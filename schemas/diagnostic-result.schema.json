@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/diagnostic-result.schema.json",
+  "title": "Diagnostic Result",
+  "type": "object",
+  "required": ["schemaVersion", "id", "operation", "subjectType", "subjectId", "status", "code", "severity", "message", "checks", "createdAt", "sanitized"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "subjectType": { "enum": ["agent", "connection", "credential", "deployment", "hub"] },
+    "subjectId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "operation": { "enum": ["detect", "inspect", "connect", "verify", "switch", "restore", "doctor"] },
+    "status": { "enum": ["pass", "warning", "fail", "unknown"] },
+    "code": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "severity": { "enum": ["info", "warning", "error", "fatal"] },
+    "message": { "type": "string", "maxLength": 1000 },
+    "remediation": { "type": "string", "maxLength": 1200 },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "code", "severity", "message"],
+        "properties": {
+          "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+          "status": { "enum": ["pass", "warning", "fail", "skipped", "unknown"] },
+          "code": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+          "severity": { "enum": ["info", "warning", "error", "fatal"] },
+          "message": { "type": "string", "maxLength": 1000 },
+          "remediation": { "type": "string", "maxLength": 1200 },
+          "details": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "createdAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "sanitized": { "const": true }
+  },
+  "additionalProperties": false
+}

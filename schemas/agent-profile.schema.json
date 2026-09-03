@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/agent-profile.schema.json",
+  "title": "Agent Profile",
+  "type": "object",
+  "required": ["schemaVersion", "id", "displayName", "domains", "protocolRequirements", "capabilityRequirements", "profileVersion"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$" }
+    },
+    "homepage": { "type": "string", "format": "uri" },
+    "versionRange": { "type": "string", "maxLength": 120 },
+    "profileVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "protocolRequirements": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "common-definitions.schema.json#/$defs/protocolId" }
+    },
+    "capabilityRequirements": {
+      "type": "array",
+      "items": { "$ref": "common-definitions.schema.json#/$defs/capabilityRequirement" }
+    },
+    "configurationModes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["direct-config", "provider", "plugin", "gateway", "launcher", "x-custom"] }
+    },
+    "runtimeConstraints": { "type": "object" },
+    "links": { "type": "array", "items": { "type": "string", "format": "uri" } },
+    "integrationId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "updatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }
+  },
+  "additionalProperties": false
+}

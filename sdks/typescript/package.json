@@ -1,0 +1,27 @@
+{
+  "name": "@apexnova-connect/integration-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript contracts and validation for Apexnova-connect integrations.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@apexnova-connect/schemas": "workspace:*",
+    "ajv": "8.20.0"
+  }
+}
+

@@ -1,0 +1,25 @@
+{
+  "name": "@apexnova-connect/integration-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenCode integration for Apexnova-connect.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "manifest.json"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@apexnova-connect/integration-sdk": "workspace:*",
+    "jsonc-parser": "3.3.1"
+  }
+}
+

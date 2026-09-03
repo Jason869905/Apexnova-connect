@@ -1,0 +1,9 @@
+# Architecture Decision Records
+
+此目录用于记录影响多个 applications、packages 或 integrations 的架构决策，例如技术栈、manifest 格式、插件加载模型、Gateway 边界和凭证存储策略。
+
+建议文件名格式：`NNNN-short-decision-title.md`。每条记录至少包含背景、决策、替代方案、后果和状态。
+
+当前记录：
+
+- [ADR 0001：分离 Integration 交付契约与产品领域契约](0001-separate-integration-and-domain-contracts.md)

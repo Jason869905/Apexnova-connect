@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "integrations/agents/opencode/src/**/*.ts",
+    "integrations/agents/opencode/tests/**/*.ts",
+    "packages/core/src/**/*.ts",
+    "packages/core/tests/**/*.ts",
+    "packages/config-engine/src/**/*.ts",
+    "packages/config-engine/tests/**/*.ts",
+    "packages/credential-store/src/**/*.ts",
+    "packages/credential-store/tests/**/*.ts",
+    "packages/hub-client/src/**/*.ts",
+    "packages/hub-client/tests/**/*.ts",
+    "sdks/typescript/src/**/*.ts",
+    "sdks/typescript/tests/**/*.ts",
+    "tests/**/*.ts"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/connection-profile.schema.json",
+  "title": "Local Connection Profile",
+  "description": "Contains only opaque credential references, never secret values.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "agentId", "integrationId", "integrationVersion", "providerId", "deploymentId", "protocol", "mode", "credentialRef", "status", "createdAt", "updatedAt"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "agentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "integrationId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "integrationVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "installationId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "providerId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "protocol": { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
+    "mode": { "enum": ["direct", "gateway", "plugin", "launcher"] },
+    "credentialRef": { "type": "string", "pattern": "^cred:[A-Za-z0-9._:/-]{3,240}$" },
+    "status": { "enum": ["planned", "active", "invalid", "restored", "removed"] },
+    "changePlanId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "modelMappings": { "type": "object", "additionalProperties": { "type": "string" } },
+    "restartPolicy": { "enum": ["not-required", "required", "ask"] },
+    "verifyPolicy": { "enum": ["none", "configuration", "live-request"] },
+    "restorePolicy": { "enum": ["manual", "on-verify-failure"] },
+    "routePolicy": { "type": "object" },
+    "lastVerifiedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "createdAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "updatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }
+  },
+  "additionalProperties": false
+}

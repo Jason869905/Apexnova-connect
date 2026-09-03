@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/provider-profile.schema.json",
+  "title": "Provider Profile",
+  "type": "object",
+  "required": ["schemaVersion", "id", "name", "profileVersion"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "profileVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "homepage": { "type": "string", "format": "uri" },
+    "operator": { "type": "string", "maxLength": 160 },
+    "protocols": { "type": "array", "uniqueItems": true, "items": { "$ref": "common-definitions.schema.json#/$defs/protocolId" } },
+    "authenticationSchemes": { "type": "array", "uniqueItems": true, "items": { "enum": ["oauth-bearer", "runtime-credential", "api-key", "byok", "none"] } },
+    "serviceMode": { "enum": ["hub-hosted", "byok", "local", "third-party"] },
+    "dataRegions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9-]{2,32}$" }
+    },
+    "privacyPolicy": { "type": "string", "format": "uri" },
+    "documentation": { "type": "string", "format": "uri" },
+    "statusPage": { "type": "string", "format": "uri" },
+    "updatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }
+  },
+  "additionalProperties": false
+}

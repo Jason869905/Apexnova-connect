@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/recommendation.schema.json",
+  "title": "Model Deployment Recommendation",
+  "type": "object",
+  "required": ["schemaVersion", "id", "agentId", "scenarioId", "catalogVersion", "ruleVersion", "candidates", "createdAt", "expiresAt"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "agentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "scenarioId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "catalogVersion": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "ruleVersion": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "constraints": { "type": "object" },
+    "priorities": { "type": "array", "items": { "type": "string", "maxLength": 80 } },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["deploymentId", "rank", "eligible", "reasons", "evidenceRefs", "sponsored"],
+        "properties": {
+          "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+          "rank": { "type": "integer", "minimum": 1 },
+          "eligible": { "type": "boolean" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reasons": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+          "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common-definitions.schema.json#/$defs/stableId" } },
+          "sponsored": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "summary": { "type": "string", "maxLength": 1200 },
+    "createdAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "expiresAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }
+  },
+  "additionalProperties": false
+}

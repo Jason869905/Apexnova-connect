@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/compatibility-evidence.schema.json",
+  "title": "Compatibility Evidence",
+  "type": "object",
+  "required": ["schemaVersion", "id", "sourceType", "subject", "testSuite", "result", "observedAt", "expiresAt"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "sourceType": { "enum": ["provider-claim", "official-test", "maintainer-test", "community-test", "runtime-observation"] },
+    "subject": {
+      "type": "object",
+      "required": ["agentId", "agentVersion", "integrationId", "integrationVersion", "deploymentId", "protocol", "platform"],
+      "properties": {
+        "agentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+        "agentVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "integrationId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+        "integrationVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+        "protocol": { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
+        "platform": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "scenarioId": { "$ref": "common-definitions.schema.json#/$defs/stableId" }
+      },
+      "additionalProperties": false
+    },
+    "testSuite": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "environment": { "type": "string", "maxLength": 240 }
+      },
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "required": ["verdict", "passed", "failed"],
+      "properties": {
+        "verdict": { "enum": ["verified", "compatible", "partial", "incompatible", "unknown"] },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "summary": { "type": "string", "maxLength": 1200 },
+        "capabilities": { "type": "array", "items": { "$ref": "common-definitions.schema.json#/$defs/capabilityStatement" } }
+      },
+      "additionalProperties": false
+    },
+    "artifactDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "supersedes": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "observedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "expiresAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "signature": { "type": "string", "maxLength": 4096 }
+  },
+  "additionalProperties": false
+}

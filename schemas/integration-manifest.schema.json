@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:apexnova-connect:schema:integration-manifest:v1",
+  "title": "Apexnova-connect Integration Manifest v1",
+  "description": "Language-neutral metadata and capability contract for an Apexnova-connect integration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "displayName",
+    "description",
+    "version",
+    "status",
+    "category",
+    "delivery",
+    "compatibility",
+    "protocols",
+    "capabilities",
+    "permissions"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schemaVersion": {
+      "const": "1"
+    },
+    "id": {
+      "$ref": "#/$defs/integrationId"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 280
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "status": {
+      "$ref": "#/$defs/status"
+    },
+    "category": {
+      "$ref": "#/$defs/category"
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modes"],
+      "properties": {
+        "modes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/deliveryMode"
+          }
+        }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platforms", "products"],
+      "properties": {
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/platform"
+          }
+        },
+        "products": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/productCompatibility"
+          }
+        }
+      }
+    },
+    "protocols": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/protocol"
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/permission"
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "homepage": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "documentation": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "repository": {
+          "$ref": "#/$defs/httpsUrl"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["research", "planned"]
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "maxItems": 0
+          },
+          "permissions": {
+            "type": "array",
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "integrationId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "extensionId": {
+      "type": "string",
+      "pattern": "^x-[a-z][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["research", "planned", "experimental", "stable", "deprecated"]
+    },
+    "category": {
+      "anyOf": [
+        {
+          "enum": ["agent", "automation", "ide", "gateway", "chat-client", "other"]
+        },
+        {
+          "$ref": "#/$defs/extensionId"
+        }
+      ]
+    },
+    "deliveryMode": {
+      "anyOf": [
+        {
+          "enum": [
+            "native-plugin",
+            "provider-package",
+            "config-adapter",
+            "gateway-adapter",
+            "launcher"
+          ]
+        },
+        {
+          "$ref": "#/$defs/extensionId"
+        }
+      ]
+    },
+    "platform": {
+      "anyOf": [
+        {
+          "enum": ["windows", "macos", "linux", "web"]
+        },
+        {
+          "$ref": "#/$defs/extensionId"
+        }
+      ]
+    },
+    "productCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "versionRange": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "documentation": {
+          "$ref": "#/$defs/httpsUrl"
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "transport"],
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "enum": ["openai-responses", "openai-chat-completions", "anthropic-messages"]
+            },
+            {
+              "$ref": "#/$defs/extensionId"
+            }
+          ]
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["direct", "gateway"]
+        }
+      }
+    },
+    "capability": {
+      "anyOf": [
+        {
+          "enum": [
+            "authentication",
+            "balance",
+            "model-catalog",
+            "provider-config",
+            "gateway",
+            "hot-switch",
+            "restart-required",
+            "backup-and-restore"
+          ]
+        },
+        {
+          "$ref": "#/$defs/extensionId"
+        }
+      ]
+    },
+    "permission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason"],
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "filesystem-read",
+                "filesystem-write",
+                "network",
+                "credential-store",
+                "process-launch"
+              ]
+            },
+            {
+              "$ref": "#/$defs/extensionId"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 240
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          }
+        }
+      }
+    },
+    "httpsUrl": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$"
+    }
+  }
+}

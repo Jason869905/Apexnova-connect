@@ -1,0 +1,51 @@
+{
+  "$schema": "../../schemas/integration-manifest.schema.json",
+  "schemaVersion": "1",
+  "id": "example-agent",
+  "displayName": "Example Agent",
+  "description": "Example manifest demonstrating a tested configuration adapter integration.",
+  "version": "0.1.0",
+  "status": "experimental",
+  "category": "agent",
+  "delivery": {
+    "modes": ["config-adapter"]
+  },
+  "compatibility": {
+    "platforms": ["windows", "macos", "linux"],
+    "products": [
+      {
+        "name": "Example Agent",
+        "versionRange": ">=1.0.0"
+      }
+    ]
+  },
+  "protocols": [
+    {
+      "id": "openai-responses",
+      "transport": "direct"
+    }
+  ],
+  "capabilities": [
+    "model-catalog",
+    "provider-config",
+    "backup-and-restore"
+  ],
+  "permissions": [
+    {
+      "kind": "filesystem-read",
+      "reason": "Inspect the target product configuration before planning changes.",
+      "targets": ["${PRODUCT_CONFIG}/example-agent.json"]
+    },
+    {
+      "kind": "filesystem-write",
+      "reason": "Apply an approved provider configuration change atomically.",
+      "targets": ["${PRODUCT_CONFIG}/example-agent.json"]
+    },
+    {
+      "kind": "network",
+      "reason": "Read models and invoke model APIs through Apexnova AI Hub.",
+      "targets": ["https://api.example.invalid"]
+    }
+  ]
+}
+

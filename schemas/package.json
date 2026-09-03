@@ -1,0 +1,24 @@
+{
+  "name": "@apexnova-connect/schemas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Language-neutral integration and domain contracts for Apexnova-connect.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./integration-manifest": "./integration-manifest.schema.json",
+    "./common-definitions": "./common-definitions.schema.json",
+    "./agent-profile": "./agent-profile.schema.json",
+    "./provider-profile": "./provider-profile.schema.json",
+    "./model-profile": "./model-profile.schema.json",
+    "./model-deployment": "./model-deployment.schema.json",
+    "./scenario-profile": "./scenario-profile.schema.json",
+    "./compatibility-evidence": "./compatibility-evidence.schema.json",
+    "./recommendation": "./recommendation.schema.json",
+    "./connection-profile": "./connection-profile.schema.json",
+    "./diagnostic-result": "./diagnostic-result.schema.json"
+  },
+  "files": [
+    "*.schema.json"
+  ]
+}

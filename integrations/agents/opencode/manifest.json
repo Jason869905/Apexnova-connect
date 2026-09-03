@@ -1,0 +1,40 @@
+{
+  "$schema": "../../../schemas/integration-manifest.schema.json",
+  "schemaVersion": "1",
+  "id": "opencode",
+  "displayName": "OpenCode",
+  "description": "Connect OpenCode v2 provider configuration to models served by Apexnova AI Hub.",
+  "version": "0.1.0",
+  "status": "planned",
+  "category": "agent",
+  "delivery": {
+    "modes": ["config-adapter", "launcher"]
+  },
+  "compatibility": {
+    "platforms": ["windows", "macos", "linux"],
+    "products": [
+      {
+        "name": "OpenCode",
+        "versionRange": ">=2.0.0",
+        "documentation": "https://opencode.ai/v2/docs/providers"
+      }
+    ]
+  },
+  "protocols": [
+    {
+      "id": "openai-responses",
+      "transport": "direct"
+    },
+    {
+      "id": "openai-chat-completions",
+      "transport": "direct"
+    }
+  ],
+  "capabilities": [],
+  "permissions": [],
+  "links": {
+    "documentation": "https://opencode.ai/v2/docs/providers",
+    "repository": "https://github.com/anomalyco/opencode"
+  }
+}
+

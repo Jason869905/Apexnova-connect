@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/model-deployment.schema.json",
+  "title": "Model Deployment",
+  "type": "object",
+  "required": ["schemaVersion", "id", "providerId", "modelId", "deploymentVersion", "protocols", "availability", "capabilities", "observedAt", "expiresAt"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "providerId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "modelId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "deploymentVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "displayName": { "type": "string", "maxLength": 160 },
+    "aliases": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+    "region": { "type": "string", "pattern": "^[a-z0-9-]{2,32}$" },
+    "protocols": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "baseUrl"],
+        "properties": {
+          "id": { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
+          "serviceModelId": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "baseUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+          "authentication": { "enum": ["oauth-bearer", "runtime-credential"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "availability": { "enum": ["available", "degraded", "maintenance", "unavailable", "retired"] },
+    "capabilities": { "type": "array", "items": { "$ref": "common-definitions.schema.json#/$defs/capabilityStatement" } },
+    "pricing": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["dimension", "price", "unit"],
+        "properties": {
+          "dimension": { "enum": ["input", "output", "cached-input", "request", "image", "audio-second", "x-custom"] },
+          "price": { "$ref": "common-definitions.schema.json#/$defs/money" },
+          "unit": { "type": "string", "minLength": 1, "maxLength": 80 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "retiredAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "replacementDeploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "observedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "expiresAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "updatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }
+  },
+  "additionalProperties": false
+}

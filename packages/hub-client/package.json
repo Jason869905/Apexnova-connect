@@ -1,0 +1,23 @@
+{
+  "name": "@apexnova-connect/hub-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public Apexnova AI Hub API client for Apexnova-connect.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@apexnova-connect/credential-store": "workspace:*"
+  }
+}

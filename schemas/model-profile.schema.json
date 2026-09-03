@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/model-profile.schema.json",
+  "title": "Model Profile",
+  "type": "object",
+  "required": ["schemaVersion", "id", "name", "family", "profileVersion", "capabilities"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "family": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "publisher": { "type": "string", "maxLength": 160 },
+    "aliases": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+    "profileVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "releaseDate": { "type": "string", "format": "date" },
+    "modalities": {
+      "type": "object",
+      "properties": {
+        "input": { "type": "array", "uniqueItems": true, "items": { "enum": ["text", "image", "audio", "video", "file"] } },
+        "output": { "type": "array", "uniqueItems": true, "items": { "enum": ["text", "image", "audio", "video", "embedding"] } }
+      },
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "common-definitions.schema.json#/$defs/capabilityStatement" }
+    },
+    "deprecatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
+    "replacementModelId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "updatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }
+  },
+  "additionalProperties": false
+}
