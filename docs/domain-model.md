@@ -87,6 +87,15 @@ AgentProfile 不保存用户安装路径、用户密钥或当前模型。这些�
 
 同一个模型由不同 Provider、不同区域或不同协议入口提供时，必须是不同 Deployment。
 
+#### 托管 Provider 的双平面边界
+
+对于 Apexnova AI Hub 这类托管网关，Connect 看到的 ModelDeployment 是面向客户的稳定公共产品，不是 Hub 内部某一条上游供应线路。一个公共 Deployment 可以由多条内部线路、凭证、负载均衡和容灾策略承载。
+
+- 公共 `providerId` 表示用户向谁购买和调用服务，例如 `provider.apexnova-ai-hub`；
+- 模型原厂使用 ModelProfile 的 `publisher` 表达，不冒充服务 Provider；
+- Hub 内部 deployment ID、上游模型名、凭证、买价和 LB 拓扑不得进入公共 Schema；
+- 托管线路切换不改变公共 Deployment 身份；跨公共模型 Fallback 则必须返回最终公共 Deployment 并按其计费。
+
 ### CapabilityDefinition
 
 定义可复用能力的语义、类型和单位。首版命名空间：
@@ -272,6 +281,7 @@ ConnectionProfile ──► ChangePlan ──► Apply / Verify / Rollback
 - 所有公共 ID 使用小写稳定标识，不把展示名称作为主键；
 - Model ID 必须包含可识别版本，浮动别名只作为 alias；
 - Deployment ID 必须区分 Provider、区域和协议入口；
+- 公共 Deployment ID 不以可改名的服务模型 alias 作为永久主键；
 - Scenario 和 Test Suite 必须版本化；
 - Evidence 创建后不可修改，纠错通过新 Evidence 和 supersedes 关系表达；
 - Schema 破坏性变更必须提升 Schema Version。

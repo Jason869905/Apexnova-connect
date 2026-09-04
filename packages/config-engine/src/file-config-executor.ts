@@ -446,6 +446,12 @@ export class FileConfigExecutor implements ChangeExecutor {
 
   async #resolvedBackupRoot(): Promise<string> {
     await mkdir(this.#backupRoot, { recursive: true, mode: 0o700 });
+    return (await this.#existingBackupRoot())!;
+  }
+
+  async #existingBackupRoot(): Promise<string | null> {
+    const existing = await pathMetadata(this.#backupRoot);
+    if (existing === null) return null;
     const metadata = await lstat(this.#backupRoot);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
       throw new ConfigExecutionError(
@@ -463,7 +469,13 @@ export class FileConfigExecutor implements ChangeExecutor {
         "Backup transaction ID is invalid.",
       );
     }
-    const backupRoot = await this.#resolvedBackupRoot();
+    const backupRoot = await this.#existingBackupRoot();
+    if (backupRoot === null) {
+      throw new ConfigExecutionError(
+        "INVALID_RECEIPT",
+        `Backup transaction does not exist: ${transactionId}.`,
+      );
+    }
     const transactionDirectory = join(backupRoot, transactionId);
     if (normalizedComparisonPath(dirname(transactionDirectory)) !== backupRoot) {
       throw new ConfigExecutionError(
@@ -664,7 +676,8 @@ export class FileConfigExecutor implements ChangeExecutor {
   }
 
   async listBackups(): Promise<readonly FileBackupSummary[]> {
-    const backupRoot = await this.#resolvedBackupRoot();
+    const backupRoot = await this.#existingBackupRoot();
+    if (backupRoot === null) return [];
     const entries = await readdir(backupRoot, { withFileTypes: true });
     const summaries: FileBackupSummary[] = [];
 

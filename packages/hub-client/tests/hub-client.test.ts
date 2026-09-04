@@ -341,4 +341,20 @@ describe("HubSessionService", () => {
       code: "REFRESH_TOKEN_MISSING",
     });
   });
+
+  it("revokes the refresh token before deleting the local session", async () => {
+    const { sessions } = credentials();
+    await sessions.save("default", {
+      accessToken: SecretValue.from("access-secret"),
+      refreshToken: SecretValue.from("refresh-secret"),
+      tokenType: "Bearer",
+    });
+    const transport = queuedFetch([new Response(null, { status: 200 })]);
+    const service = new HubSessionService(oauth(transport.fetch), sessions);
+
+    await expect(service.logout("default")).resolves.toEqual({ serverRevoked: true });
+    expect(await sessions.load("default")).toBeNull();
+    expect(transport.calls[0]?.body).toContain("token=refresh-secret");
+    expect(transport.calls[0]?.body).not.toContain("access-secret");
+  });
 });

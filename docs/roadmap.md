@@ -47,6 +47,8 @@ M6 能跨领域复制
 
 预计：4～6 周。目标版本：`v0.1`。
 
+当前状态：进行中，已推进到 H1 staging 联调边界。已对齐 Hub H1 P6 OpenAPI/fixtures，并通过官方 mock 的 discovery、device flow、账号、余额、目录、runtime credential 创建/撤销。CLI 已实现 `detect/inspect/login/logout/whoami/balance/models`、`connect --dry-run`、`connect --yes`、`switch`、安全 `run opencode` launcher、配置级 `verify`、`doctor` 和事务 `restore`。live inference verify、runtime credential 自动轮换和 Windows/Linux 真实环境验收等待 staging。
+
 首个正式目标：OpenCode。
 
 范围：

@@ -168,7 +168,7 @@ Apexnova-connect/
 
 ## 实施路线图
 
-完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。当前 M0 设计基线已经建立，下一步是完成跨仓库 API 评审和 Schema 验证后进入 M1 CLI Developer Preview。
+完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。M0 设计基线已经建立，M1 CLI Developer Preview 正在进行；Hub H1 与 Connect M1 通过契约和 mock 并行推进。
 
 - [x] 建立 Integration Manifest 和 capability contract v1 初稿；
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；
@@ -188,13 +188,15 @@ Apexnova-connect/
 
 ## 开发状态
 
-基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已实现可配置的 RFC 8628 device flow、规范轮询、token 刷新、并发刷新合并及 keychain 会话保存；服务端端点、scope、rotation 和账号扩展字段仍待与 Apexnova AI Hub 冻结。OpenCode integration 已能生成安全的 v2 JSONC change plan。凭证包已实现 Windows Credential Manager 与 Linux Secret Service 后端；当前隔离环境没有 Windows credential set，因此 Windows 仍需交互式桌面会话验收，Linux 也尚待真实环境验收，macOS 后端尚未实现。CLI 尚未接入这些模块，不会调用生产服务或修改用户真实配置。应用运行时与 UI 框架仍未确定。
+基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已对齐 Hub H1 P6 OpenAPI/fixtures，并通过官方 mock 的 OAuth discovery、RFC 8628 device flow、刷新、撤销、账号、余额、原子模型目录和 runtime credential。OpenCode integration 已能生成安全的 v2 JSONC change plan，并提供跨平台发现和脱敏检查。M1 CLI 已实现 `detect/inspect/login/logout/whoami/balance/models`、`connect --dry-run/--yes`、`switch`、安全 launcher、配置级 `verify`、`doctor` 和持久化事务 `restore`；live inference verify、runtime credential 自动轮换和真实 OS/Hub 环境验收等待 staging。macOS 后端尚未实现，应用 UI 框架仍未确定。
 
 本地要求：Node.js 24+ 与 pnpm 9.15+。
 
 ```bash
 pnpm install
 pnpm check
+pnpm cli -- detect --json
+pnpm cli -- models --agent opencode --json
 ```
 
 `pnpm check` 会依次执行 TypeScript 类型检查、测试和 SDK 构建。

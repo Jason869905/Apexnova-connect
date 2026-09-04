@@ -93,7 +93,20 @@ export class HubSessionService {
     return session.accessToken;
   }
 
-  async logout(profileId: string): Promise<void> {
-    await this.#sessions.delete(profileId);
+  async logout(profileId: string, signal?: AbortSignal): Promise<{ readonly serverRevoked: boolean }> {
+    const session = await this.#sessions.load(profileId);
+    let serverRevoked = session === null;
+    try {
+      if (session) {
+        await this.#oauth.revoke(session.refreshToken ?? session.accessToken, signal);
+        serverRevoked = true;
+      }
+    } catch {
+      // Logout is fail-closed locally. A network failure must not keep a usable
+      // session on disk merely because best-effort server revocation failed.
+    } finally {
+      await this.#sessions.delete(profileId);
+    }
+    return { serverRevoked };
   }
 }

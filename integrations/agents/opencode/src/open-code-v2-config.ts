@@ -108,15 +108,19 @@ function normalizeBaseUrl(value: string): string {
     );
   }
 
-  if (url.protocol !== "https:") {
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
     throw new OpenCodeConfigError(
       "INVALID_INPUT",
-      "Apexnova AI Hub base URL must use HTTPS.",
+      "Apexnova AI Hub base URL must use HTTPS and contain no credentials, query, or fragment.",
     );
   }
 
-  url.hash = "";
-  url.search = "";
   url.pathname = url.pathname.replace(/\/+$/, "");
   return url.toString().replace(/\/$/, "");
 }

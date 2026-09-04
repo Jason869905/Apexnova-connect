@@ -18,6 +18,21 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3))
 
+  apps/cli:
+    dependencies:
+      '@apexnova-connect/config-engine':
+        specifier: workspace:*
+        version: link:../../packages/config-engine
+      '@apexnova-connect/credential-store':
+        specifier: workspace:*
+        version: link:../../packages/credential-store
+      '@apexnova-connect/hub-client':
+        specifier: workspace:*
+        version: link:../../packages/hub-client
+      '@apexnova-connect/integration-opencode':
+        specifier: workspace:*
+        version: link:../../integrations/agents/opencode
+
   integrations/agents/opencode:
     dependencies:
       '@apexnova-connect/integration-sdk':
@@ -33,6 +48,12 @@ importers:
         specifier: workspace:*
         version: link:../../sdks/typescript
 
+  packages/core:
+    dependencies:
+      '@apexnova-connect/integration-sdk':
+        specifier: workspace:*
+        version: link:../../sdks/typescript
+
   packages/credential-store: {}
 
   packages/hub-client:
@@ -40,12 +61,6 @@ importers:
       '@apexnova-connect/credential-store':
         specifier: workspace:*
         version: link:../credential-store
-
-  packages/core:
-    dependencies:
-      '@apexnova-connect/integration-sdk':
-        specifier: workspace:*
-        version: link:../../sdks/typescript
 
   schemas: {}
 

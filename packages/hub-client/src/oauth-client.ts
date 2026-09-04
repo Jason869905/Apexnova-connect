@@ -3,6 +3,7 @@ import { SecretValue } from "@apexnova-connect/credential-store";
 import { HubClientError } from "./errors.js";
 import type {
   DeviceAuthorization,
+  AuthorizationServerMetadata,
   DevicePollResult,
   HubTokenSet,
   WaitForDeviceAuthorizationOptions,
@@ -21,6 +22,7 @@ export interface HubOAuthClientOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => Date;
   readonly requestTimeoutMs?: number;
+  readonly allowInsecureLoopback?: boolean;
 }
 
 interface OAuthErrorResponse {
@@ -79,14 +81,18 @@ function futureIso(now: Date, seconds: number, field: string): string {
   return new Date(timestamp).toISOString();
 }
 
-function validateHttpsUrl(value: string, field: string): string {
+function isInsecureLoopback(url: URL): boolean {
+  return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+}
+
+function validateSecureUrl(value: string, field: string, allowInsecureLoopback: boolean): string {
   let url: URL;
   try {
     url = new URL(value);
   } catch (cause) {
     throw new HubClientError("INVALID_RESPONSE", `Invalid ${field} URL.`, { cause });
   }
-  if (url.protocol !== "https:") {
+  if ((url.protocol !== "https:" && !(allowInsecureLoopback && isInsecureLoopback(url))) || url.username || url.password) {
     throw new HubClientError("INVALID_RESPONSE", `${field} must use HTTPS.`);
   }
   return url.toString();
@@ -129,6 +135,43 @@ export class HubOAuthClient {
   readonly #fetch: typeof globalThis.fetch;
   readonly #now: () => Date;
   readonly #requestTimeoutMs: number;
+  readonly #allowInsecureLoopback: boolean;
+
+  async discover(signal?: AbortSignal): Promise<AuthorizationServerMetadata> {
+    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(this.#requestTimeoutMs)]) : AbortSignal.timeout(this.#requestTimeoutMs);
+    let response: Response;
+    try {
+      response = await this.#fetch(new URL("/.well-known/oauth-authorization-server", this.#baseUrl), { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: requestSignal });
+    } catch (cause) {
+      throw new HubClientError("NETWORK_ERROR", "OAuth authorization server discovery failed.", { cause, retryable: true });
+    }
+    if (!response.ok) throw new HubClientError("OAUTH_ERROR", "OAuth authorization server discovery failed.");
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > MAX_RESPONSE_BYTES) throw new HubClientError("INVALID_RESPONSE", "Hub response is too large.");
+    let body: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+      body = parsed as Record<string, unknown>;
+    } catch (cause) {
+      throw new HubClientError("INVALID_RESPONSE", "OAuth discovery response is invalid.", { cause });
+    }
+    const secure = (value: unknown, field: string) => validateSecureUrl(requiredString(value, field, 2_048), field, this.#allowInsecureLoopback);
+    const issuer = secure(body.issuer, "issuer");
+    const tokenEndpoint = secure(body.token_endpoint, "token_endpoint");
+    const deviceAuthorizationEndpoint = secure(body.device_authorization_endpoint, "device_authorization_endpoint");
+    const revocationEndpoint = secure(body.revocation_endpoint, "revocation_endpoint");
+    for (const endpoint of [issuer, tokenEndpoint, deviceAuthorizationEndpoint, revocationEndpoint]) {
+      if (new URL(endpoint).origin !== this.#baseUrl.origin) throw new HubClientError("INVALID_RESPONSE", "OAuth discovery endpoints must use the configured Hub origin.");
+    }
+    if (new URL(tokenEndpoint).pathname !== this.#tokenPath || new URL(deviceAuthorizationEndpoint).pathname !== this.#deviceAuthorizationPath || new URL(revocationEndpoint).pathname !== "/oauth/revoke") {
+      throw new HubClientError("INVALID_RESPONSE", "OAuth discovery endpoints do not match the configured Hub paths.");
+    }
+    if (!Array.isArray(body.scopes_supported) || !body.scopes_supported.every((item) => typeof item === "string")) throw new HubClientError("INVALID_RESPONSE", "OAuth discovery scopes_supported is invalid.");
+    const scopesSupported = body.scopes_supported as string[];
+    if (this.#scope && !this.#scope.split(/\s+/).every((scope) => scopesSupported.includes(scope))) throw new HubClientError("INVALID_RESPONSE", "OAuth discovery does not advertise every requested scope.");
+    return { issuer, tokenEndpoint, deviceAuthorizationEndpoint, revocationEndpoint, scopesSupported };
+  }
 
   constructor(options: HubOAuthClientOptions) {
     try {
@@ -137,7 +180,7 @@ export class HubOAuthClient {
       throw new HubClientError("INVALID_CONFIG", "Hub baseUrl is invalid.", { cause });
     }
     if (
-      this.#baseUrl.protocol !== "https:" ||
+      (this.#baseUrl.protocol !== "https:" && !(options.allowInsecureLoopback && isInsecureLoopback(this.#baseUrl))) ||
       this.#baseUrl.username !== "" ||
       this.#baseUrl.password !== "" ||
       this.#baseUrl.pathname !== "/" ||
@@ -176,12 +219,14 @@ export class HubOAuthClient {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? (() => new Date());
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
+    this.#allowInsecureLoopback = options.allowInsecureLoopback ?? false;
   }
 
   async #postForm(
     path: string,
     values: Readonly<Record<string, string | undefined>>,
     signal?: AbortSignal,
+    allowEmptySuccess = false,
   ): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
     const body = new URLSearchParams();
     for (const [name, value] of Object.entries(values)) {
@@ -219,6 +264,9 @@ export class HubOAuthClient {
       throw new HubClientError("INVALID_RESPONSE", "Hub response is too large.");
     }
     let parsed: unknown;
+    if (allowEmptySuccess && response.ok && bytes.byteLength === 0) {
+      return { ok: true, status: response.status, body: null };
+    }
     try {
       const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       parsed = JSON.parse(text);
@@ -275,9 +323,10 @@ export class HubOAuthClient {
       body.interval === undefined
         ? 5
         : positiveInteger(body.interval, "interval", MAX_POLL_INTERVAL_SECONDS);
-    const verificationUri = validateHttpsUrl(
+    const verificationUri = validateSecureUrl(
       requiredString(body.verification_uri, "verification_uri", 2_048),
       "verification_uri",
+      this.#allowInsecureLoopback,
     );
     const complete = optionalString(
       body.verification_uri_complete,
@@ -289,7 +338,7 @@ export class HubOAuthClient {
       verificationUri,
       ...(complete === undefined
         ? {}
-        : { verificationUriComplete: validateHttpsUrl(complete, "verification_uri_complete") }),
+        : { verificationUriComplete: validateSecureUrl(complete, "verification_uri_complete", this.#allowInsecureLoopback) }),
       expiresAt: futureIso(this.#now(), expiresIn, "expires_in"),
       intervalSeconds,
     };
@@ -402,5 +451,17 @@ export class HubOAuthClient {
       });
     }
     return this.#parseTokens(response.body, refreshToken);
+  }
+
+  async revoke(token: SecretValue, signal?: AbortSignal): Promise<void> {
+    const response = await this.#postForm(
+      "/oauth/revoke",
+      { token: token.reveal(), client_id: this.#clientId },
+      signal,
+      true,
+    );
+    if (!response.ok) {
+      throw new HubClientError("OAUTH_ERROR", "Token revocation failed.");
+    }
   }
 }

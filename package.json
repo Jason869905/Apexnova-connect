@@ -13,9 +13,11 @@
   "scripts": {
     "build": "pnpm --recursive --if-present run build",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build",
-    "test": "vitest run",
+    "cli": "pnpm --filter @apexnova-connect/cli... build && node apps/cli/dist/main.js",
+    "test": "pnpm --filter @apexnova-connect/cli... build && vitest run",
     "test:watch": "vitest",
-    "typecheck": "pnpm --filter @apexnova-connect/integration-sdk build && pnpm --filter @apexnova-connect/credential-store build && tsc -p tsconfig.json --noEmit"
+    "probe:hub-h1": "pnpm --filter @apexnova-connect/hub-client... build && node tools/probe-hub-h1.mjs",
+    "typecheck": "pnpm --filter @apexnova-connect/cli... build && tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

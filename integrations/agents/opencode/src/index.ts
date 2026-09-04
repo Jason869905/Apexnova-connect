@@ -8,3 +8,13 @@ export {
   type PlanOpenCodeV2ConfigOptions,
 } from "./open-code-v2-config.js";
 
+export {
+  detectOpenCode,
+  inspectOpenCode,
+  OpenCodeInspectionError,
+  type OpenCodeConfigScope,
+  type OpenCodeDetection,
+  type OpenCodeDetectionOptions,
+  type OpenCodeInspection,
+  type OpenCodeManagedProvider,
+} from "./discovery.js";

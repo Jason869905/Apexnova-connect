@@ -10,7 +10,11 @@ Apexnova AI Hub 公共 API 客户端，包括设备认证、凭证刷新、余�
 - 通过 `HubSessionStore` 把一个完整会话作为单个 secret 存入 `CredentialStore`；
 - HTTPS-only、同源端点路径、禁止 HTTP 重定向、请求超时和响应大小限制；
 - UI prompt 只包含 `user_code` 与验证 URI，不包含 `device_code`。
+- 严格校验 `/v1/me`、`/v1/billing/balance` 和 `/v1/catalog/snapshot` 的控制面客户端；
+- runtime credential 创建与撤销客户端，secret 只以 `SecretValue` 返回；
+- 控制面 Request ID、认证、权限、限流、余额和网络错误映射；
+- 拒绝目录中的 HTTP、URL credentials、query 和 fragment，且不保留未信任错误 details。
 
-默认端点为 `/oauth/device/code` 和 `/oauth/token`，可以配置为 Apexnova AI Hub 最终确定的同源路径。余额、模型目录、服务端注销/撤销与 OAuth discovery 尚未实现。当前测试全部使用 mock transport，不调用生产服务。
+默认 OAuth 端点为 `/oauth/device/code`、`/oauth/token` 和 `/oauth/revoke`。控制面、设备登录、刷新、服务端注销与 runtime credential 已通过 Hub H1 官方 mock；OAuth discovery 和 staging 联调仍待完成。
 
 协议和安全边界见 [`../../docs/hub-authentication.md`](../../docs/hub-authentication.md)。

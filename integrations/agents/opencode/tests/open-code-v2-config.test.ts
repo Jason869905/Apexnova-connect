@@ -146,6 +146,17 @@ describe("planOpenCodeV2Config", () => {
     );
   });
 
+  it("rejects secret-bearing Hub base URLs instead of writing them to config", () => {
+    expect(() => planOpenCodeV2Config({
+      planId: "plan.secret-url",
+      createdAt: "2026-09-04T12:00:00Z",
+      configPath: "/tmp/opencode.jsonc",
+      existingContent: null,
+      hubBaseUrl: "https://user:secret@api.example.test/v1?token=secret",
+      models,
+    })).toThrow(expect.objectContaining<Partial<OpenCodeConfigError>>({ code: "INVALID_INPUT" }));
+  });
+
   it("rejects a catalog that mixes provider protocols", () => {
     expect(() =>
       planOpenCodeV2Config({

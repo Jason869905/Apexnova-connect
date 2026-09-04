@@ -1,0 +1,20 @@
+{
+  // Contract fixture: unrelated user settings must not appear in inspect output.
+  "theme": "system",
+  "model": "apexnova/nova-coder",
+  "providers": {
+    "apexnova": {
+      "name": "Apexnova AI Hub",
+      "env": ["APEXNOVA_API_KEY"],
+      "package": "@opencode-ai/ai/providers/openai-compatible/responses",
+      "settings": {
+        "baseURL": "https://api.example.test/v1"
+      },
+      "models": {
+        "nova-coder": {
+          "name": "Nova Coder"
+        }
+      }
+    }
+  }
+}

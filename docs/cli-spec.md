@@ -47,9 +47,12 @@ CLI 是首个可审计、可脚本化宿主。它负责用户交互和编排，�
 ```text
 apexnova detect
 apexnova detect opencode --json
+apexnova detect opencode --config ./opencode.jsonc
 ```
 
 默认只读。不得读取无关目录或上传本地绝对路径。
+
+`--config <path>` 显式指定要检查的配置文件，主要用于测试、非标准安装和项目级配置。未指定时 Integration 按项目目录、XDG 目录和平台配置目录的已知候选路径只读探测。
 
 ### `apexnova inspect <agent>`
 
@@ -57,6 +60,7 @@ apexnova detect opencode --json
 
 ```text
 apexnova inspect opencode
+apexnova inspect opencode --config ./opencode.jsonc
 ```
 
 ### `apexnova login`
@@ -67,6 +71,8 @@ apexnova inspect opencode
 apexnova login
 apexnova login --profile work
 ```
+
+H1 staging contract test 通过前，开发版必须显式配置 Hub base URL 和 OAuth client ID，不得内置生产默认地址。
 
 ### `apexnova logout`
 
@@ -125,8 +131,10 @@ apexnova connect opencode --connection-profile coding-fast
 ```text
 detect → inspect → resolve credentialRef → plan → approve → backup → apply → verify
                                                                │
-                                                               └─ failure → rollback
+                                                              └─ failure → rollback
 ```
+
+`--dry-run` 永不签发凭证或写文件。经 Hub H1 官方 mock contract 后，`--yes` 已开放事务化写入：先签发短期 runtime credential，再应用配置并验证；失败会 rollback 并撤销新凭证。live inference verify 和自动轮换仍等待 staging。
 
 ### `apexnova verify <agent>`
 

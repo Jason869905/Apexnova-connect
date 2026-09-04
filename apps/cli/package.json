@@ -1,0 +1,29 @@
+{
+  "name": "@apexnova-connect/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Auditable command-line interface for Apexnova-connect.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "apexnova": "./dist/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@apexnova-connect/credential-store": "workspace:*",
+    "@apexnova-connect/config-engine": "workspace:*",
+    "@apexnova-connect/hub-client": "workspace:*",
+    "@apexnova-connect/integration-opencode": "workspace:*"
+  }
+}
