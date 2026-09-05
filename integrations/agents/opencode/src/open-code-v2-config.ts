@@ -31,6 +31,7 @@ export interface PlanOpenCodeV2ConfigOptions {
   readonly configPath: string;
   readonly existingContent: string | null;
   readonly hubBaseUrl: string;
+  readonly allowInsecureLoopback?: boolean;
   readonly apiKeyEnvironmentVariable?: string;
   readonly models: readonly OpenCodeModelInput[];
   readonly defaultModelId?: string;
@@ -80,24 +81,24 @@ function parseConfig(content: string): JsonObject {
     );
   }
 
-  if ("provider" in value && !("providers" in value)) {
+  if ("providers" in value) {
     throw new OpenCodeConfigError(
       "LEGACY_CONFIG",
-      "Legacy OpenCode provider configuration was detected; migrate to OpenCode v2 before applying this integration.",
+      "Unsupported plural OpenCode providers configuration was detected; migrate it to the current provider/npm/options schema before applying this integration.",
     );
   }
 
-  if ("providers" in value && !isJsonObject(value.providers)) {
+  if ("provider" in value && !isJsonObject(value.provider)) {
     throw new OpenCodeConfigError(
       "INVALID_CONFIG",
-      "OpenCode v2 providers must be an object.",
+      "OpenCode provider must be an object.",
     );
   }
 
   return value;
 }
 
-function normalizeBaseUrl(value: string): string {
+function normalizeBaseUrl(value: string, allowInsecureLoopback: boolean): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -108,8 +109,14 @@ function normalizeBaseUrl(value: string): string {
     );
   }
 
+  const insecureLoopback = url.protocol === "http:" && (
+    url.hostname === "localhost" ||
+    url.hostname.endsWith(".localhost") ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]"
+  );
   if (
-    url.protocol !== "https:" ||
+    (url.protocol !== "https:" && !(allowInsecureLoopback && insecureLoopback)) ||
     url.username !== "" ||
     url.password !== "" ||
     url.search !== "" ||
@@ -176,21 +183,25 @@ function validateModels(models: readonly OpenCodeModelInput[]): OpenCodeProtocol
 
 function providerPackage(protocol: OpenCodeProtocol): string {
   return protocol === "openai-responses"
-    ? "@opencode-ai/ai/providers/openai-compatible/responses"
-    : "@opencode-ai/ai/providers/openai-compatible";
+    ? "@ai-sdk/openai"
+    : "@ai-sdk/openai-compatible";
 }
 
 function createProvider(
   models: readonly OpenCodeModelInput[],
   hubBaseUrl: string,
   apiKeyEnvironmentVariable: string,
+  allowInsecureLoopback: boolean,
 ): JsonObject {
   const protocol = validateModels(models);
   const modelEntries = models.map((model) => {
     const definition: JsonObject = {
       name: model.name,
-      modelID: model.upstreamId ?? model.id,
     };
+
+    if (model.upstreamId && model.upstreamId !== model.id) {
+      definition.id = model.upstreamId;
+    }
 
     if (model.limits) {
       definition.limit = {
@@ -205,9 +216,10 @@ function createProvider(
   return {
     name: OPENCODE_PROVIDER_NAME,
     env: [apiKeyEnvironmentVariable],
-    package: providerPackage(protocol),
-    settings: {
-      baseURL: normalizeBaseUrl(hubBaseUrl),
+    npm: providerPackage(protocol),
+    options: {
+      apiKey: `{env:${apiKeyEnvironmentVariable}}`,
+      baseURL: normalizeBaseUrl(hubBaseUrl, allowInsecureLoopback),
     },
     models: Object.fromEntries(modelEntries),
   };
@@ -268,10 +280,11 @@ export function planOpenCodeV2Config(
     options.models,
     options.hubBaseUrl,
     apiKeyEnvironmentVariable,
+    options.allowInsecureLoopback ?? false,
   );
   let content = updateConfig(
     source,
-    ["providers", OPENCODE_PROVIDER_ID],
+    ["provider", OPENCODE_PROVIDER_ID],
     provider,
   );
 
@@ -314,12 +327,12 @@ export function planOpenCodeV2Config(
   return {
     id: options.planId,
     integrationId: "opencode",
-    summary: "Configure OpenCode v2 to use Apexnova AI Hub.",
+    summary: "Configure OpenCode to use Apexnova AI Hub.",
     createdAt: options.createdAt,
     operations,
     requiresRestart: true,
     warnings: [
-      "OpenCode v2 loads provider configuration at startup; restart OpenCode after applying this plan.",
+      "OpenCode loads provider configuration at startup; restart OpenCode after applying this plan.",
       `The launcher must provide ${apiKeyEnvironmentVariable} from the credential store; no API key is written to the config file.`,
     ],
   };

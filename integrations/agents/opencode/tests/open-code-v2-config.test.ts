@@ -53,7 +53,7 @@ describe("planOpenCodeV2Config", () => {
     expect(() => assertIntegrationManifest(manifest)).not.toThrow();
   });
 
-  it("creates an OpenCode v2 provider without embedding a secret", () => {
+  it("creates a current OpenCode provider without embedding a credential value", () => {
     const changePlan = plan();
     const operation = changePlan.operations[0]!;
     const config = plannedConfig();
@@ -61,18 +61,21 @@ describe("planOpenCodeV2Config", () => {
     expect(operation.mode).toBe("create");
     expect(operation.expectedContentHash).toBeNull();
     expect(operation.containsSecrets).toBe(false);
-    expect(operation.content).not.toContain("apiKey");
+    expect(operation.content).toContain('"apiKey": "{env:APEXNOVA_API_KEY}"');
     expect(config).toMatchObject({
       model: "apexnova/nova-coder",
-      providers: {
+      provider: {
         apexnova: {
           name: "Apexnova AI Hub",
           env: ["APEXNOVA_API_KEY"],
-          package: "@opencode-ai/ai/providers/openai-compatible/responses",
-          settings: { baseURL: "https://api.apexnova.example/v1" },
+          npm: "@ai-sdk/openai",
+          options: {
+            apiKey: "{env:APEXNOVA_API_KEY}",
+            baseURL: "https://api.apexnova.example/v1",
+          },
           models: {
             "nova-coder": {
-              modelID: "vendor/nova-coder-v1",
+              id: "vendor/nova-coder-v1",
               name: "Nova Coder",
               limit: { context: 200_000, output: 64_000 },
             },
@@ -98,7 +101,7 @@ describe("planOpenCodeV2Config", () => {
 
   it("replaces only the managed provider entry", () => {
     const existing = `{
-  "providers": {
+  "provider": {
     "other": { "name": "Other" },
     "apexnova": { "name": "Old value" }
   }
@@ -106,7 +109,7 @@ describe("planOpenCodeV2Config", () => {
 `;
 
     expect(plannedConfig(existing)).toMatchObject({
-      providers: {
+      provider: {
         other: { name: "Other" },
         apexnova: { name: "Apexnova AI Hub" },
       },
@@ -132,16 +135,25 @@ describe("planOpenCodeV2Config", () => {
     });
     const operation = changePlan.operations[0]!;
     const config = parse(operation.content) as {
-      providers: { apexnova: { package: string } };
+      provider: { apexnova: { npm: string } };
     };
 
-    expect(config.providers.apexnova.package).toBe(
-      "@opencode-ai/ai/providers/openai-compatible",
+    expect(config.provider.apexnova.npm).toBe(
+      "@ai-sdk/openai-compatible",
     );
   });
 
-  it("rejects legacy OpenCode provider configuration", () => {
-    expect(() => plan(`{ "provider": { "existing": {} } }`)).toThrowError(
+  it("preserves existing providers in the current singular configuration", () => {
+    expect(plannedConfig(`{ "provider": { "existing": { "name": "Existing" } } }`)).toMatchObject({
+      provider: {
+        existing: { name: "Existing" },
+        apexnova: { name: "Apexnova AI Hub" },
+      },
+    });
+  });
+
+  it("rejects the unsupported plural provider configuration", () => {
+    expect(() => plan(`{ "providers": { "existing": {} } }`)).toThrowError(
       expect.objectContaining<Partial<OpenCodeConfigError>>({ code: "LEGACY_CONFIG" }),
     );
   });
@@ -155,6 +167,21 @@ describe("planOpenCodeV2Config", () => {
       hubBaseUrl: "https://user:secret@api.example.test/v1?token=secret",
       models,
     })).toThrow(expect.objectContaining<Partial<OpenCodeConfigError>>({ code: "INVALID_INPUT" }));
+  });
+
+  it("allows HTTP only for an explicitly enabled loopback Hub", () => {
+    const input = {
+      planId: "plan.loopback",
+      createdAt: "2026-09-04T12:00:00Z",
+      configPath: "/tmp/opencode.jsonc",
+      existingContent: null,
+      hubBaseUrl: "http://api.localhost:18080/v1",
+      models,
+    } as const;
+
+    expect(() => planOpenCodeV2Config(input)).toThrow(expect.objectContaining<Partial<OpenCodeConfigError>>({ code: "INVALID_INPUT" }));
+    const changePlan = planOpenCodeV2Config({ ...input, allowInsecureLoopback: true });
+    expect(changePlan.operations[0]?.content).toContain('"baseURL": "http://api.localhost:18080/v1"');
   });
 
   it("rejects a catalog that mixes provider protocols", () => {

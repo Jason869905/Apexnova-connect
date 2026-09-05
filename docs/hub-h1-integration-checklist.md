@@ -1,6 +1,6 @@
 # Hub H1 联调清单
 
-本清单定义 Apexnova-connect 从 mock contract 切换到 Hub staging 的唯一入口条件。未通过前，CLI 保持 `connect` 写入、`switch`、live verify 和 runtime credential 自动轮换关闭。
+本清单定义 Apexnova-connect 从 Developer Preview 进入稳定 Hub staging 的入口条件。未通过前，相关能力只能在显式配置的开发/测试环境中使用，不得作为生产可用能力发布。
 
 ## 服务端交付物
 
@@ -56,6 +56,12 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 - `[passed]` `/v1/me`、余额与原子 catalog snapshot；
 - `[passed]` runtime credential 签发、推理面 Bearer 鉴权入口和成功后的自动撤销；
 - `[passed]` 指定 `glm-5.2` 的最小 `openai-chat` 真实推理返回 HTTP 200；请求 `319f02cd-44c2-4326-a9d8-4c2ee76566f9` 记录为 17 input / 93 output tokens，实扣 `0.000203 USD`；
+- `[passed]` 正式 CLI 经 Windows Credential Manager 完成登录、目录查询、`connect --dry-run`、`connect --yes`、配置验证、`switch`、配置事务逆序 `restore` 与 `logout`；`switch` 恢复时重新签发上一目标凭据的语义已由自动化 contract test 覆盖，仍待 staging 实测；
+- `[passed with follow-up]` 正式 CLI 的 `verify opencode --live --yes` 经 `openai-responses` 调用 `glm-5.2` 成功，请求 `523d9ab3-0839-4b58-989a-c66bd596033f` 的公共路由头完整，账单为 17 input / 87 output tokens、`0.000191 USD`。实际费用高于原 64 input / 8 output 估价，已转为非约束估价并登记 `M1-HUB-01` 请求级硬消费上限需求；
+- `[passed with follow-up]` Windows OpenCode CLI `1.18.29` 已完成真实 Agent 进程验收：Connect 保留用户现有 Provider，临时加入现行 `provider/npm/options` 配置，通过 launcher 仅在子进程环境注入 runtime credential；`opencode models apexnova` 识别 `apexnova/glm-5.2`，随后真实 Responses 请求返回精确文本 `APEXNOVA_OK`；Hub 请求 `55978fdf-a840-4673-b6a5-8f3e237cae6f` 归因到本次 runtime credential，记录 6964 input / 7 output tokens、实扣 `0.006978 USD`；
+- `[passed]` 上述 OpenCode 配置事务已逆序恢复，恢复后文件 SHA-256 与测试前一致；runtime credential 已撤销，OAuth access/refresh token 均已服务端撤销。本次 `logout` 保留无活动 token 的设备审计记录，不影响授权安全；
+- `[fixed]` OpenCode 官方现行配置使用单数 `provider`、`npm`、`options` 和模型覆写字段 `id`；此前按失效的 v2 文档实现的 `providers/package/settings/modelID` 已更正，并增加真实配置保留与回归测试；
+- `[fixed]` Windows npm 安装的 `opencode.cmd` 不能被 Node `spawn(..., shell:false)` 直接启动；launcher 现在从 PATH 安全解析 npm shim 背后的原生 `opencode.exe`，不通过 shell 拼接 Agent 参数；
 - `[passed with recovery]` runtime credential 与 access token 自动撤销；Hub 开发容器在首次编译 `/oauth/revoke` 时触发内存阈值重启，导致 refresh token 的第二次撤销未执行。本次设备已手工撤销，probe 已改为优先撤销 refresh token family、瞬态失败重试，再兜底撤销 access token。
 
 本地编排还暴露出三个 Hub 侧开发环境问题：
@@ -64,4 +70,4 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 2. 非标准端口代理必须保留原始 Host 端口，否则 discovery 会把 `localhost:PORT` 错报为 `localhost`；
 3. SaaS catalog 在本地生成 `api.localhost`，Windows Node DNS 不一定解析该特殊域名；live probe 允许用显式 `APEXNOVA_HUB_LOOPBACK_HOST_ALIAS=localhost` 仅在 loopback 测试中覆盖解析。
 
-本机计费 live verify 已通过。后续 staging 复验仍须观察 `[passed] Minimal live inference`，并确认 runtime credential、access token、refresh token 全部撤销；不得通过修改余额、跳过计费或使用控制面 token 调推理来绕过该门槛。
+本机计费 live verify 与 Windows OpenCode 真实 Agent 流程均已通过，临时配置和活动凭据已清理。OpenCode 自身对未配置静态价格的自定义 Provider 报告 `cost: 0`，但 Hub 实际扣费 `0.006978 USD`；M1 必须继续把 Hub 余额/用量作为计费事实来源，不能展示 OpenCode 的本地 cost 为实际费用。后续发布门槛剩余稳定 staging contract test 与 Linux 真实环境验收，并须再次确认所有临时凭据撤销；不得通过修改余额、跳过计费或使用控制面 token 调推理来绕过该门槛。

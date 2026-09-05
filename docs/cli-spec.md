@@ -30,7 +30,7 @@ CLI 是首个可审计、可脚本化宿主。它负责用户交互和编排，�
 --no-color             禁用颜色
 --non-interactive      禁止任何交互提示
 --yes                  接受已经输出或通过 --plan-file 指定的 Plan
---timeout <seconds>    客户端操作超时
+--timeout <seconds>    单次网络或短操作超时；设备登录遵循设备码有效期
 --verbose              输出脱敏诊断
 --version
 --help
@@ -134,11 +134,31 @@ detect → inspect → resolve credentialRef → plan → approve → backup →
                                                               └─ failure → rollback
 ```
 
-`--dry-run` 永不签发凭证或写文件。经 Hub H1 官方 mock contract 后，`--yes` 已开放事务化写入：先签发短期 runtime credential，再应用配置并验证；失败会 rollback 并撤销新凭证。live inference verify 和自动轮换仍等待 staging。
+`--dry-run` 永不签发凭证或写文件。经 Hub H1 官方 mock contract 后，`--yes` 已开放事务化写入：先签发短期 runtime credential，再应用配置并验证；失败会 rollback 并撤销新凭证。
 
 ### `apexnova verify <agent>`
 
-验证当前配置、凭证引用、Endpoint、模型映射和最小协议行为。默认不执行会产生费用的大型测试；可能产生费用的验证必须展示预计上限。
+验证当前配置、凭证引用、Endpoint、模型映射和最小协议行为。默认不执行会产生费用的测试；可能产生费用的验证必须展示非约束估价与估价假设。
+
+默认只做配置验证。`--live` 会先以固定的 `64 input + 256 output tokens` 假设调用 Hub 估价接口，不发送推理请求；只有显式追加 `--yes` 才使用已保存的 runtime credential 发起一次最小真实请求：
+
+```text
+apexnova verify opencode --live
+# 展示非约束 estimate 及其假设后退出，不产生推理费用
+
+apexnova verify opencode --live --yes
+# 执行真实请求，并验证 Request ID、Provider、requested/resolved model 与 Deployment 响应头
+```
+
+`verify` 不接受明文密钥，也不输出响应正文、Prompt 或源码。
+
+Hub 的 estimate 明确不是锁价或消费上限。推理模型可能产生额外 reasoning token；在 Hub 提供请求级硬消费上限前，CLI 不得把估价描述成“最多扣费”。
+
+### Runtime credential 预续期
+
+`apexnova run opencode` 会在启动 Agent 前检查 runtime credential。剩余有效期不超过一小时时，在 profile 级跨进程锁内执行：重新读取绑定 → 签发新凭据 → 通过控制面列表确认 active 与授权范围 → 原子保存 → 撤销旧凭据。并发启动只允许一个进程续期；新凭据验证或保存失败时保留旧绑定，并 best-effort 撤销新凭据。
+
+M1 不承诺 Agent 进程启动后的热更新；超长会话的无感轮换需要后续本地 Gateway。
 
 ### `apexnova switch <agent>`
 
@@ -160,7 +180,9 @@ apexnova restore <transaction-id> --dry-run
 apexnova restore <transaction-id>
 ```
 
-恢复只撤销 Connect 管理的变更，并执行并发哈希检查。
+恢复只撤销 Connect 管理的变更，并执行并发哈希检查。恢复必须按事务逆序执行；尝试跳过较新的切换事务会返回 `RESTORE_ORDER_CONFLICT`，不修改配置或凭据。
+
+恢复一次 `switch` 时，凭据库只保存上一个 Deployment/协议及事务链，不保存已撤销的旧 secret。CLI 会先为上一个目标签发并通过控制面确认一枚新 runtime credential，再回滚配置、原子保存新绑定并撤销当前凭据。恢复最初的 `connect` 则回到连接前配置、撤销当前凭据并删除本地绑定。若新凭据签发或验证失败，文件保持不变；若配置已经恢复但绑定保存失败，CLI 撤销相关凭据并进入安全断开状态。
 
 ### `apexnova doctor [agent]`
 

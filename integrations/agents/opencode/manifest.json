@@ -3,7 +3,7 @@
   "schemaVersion": "1",
   "id": "opencode",
   "displayName": "OpenCode",
-  "description": "Connect OpenCode v2 provider configuration to models served by Apexnova AI Hub.",
+  "description": "Connect OpenCode provider configuration to models served by Apexnova AI Hub.",
   "version": "0.1.0",
   "status": "planned",
   "category": "agent",
@@ -15,8 +15,8 @@
     "products": [
       {
         "name": "OpenCode",
-        "versionRange": ">=2.0.0",
-        "documentation": "https://opencode.ai/v2/docs/providers"
+        "versionRange": ">=1.18.29 <2.0.0",
+        "documentation": "https://opencode.ai/docs/providers/"
       }
     ]
   },
@@ -33,8 +33,7 @@
   "capabilities": [],
   "permissions": [],
   "links": {
-    "documentation": "https://opencode.ai/v2/docs/providers",
+    "documentation": "https://opencode.ai/docs/providers/",
     "repository": "https://github.com/anomalyco/opencode"
   }
 }
-

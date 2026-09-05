@@ -5,7 +5,7 @@ import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { EXIT_CODES, runCli, type CliIo, type HubCommandService } from "../src/index.js";
+import { EXIT_CODES, RuntimeBindingStore, resolveOpenCodeExecutable, runCli, type CliIo, type HubCommandService } from "../src/index.js";
 import type { OpenCodeDetection, OpenCodeInspection } from "@apexnova-connect/integration-opencode";
 
 function captureIo() {
@@ -49,7 +49,9 @@ function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService 
       models: [{ id: "model.nova", name: "Nova Coder", publisher: "apexnova", modelType: "chat", capabilities: ["tool.calling"], deploymentIds: ["deployment.nova"] }],
       deployments: [{ id: "deployment.nova", providerId: "provider.apexnova-ai-hub", modelId: "model.nova", displayName: "Nova Coder", inferenceAlias: "nova", aliases: ["nova"], protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }], limits: { contextWindow: 128000, maxOutputTokens: 8192 }, capabilities: ["tool.calling"], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } }],
     }),
+    estimatePricing: async () => ({ deploymentId: "deployment.nova", model: "nova", currency: "USD", billingMode: "token", listAmount: "0.000120", discountRate: "0.5", amount: "0.000060", priceVersion: "2026-09-05T10:00:00Z", estimateOnly: true }),
     createRuntimeCredential: async () => ({ credentialId: "rtc_1", expiresAt: "2099-09-05T12:00:00Z", deviceId: "device_1", secret: SecretValue.from("runtime-secret") }),
+    runtimeCredentials: async () => [{ credentialId: "rtc_1", name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], expiresAt: "2099-09-05T12:00:00Z", createdAt: "2026-09-05T12:00:00Z" }],
     revokeRuntimeCredential: async () => undefined,
     ...overrides,
   };
@@ -66,6 +68,12 @@ function memoryCredentials(): CredentialStore {
 }
 
 describe("CLI", () => {
+  it("resolves the native OpenCode target behind an npm Windows shim without a shell", () => {
+    const expected = "C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe";
+    expect(resolveOpenCodeExecutable("win32", { PATH: "C:\\other;C:\\npm" }, (path) => path === expected)).toBe(expected);
+    expect(resolveOpenCodeExecutable("linux", {}, () => false)).toBe("opencode");
+  });
+
   it("emits the versioned JSON envelope for detect", async () => {
     const capture = captureIo();
     const detect = vi.fn(async () => installed);
@@ -170,12 +178,14 @@ describe("CLI", () => {
 
   it("runs device login without writing tokens to either output stream", async () => {
     const capture = captureIo();
-    const result = await runCli(["login", "--profile", "work", "--json"], { io: capture.io, hubService: mockHub(), createRequestId: () => "local_login" });
+    const login = vi.fn(mockHub().login);
+    const result = await runCli(["login", "--profile", "work", "--json"], { io: capture.io, hubService: mockHub({ login }), createRequestId: () => "local_login" });
     expect(result.exitCode).toBe(EXIT_CODES.success);
     expect(JSON.parse(capture.stdout()).data).toMatchObject({ profile: "work", authenticated: true, accountId: "account_1" });
     expect(capture.stderr()).toContain("ABCD-EFGH");
     expect(`${capture.stdout()}${capture.stderr()}`).not.toContain("access-secret");
     expect(`${capture.stdout()}${capture.stderr()}`).not.toContain("refresh-secret");
+    expect(login.mock.calls[0]?.[2]).toBeUndefined();
   });
 
   it("joins and filters Hub catalog deployments for OpenCode", async () => {
@@ -279,6 +289,207 @@ describe("CLI", () => {
     expect(revoke).toHaveBeenCalledWith("default", "rtc_1", expect.any(AbortSignal));
   });
 
+  it("reissues the previous runtime target when restoring a switch, then disconnects on the initial restore", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-restore-"));
+    const configPath = join(root, "opencode.jsonc");
+    const original = "{\n  \"theme\": \"dark\"\n}\n";
+    await writeFile(configPath, original, "utf8");
+    const credentials = memoryCredentials();
+    const bindings = new RuntimeBindingStore(credentials);
+    const baseCatalog = await mockHub().catalog("default", new AbortController().signal);
+    const catalog = {
+      ...baseCatalog,
+      deployments: baseCatalog.deployments.map((deployment) => ({
+        ...deployment,
+        protocols: [
+          ...deployment.protocols,
+          { protocol: "openai-chat", baseUrl: "https://api.example.test/v1/chat/completions" },
+        ],
+      })),
+    };
+    const active = new Map<string, { readonly protocol: string; readonly deploymentId: string; readonly expiresAt: string }>();
+    let credentialSequence = 0;
+    const createRuntimeCredential: HubCommandService["createRuntimeCredential"] = async (_profile, input) => {
+      credentialSequence += 1;
+      const credentialId = `rtc_${credentialSequence}`;
+      const expiresAt = "2099-09-05T12:00:00Z";
+      active.set(credentialId, { protocol: input.protocols[0]!, deploymentId: input.publicDeploymentIds[0]!, expiresAt });
+      return { credentialId, expiresAt, deviceId: "device_1", secret: SecretValue.from(`runtime-secret-${credentialSequence}`) };
+    };
+    const revokeRuntimeCredential = vi.fn(async (_profile: string, credentialId: string) => { active.delete(credentialId); });
+    const runtimeCredentials: HubCommandService["runtimeCredentials"] = async () => [...active].map(([credentialId, item]) => ({
+      credentialId,
+      name: "OpenCode",
+      prefix: "anrt_test...test",
+      deviceId: "device_1",
+      protocols: [item.protocol],
+      publicDeploymentIds: [item.deploymentId],
+      expiresAt: item.expiresAt,
+      createdAt: "2026-09-05T12:00:00Z",
+    }));
+    const hub = mockHub({ catalog: async () => catalog, createRuntimeCredential, runtimeCredentials, revokeRuntimeCredential });
+    const common = {
+      hubService: hub,
+      credentialStore: credentials,
+      detectOpenCode: async () => ({ ...installed, configPath }),
+      platform: "win32" as const,
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+      createRequestId: () => "local_switch_restore",
+    };
+
+    const connectCapture = captureIo();
+    const connected = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-responses", "--yes", "--json"], { ...common, io: connectCapture.io });
+    expect(connected.exitCode).toBe(EXIT_CODES.success);
+    const initialTransactionId = JSON.parse(connectCapture.stdout()).data.transactionId as string;
+
+    const switchCapture = captureIo();
+    const switched = await runCli(["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes", "--json"], { ...common, io: switchCapture.io });
+    expect(switched.exitCode).toBe(EXIT_CODES.success);
+    const switchTransactionId = JSON.parse(switchCapture.stdout()).data.transactionId as string;
+    expect(switchTransactionId).not.toBe(initialTransactionId);
+    expect((await bindings.load("default"))).toMatchObject({
+      credentialId: "rtc_2",
+      protocol: "openai-chat",
+      transactionId: switchTransactionId,
+      restoreTarget: { protocol: "openai-responses", deploymentId: "deployment.nova", transactionId: initialTransactionId },
+    });
+    const storedAfterSwitch = await credentials.get({ integrationId: "opencode", accountId: "default", kind: "runtime-credential" });
+    expect(storedAfterSwitch?.reveal()).not.toContain("runtime-secret-1");
+    expect(active.has("rtc_1")).toBe(false);
+
+    const outOfOrderCapture = captureIo();
+    const outOfOrder = await runCli(["restore", initialTransactionId, "--yes", "--json"], { ...common, io: outOfOrderCapture.io });
+    expect(outOfOrder.exitCode).toBe(EXIT_CODES.conflict);
+    expect(JSON.parse(outOfOrderCapture.stdout())).toMatchObject({ error: { code: "RESTORE_ORDER_CONFLICT" } });
+    expect((await bindings.load("default"))?.credentialId).toBe("rtc_2");
+
+    const restoreSwitchCapture = captureIo();
+    const restoredSwitch = await runCli(["restore", switchTransactionId, "--yes", "--json"], { ...common, io: restoreSwitchCapture.io });
+    expect(restoredSwitch.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(restoreSwitchCapture.stdout())).toMatchObject({ data: { runtimeCredentialRestored: true, runtimeCredentialRevoked: true } });
+    expect((await bindings.load("default"))).toMatchObject({
+      credentialId: "rtc_3",
+      protocol: "openai-responses",
+      transactionId: initialTransactionId,
+    });
+    expect((await bindings.load("default"))?.restoreTarget).toBeUndefined();
+    expect(active.has("rtc_2")).toBe(false);
+
+    const restoreInitialCapture = captureIo();
+    const restoredInitial = await runCli(["restore", initialTransactionId, "--yes", "--json"], { ...common, io: restoreInitialCapture.io });
+    expect(restoredInitial.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(restoreInitialCapture.stdout())).toMatchObject({ data: { runtimeCredentialRestored: false, runtimeCredentialRevoked: true } });
+    expect(await readFile(configPath, "utf8")).toBe(original);
+    expect(await bindings.load("default")).toBeNull();
+    expect(active.size).toBe(0);
+    expect(revokeRuntimeCredential.mock.calls.map((call) => call[1])).toEqual(["rtc_1", "rtc_2", "rtc_3"]);
+  });
+
+  it("renews a runtime credential before launch and revokes the previous credential", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-renew-"));
+    const credentials = memoryCredentials();
+    const bindings = new RuntimeBindingStore(credentials);
+    await bindings.save("default", {
+      credentialId: "rtc_old",
+      secret: SecretValue.from("old-runtime-secret"),
+      expiresAt: "2026-09-05T10:30:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    const issue = vi.fn(async () => ({ credentialId: "rtc_new", expiresAt: "2026-09-06T10:00:00Z", deviceId: "device_1", secret: SecretValue.from("new-runtime-secret") }));
+    const revoke = vi.fn(async () => undefined);
+    let launchedSecret: string | undefined;
+    const capture = captureIo();
+    const result = await runCli(["run", "opencode", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      detectOpenCode: async () => installed,
+      hubService: mockHub({
+        createRuntimeCredential: issue,
+        runtimeCredentials: async () => [{ credentialId: "rtc_new", name: "OpenCode", prefix: "anrt_new...test", deviceId: "device_1", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], expiresAt: "2026-09-06T10:00:00Z", createdAt: "2026-09-05T10:00:00Z" }],
+        revokeRuntimeCredential: revoke,
+      }),
+      launchOpenCode: async (_args, environment) => { launchedSecret = environment.APEXNOVA_API_KEY; return 0; },
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      now: () => new Date("2026-09-05T10:00:00Z"),
+      createRequestId: () => "local_renew",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ data: { credentialRotated: true, credentialExpiresAt: "2026-09-06T10:00:00Z" } });
+    expect(issue).toHaveBeenCalledOnce();
+    expect(revoke).toHaveBeenCalledWith("default", "rtc_old", expect.any(AbortSignal));
+    expect(launchedSecret).toBe("new-runtime-secret");
+    expect((await bindings.load("default"))?.credentialId).toBe("rtc_new");
+    expect(capture.stdout()).not.toContain("new-runtime-secret");
+  });
+
+  it("keeps the previous binding when a renewed credential cannot be verified", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-renew-fail-"));
+    const credentials = memoryCredentials();
+    const bindings = new RuntimeBindingStore(credentials);
+    await bindings.save("default", {
+      credentialId: "rtc_old",
+      secret: SecretValue.from("old-runtime-secret"),
+      expiresAt: "2026-09-05T10:30:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    const revoke = vi.fn(async () => undefined);
+    const launch = vi.fn(async () => 0);
+    const capture = captureIo();
+    const result = await runCli(["run", "opencode", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      detectOpenCode: async () => installed,
+      hubService: mockHub({
+        createRuntimeCredential: async () => ({ credentialId: "rtc_new", expiresAt: "2026-09-06T10:00:00Z", deviceId: "device_1", secret: SecretValue.from("new-runtime-secret") }),
+        runtimeCredentials: async () => [],
+        revokeRuntimeCredential: revoke,
+      }),
+      launchOpenCode: launch,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      now: () => new Date("2026-09-05T10:00:00Z"),
+      createRequestId: () => "local_renew_fail",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.verification);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "VERIFICATION_FAILED" } });
+    expect(revoke).toHaveBeenCalledWith("default", "rtc_new", expect.any(AbortSignal));
+    expect((await bindings.load("default"))?.credentialId).toBe("rtc_old");
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a config-only OpenCode launcher before reading runtime credentials", async () => {
+    const capture = captureIo();
+    const credentials = {
+      ...memoryCredentials(),
+      get: vi.fn(async () => null),
+    };
+    const launch = vi.fn(async () => 0);
+    const result = await runCli(["run", "opencode", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      detectOpenCode: async () => {
+        const { productVersion: _productVersion, ...configOnly } = installed;
+        return { ...configOnly, status: "config-only" };
+      },
+      launchOpenCode: launch,
+      createRequestId: () => "local_run_missing",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.unavailable);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "AGENT_NOT_FOUND" } });
+    expect(credentials.get).not.toHaveBeenCalled();
+    expect(launch).not.toHaveBeenCalled();
+  });
+
   it("performs configuration-only verification without a paid request", async () => {
     const capture = captureIo();
     const result = await runCli(["verify", "opencode", "--json"], {
@@ -289,6 +500,62 @@ describe("CLI", () => {
     });
     expect(result.exitCode).toBe(EXIT_CODES.success);
     expect(JSON.parse(capture.stdout())).toMatchObject({ data: { valid: true, level: "configuration" } });
+  });
+
+  it("shows a non-binding estimate and requires approval before live verification", async () => {
+    const capture = captureIo();
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("default", {
+      credentialId: "rtc_1",
+      secret: SecretValue.from("runtime-secret"),
+      expiresAt: "2099-09-05T12:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    const live = vi.fn();
+    const result = await runCli(["verify", "opencode", "--live", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      hubService: mockHub(),
+      detectOpenCode: async () => installed,
+      inspectOpenCode: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, provider: { id: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }),
+      verifyHubInference: live,
+      createRequestId: () => "local_live_approval",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.permission);
+    expect(JSON.parse(capture.stdout())).toMatchObject({
+      error: { code: "APPROVAL_REQUIRED", details: { estimate: { amount: "0.000060", currency: "USD", estimateOnly: true }, estimateAssumptions: { inputTokens: 64, outputTokens: 256 } } },
+    });
+    expect(live).not.toHaveBeenCalled();
+    expect(capture.stdout()).not.toContain("runtime-secret");
+  });
+
+  it("performs an approved live verification without exposing the credential", async () => {
+    const capture = captureIo();
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("default", {
+      credentialId: "rtc_1",
+      secret: SecretValue.from("runtime-secret"),
+      expiresAt: "2099-09-05T12:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    const live = vi.fn(async () => ({ status: 200, protocol: "openai-responses" as const, requestId: "req_live", providerId: "provider.apexnova-ai-hub", requestedModel: "nova", resolvedModel: "nova", deploymentId: "deployment.nova" }));
+    const result = await runCli(["verify", "opencode", "--live", "--yes", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      hubService: mockHub(),
+      detectOpenCode: async () => installed,
+      inspectOpenCode: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, provider: { id: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }),
+      verifyHubInference: live,
+      createRequestId: () => "local_live",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ data: { valid: true, level: "live", inference: { requestId: "req_live", deploymentId: "deployment.nova" } } });
+    expect(live).toHaveBeenCalledWith(expect.objectContaining({ model: "nova", deploymentId: "deployment.nova", protocol: "openai-responses" }));
+    expect(capture.stdout()).not.toContain("runtime-secret");
   });
 
   it("lists restore transactions without creating local state", async () => {
@@ -304,6 +571,27 @@ describe("CLI", () => {
     expect(result.exitCode).toBe(EXIT_CODES.success);
     expect(JSON.parse(capture.stdout()).data.backups).toEqual([]);
     await expect(access(join(root, "Apexnova", "connect"))).rejects.toBeDefined();
+  });
+
+  it("loads legacy runtime bindings and upgrades them without inventing a restore target", async () => {
+    const credentials = memoryCredentials();
+    const key = { integrationId: "opencode", accountId: "legacy", kind: "runtime-credential" } as const;
+    await credentials.set(key, SecretValue.from(JSON.stringify({
+      version: 1,
+      credentialId: "rtc_legacy",
+      secret: "legacy-runtime-secret",
+      expiresAt: "2099-09-05T12:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    })));
+    const bindings = new RuntimeBindingStore(credentials);
+
+    const loaded = await bindings.load("legacy");
+    expect(loaded).toMatchObject({ credentialId: "rtc_legacy", protocol: "openai-responses", deploymentId: "deployment.nova" });
+    expect(loaded?.restoreTarget).toBeUndefined();
+    await bindings.save("legacy", loaded!);
+
+    expect(JSON.parse((await credentials.get(key))!.reveal())).toMatchObject({ version: 2, credentialId: "rtc_legacy" });
   });
 
   it("does not fall back to an implicit production Hub", async () => {

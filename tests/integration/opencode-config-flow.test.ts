@@ -70,7 +70,7 @@ describe("OpenCode configuration lifecycle", () => {
         manifest,
         detect: async () => ({
           status: "available",
-          productVersion: "2.0.0",
+          productVersion: "1.18.29",
           configPath,
         }),
         inspect: async () => ({
@@ -146,7 +146,8 @@ describe("OpenCode configuration lifecycle", () => {
       const applied = await readFile(configPath, "utf8");
       expect(applied).toContain("// This user setting must survive");
       expect(applied).toContain('"apexnova"');
-      expect(applied).not.toContain("apiKey");
+      expect(applied).toContain('"apiKey": "{env:APEXNOVA_API_KEY}"');
+      expect(applied).not.toContain("runtime-secret");
 
       if (result.status !== "applied") {
         throw new TypeError("Expected the change to be applied.");
@@ -158,4 +159,3 @@ describe("OpenCode configuration lifecycle", () => {
     }
   });
 });
-

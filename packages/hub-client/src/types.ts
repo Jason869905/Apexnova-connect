@@ -91,6 +91,38 @@ export interface HubBalance {
   readonly effectiveAvailable?: string;
 }
 
+export interface HubPricingUsage {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cachedTokens?: number;
+  readonly items?: number;
+  readonly inputItems?: number;
+  readonly seconds?: number;
+  readonly itemAttrs?: Readonly<Record<string, string | boolean>>;
+}
+
+export interface HubPricingEstimate {
+  readonly deploymentId: string;
+  readonly model: string;
+  readonly currency: string;
+  readonly billingMode: string;
+  readonly listAmount: string;
+  readonly discountRate?: string;
+  readonly amount: string;
+  readonly priceVersion?: string;
+  readonly estimateOnly: true;
+}
+
+export interface HubInferenceVerification {
+  readonly status: number;
+  readonly protocol: "openai-responses" | "openai-chat";
+  readonly requestId: string;
+  readonly providerId: string;
+  readonly requestedModel: string;
+  readonly resolvedModel: string;
+  readonly deploymentId: string;
+}
+
 export interface HubCatalogProtocol {
   readonly protocol: "openai-responses" | "openai-chat" | "anthropic-messages" | string;
   readonly baseUrl: string;
@@ -156,4 +188,17 @@ export interface CreatedRuntimeCredential {
   readonly expiresAt: string;
   readonly workspaceId?: string;
   readonly deviceId?: string;
+}
+
+export interface RuntimeCredentialSummary {
+  readonly credentialId: string;
+  readonly name: string;
+  readonly prefix: string;
+  readonly deviceId?: string;
+  readonly workspaceId?: string;
+  readonly protocols: readonly string[];
+  readonly publicDeploymentIds: readonly string[];
+  readonly expiresAt?: string;
+  readonly createdAt: string;
+  readonly lastUsedAt?: string;
 }

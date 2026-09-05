@@ -420,3 +420,29 @@ X-Apexnova-Deployment-Id
 H1 全部通过后，Connect 才从 mock/contract 环境切换到 Hub staging；生产接入仍需单独的安全、计费和发布验收。
 
 Connect 侧具体的 staging 解锁顺序和 contract test 见 [`hub-h1-integration-checklist.md`](hub-h1-integration-checklist.md)。
+
+## 17. Connect M1 收口联调要求（2026-09-05）
+
+Connect 已开始把独立 H1 probe 收入正式 CLI。当前不要求 Hub 新增端点，但下列现有契约成为 M1 发布阻塞项：
+
+1. `POST /v1/pricing/estimate` 对固定 token 假设返回 `deploymentId/model/currency/billingMode/listAmount/amount/priceVersion/estimateOnly`，且与实际结算使用同一计价实现；
+2. `POST /v1/runtime-credentials` 成功后，新的凭据必须立即出现在 `GET /v1/runtime-credentials`，并准确返回 `protocols` 与 `publicDeploymentIds`，供无费用续期确认使用；
+3. OpenAI Responses 与 Chat Completions 的成功响应必须始终带 `X-Apexnova-Request-Id`、`X-Apexnova-Provider-Id`、`X-Apexnova-Requested-Model`、`X-Apexnova-Resolved-Model`、`X-Apexnova-Deployment-Id`；fallback 后也必须反映实际结果；
+4. `/oauth/revoke` 必须幂等，并能在首次访问、冷启动和进程重启附近可靠完成。开发容器曾在该路由首次编译时触发内存阈值重启，导致客户端收到网络失败；Connect 会重试，但 staging 仍应消除该不稳定因素；
+5. staging 必须至少提供一个可计费的 `openai-responses` Deployment，完成非流式、流式、撤销后 401、余额不足 402 和公共响应头 contract test；
+6. 上述端点与字段变化必须同步更新 OpenAPI、fixtures 和双方 CI 使用的 contract tests。
+
+Connect 的安全策略保持不变：估价使用 OAuth access token；真实推理只使用受 Deployment/协议约束的 runtime credential；自动续期不会为了验证凭据而偷偷产生一次推理费用。
+
+### M1-HUB-01：请求级硬消费上限（新增，高优先级）
+
+本机验收请求 `523d9ab3-0839-4b58-989a-c66bd596033f` 发送 `max_output_tokens: 8`，但 GLM 5.2 的账单记录为 17 input / 87 output tokens，实际 `0.000191 USD`，高于按 64 input / 8 output 假设得到的 `0.000080 USD` estimate。reasoning token、协议翻译或上游实现可能使客户端输出参数无法成为可靠的费用上限。
+
+因此：
+
+- Connect M1 只把 `/v1/pricing/estimate` 展示为非约束估价，并改用 64 input / 256 output 的保守假设；
+- Hub 需要调查 Responses bridge 与上游对 `max_output_tokens` 的映射、usage 口径是否符合公开契约；
+- 若产品需要“本次验证最多花 X”，Hub 必须提供服务端原子执行的请求级 hard spend cap（或等价的一次性预算凭据），在调用前预留、结算后释放，超过上限直接拒绝；客户端 header 或参数本身不能被当作安全边界；
+- 在 hard spend cap 交付前，CLI 不提供 `--max-cost`，也不得使用“最高费用”“最多扣费”等承诺性文案。
+
+Windows OpenCode 1.18.29 的真实 Agent 调用进一步验证了这个需求：用户消息仅要求返回固定短串，但 Agent 自身系统上下文使 Hub 最终计量达到 6964 input / 7 output tokens，实扣 `0.006978 USD`；同时 OpenCode 因自定义 Provider 没有静态价格元数据而在本地事件中报告 `cost: 0`。因此 Hub 的余额和 `/v1/billing/usage` 必须始终是费用事实来源，后续 Connect UI/CLI 应按 `X-Apexnova-Request-Id` 查询实际用量，不得照抄 Agent 的本地 cost 字段。该现象不要求 H1 新增端点，但会把用量查询与请求 ID 对账列为 M1 staging contract test 的必测项。

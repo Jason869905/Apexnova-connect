@@ -1,18 +1,25 @@
-import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { access, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
+import { dirname, join, resolve, win32 } from "node:path";
 import { spawn } from "node:child_process";
 
 import {
   detectOpenCode,
   inspectOpenCode,
   OpenCodeInspectionError,
+  OpenCodeConfigError,
   planOpenCodeV2Config,
   type OpenCodeDetection,
   type OpenCodeDetectionOptions,
   type OpenCodeInspection,
 } from "@apexnova-connect/integration-opencode";
-import { HubClientError } from "@apexnova-connect/hub-client";
+import {
+  HubClientError,
+  verifyHubInference,
+  type HubInferenceVerification,
+  type VerifyHubInferenceOptions,
+} from "@apexnova-connect/hub-client";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
 import {
   createDefaultCredentialStore,
@@ -58,7 +65,9 @@ export interface CliDependencies {
   readonly hubService?: HubCommandService;
   readonly credentialStore?: CredentialStore;
   readonly launchOpenCode?: (args: readonly string[], environment: NodeJS.ProcessEnv) => Promise<number>;
+  readonly verifyHubInference?: (options: VerifyHubInferenceOptions) => Promise<HubInferenceVerification>;
   readonly createRequestId?: () => string;
+  readonly now?: () => Date;
 }
 
 export interface CliRunResult {
@@ -84,6 +93,7 @@ interface ParsedArguments {
   readonly deployment?: string;
   readonly dryRun: boolean;
   readonly list: boolean;
+  readonly live: boolean;
 }
 
 interface CliErrorShape {
@@ -125,7 +135,7 @@ Usage:
   apexnova models [--agent opencode] [--protocol <id>] [--compatible-only]
   apexnova connect opencode --deployment <id> --dry-run
   apexnova switch opencode --deployment <id> [--dry-run] [--yes]
-  apexnova verify opencode | doctor [opencode]
+  apexnova verify opencode [--live] [--yes] | doctor [opencode]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
   apexnova run opencode [-- <agent args>]
   apexnova --version
@@ -143,6 +153,7 @@ Global options:
   --deployment <id>      Select a public model deployment
   --dry-run              Plan without changing local or remote state
   --list                 List restorable transactions
+  --live                 Perform a minimal, potentially billable inference check
   --no-color             Disable colors
   --help                 Show help
   --version              Show version
@@ -187,6 +198,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let deployment: string | undefined;
   let dryRun = false;
   let list = false;
+  let live = false;
   let optionsEnded = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -228,6 +240,9 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         break;
       case "--list":
         list = true;
+        break;
+      case "--live":
+        live = true;
         break;
       case "--deployment":
         deployment = valueAfter(args, index, arg);
@@ -290,6 +305,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(deployment ? { deployment } : {}),
     dryRun,
     list,
+    live,
   };
 }
 
@@ -460,9 +476,41 @@ function credentialStore(dependencies: CliDependencies): CredentialStore {
   });
 }
 
+export function resolveOpenCodeExecutable(
+  platform: NodeJS.Platform,
+  environment: NodeJS.ProcessEnv,
+  pathExists: (path: string) => boolean = existsSync,
+): string {
+  if (platform !== "win32") return "opencode";
+
+  const pathValue = environment.PATH ?? environment.Path ?? "";
+  for (const directory of pathValue.split(";").filter(Boolean)) {
+    const standalone = win32.join(directory, "opencode.exe");
+    if (pathExists(standalone)) return standalone;
+
+    // npm's Windows shim cannot be spawned with shell=false. Resolve its fixed,
+    // argument-safe native target instead of interpolating user arguments into cmd.exe.
+    const npmBinary = win32.join(directory, "node_modules", "opencode-ai", "bin", "opencode.exe");
+    if (pathExists(npmBinary)) return npmBinary;
+  }
+
+  throw new CliError({
+    code: "AGENT_NOT_FOUND",
+    message: "OpenCode was detected, but no native opencode.exe target was found on PATH.",
+    exitCode: EXIT_CODES.unavailable,
+  });
+}
+
 function defaultLaunchOpenCode(args: readonly string[], environment: NodeJS.ProcessEnv): Promise<number> {
   return new Promise((resolveLaunch, reject) => {
-    const child = spawn("opencode", args, { env: environment, stdio: "inherit", windowsHide: true, shell: false });
+    let executable: string;
+    try {
+      executable = resolveOpenCodeExecutable(process.platform, environment);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const child = spawn(executable, args, { env: environment, stdio: "inherit", windowsHide: true, shell: false });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
       if (signal) reject(new Error(`OpenCode exited after signal ${signal}.`));
@@ -485,7 +533,6 @@ async function executeLogin(parsed: ParsedArguments, dependencies: CliDependenci
         `Expires: ${prompt.expiresAt}`,
       ].join("\n") + "\n");
     },
-    operationSignal(parsed),
   );
   if (!promptShown) throw new CliError({ code: "INVALID_RESPONSE", message: "Hub login completed without a verification prompt.", exitCode: EXIT_CODES.runtime });
   return {
@@ -556,6 +603,124 @@ function localStateRoot(dependencies: CliDependencies): string {
   return resolve(environment.XDG_STATE_HOME ?? join(home, ".local", "state"), "apexnova-connect");
 }
 
+const RUNTIME_ROTATION_WINDOW_MS = 60 * 60 * 1_000;
+const RUNTIME_ROTATION_LOCK_STALE_MS = 5 * 60 * 1_000;
+const LIVE_VERIFY_ESTIMATE_USAGE = { inputTokens: 64, outputTokens: 256 } as const;
+
+function currentTime(dependencies: CliDependencies): number {
+  return (dependencies.now?.() ?? new Date()).getTime();
+}
+
+function filesystemCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+async function withRuntimeRotationLock<T>(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  task: () => Promise<T>,
+): Promise<T> {
+  const lockRoot = join(localStateRoot(dependencies), "locks");
+  await mkdir(lockRoot, { recursive: true, mode: 0o700 });
+  const profileHash = createHash("sha256").update(parsed.profile, "utf8").digest("hex").slice(0, 32);
+  const lockPath = join(lockRoot, `runtime-${profileHash}.lock`);
+  const signal = operationSignal(parsed);
+  let handle;
+  for (;;) {
+    if (signal.aborted) {
+      throw new CliError({ code: "CREDENTIAL_ROTATION_BUSY", message: "Timed out waiting for another credential rotation to finish.", exitCode: EXIT_CODES.conflict, retryable: true });
+    }
+    try {
+      handle = await open(lockPath, "wx", 0o600);
+      await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }), "utf8");
+      break;
+    } catch (error) {
+      if (filesystemCode(error) !== "EEXIST") throw error;
+      try {
+        const info = await stat(lockPath);
+        if (Date.now() - info.mtimeMs > RUNTIME_ROTATION_LOCK_STALE_MS) {
+          await unlink(lockPath);
+          continue;
+        }
+      } catch (staleError) {
+        if (filesystemCode(staleError) === "ENOENT") continue;
+        throw staleError;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    }
+  }
+  try {
+    return await task();
+  } finally {
+    await handle.close().catch(() => {});
+    await unlink(lockPath).catch(() => {});
+  }
+}
+
+async function runtimeCredentialForLaunch(parsed: ParsedArguments, dependencies: CliDependencies) {
+  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
+  const initial = await bindings.load(parsed.profile);
+  if (!initial) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
+  if (Date.parse(initial.expiresAt) - currentTime(dependencies) > RUNTIME_ROTATION_WINDOW_MS) {
+    return { binding: initial, rotated: false, warnings: [] as string[] };
+  }
+
+  return withRuntimeRotationLock(parsed, dependencies, async () => {
+    const current = await bindings.load(parsed.profile);
+    if (!current) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
+    if (Date.parse(current.expiresAt) - currentTime(dependencies) > RUNTIME_ROTATION_WINDOW_MS) {
+      return { binding: current, rotated: false, warnings: [] as string[] };
+    }
+    const service = hubService(parsed, dependencies);
+    const signal = operationSignal(parsed);
+    const catalog = await service.catalog(parsed.profile, signal);
+    const deployment = catalog.deployments.find((item) => item.id === current.deploymentId);
+    const protocol = deployment?.protocols.find((item) => item.protocol === current.protocol);
+    if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
+      throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential cannot be renewed because its deployment or protocol is no longer available.", exitCode: EXIT_CODES.verification });
+    }
+    const created = await service.createRuntimeCredential(parsed.profile, {
+      name: `OpenCode (${parsed.profile})`,
+      protocols: [current.protocol],
+      publicDeploymentIds: [current.deploymentId],
+      expiresIn: 86_400,
+    }, signal);
+    const replacement = {
+      credentialId: created.credentialId,
+      secret: created.secret,
+      expiresAt: created.expiresAt,
+      protocol: current.protocol,
+      deploymentId: current.deploymentId,
+      ...(current.transactionId ? { transactionId: current.transactionId } : {}),
+      ...(current.restoreTarget ? { restoreTarget: current.restoreTarget } : {}),
+    };
+    try {
+      if (Date.parse(created.expiresAt) - currentTime(dependencies) <= RUNTIME_ROTATION_WINDOW_MS) {
+        throw new CliError({ code: "INVALID_RESPONSE", message: "Hub issued a runtime credential with an insufficient lifetime.", exitCode: EXIT_CODES.runtime });
+      }
+      const active = (await service.runtimeCredentials(parsed.profile, signal)).find((item) => item.credentialId === created.credentialId);
+      if (!active || !active.protocols.includes(current.protocol) || !active.publicDeploymentIds.includes(current.deploymentId)) {
+        throw new CliError({ code: "VERIFICATION_FAILED", message: "The renewed runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
+      }
+      await bindings.save(parsed.profile, replacement);
+    } catch (cause) {
+      await service.revokeRuntimeCredential(parsed.profile, created.credentialId, operationSignal(parsed)).catch(() => {});
+      throw cause;
+    }
+    const warnings: string[] = [];
+    if (current.credentialId !== created.credentialId) {
+      try {
+        await service.revokeRuntimeCredential(parsed.profile, current.credentialId, operationSignal(parsed));
+      } catch {
+        warnings.push(`Previous runtime credential ${current.credentialId} could not be revoked automatically.`);
+      }
+    }
+    return { binding: replacement, rotated: true, warnings };
+  });
+}
+
 function safePlan(plan: ReturnType<typeof planOpenCodeV2Config>) {
   return {
     id: plan.id,
@@ -608,6 +773,7 @@ async function createOpenCodePlan(parsed: ParsedArguments, dependencies: CliDepe
     configPath: detection.configPath,
     existingContent,
     hubBaseUrl: openCodeBaseUrl(protocol.baseUrl, protocol.protocol),
+    allowInsecureLoopback: (dependencies.environment ?? process.env).APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
     models: [{ id: serviceModelId, name: deployment.displayName || model?.name || serviceModelId, protocol: mappedProtocol, upstreamId: serviceModelId, ...(deployment.limits?.contextWindow && deployment.limits.maxOutputTokens ? { limits: { context: deployment.limits.contextWindow, output: deployment.limits.maxOutputTokens } } : {}) }],
     defaultModelId: serviceModelId,
   });
@@ -646,12 +812,20 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
     if (inspection.status !== "configured" || !inspection.managed || !inspection.provider?.modelIds.includes(result.deployment.inferenceAlias)) {
       throw new CliError({ code: "VERIFICATION_FAILED", message: "Applied OpenCode configuration did not pass configuration verification.", exitCode: EXIT_CODES.verification });
     }
+    const transactionId = receipt && typeof receipt.rollbackToken === "object" && receipt.rollbackToken !== null && "transactionId" in receipt.rollbackToken && typeof receipt.rollbackToken.transactionId === "string" ? receipt.rollbackToken.transactionId : undefined;
     await bindings.save(parsed.profile, {
       credentialId: created.credentialId,
       secret: created.secret,
       expiresAt: created.expiresAt,
       protocol: result.protocol.protocol,
       deploymentId: result.deployment.id,
+      ...(transactionId ? { transactionId } : {}),
+      ...(previous ? { restoreTarget: {
+        protocol: previous.protocol,
+        deploymentId: previous.deploymentId,
+        ...(previous.transactionId ? { transactionId: previous.transactionId } : {}),
+        ...(previous.restoreTarget ? { restoreTarget: previous.restoreTarget } : {}),
+      } } : {}),
     });
   } catch (cause) {
     const failures: unknown[] = [cause];
@@ -680,13 +854,20 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
 async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies) {
   const [agent, ...agentArgs] = parsed.operands;
   if (agent !== "opencode") throw new CliError({ code: "INVALID_ARGUMENT", message: "run requires opencode as its first argument.", exitCode: EXIT_CODES.usage });
-  const binding = await new RuntimeBindingStore(credentialStore(dependencies)).load(parsed.profile);
-  if (!binding) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
-  if (Date.parse(binding.expiresAt) <= Date.now()) throw new CliError({ code: "RUNTIME_CREDENTIAL_EXPIRED", message: "The stored runtime credential has expired; reconnect to rotate it.", exitCode: EXIT_CODES.authentication });
+  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
+  if (detection.status !== "installed") {
+    throw new CliError({ code: "AGENT_NOT_FOUND", message: "OpenCode executable was not found; install OpenCode before using the launcher.", exitCode: EXIT_CODES.unavailable });
+  }
+  const runtime = await runtimeCredentialForLaunch(parsed, dependencies);
+  const binding = runtime.binding;
   const environment: NodeJS.ProcessEnv = { ...(dependencies.environment ?? process.env), APEXNOVA_API_KEY: binding.secret.reveal() };
   const exitCode = await (dependencies.launchOpenCode ?? defaultLaunchOpenCode)(agentArgs, environment);
   if (exitCode !== 0) throw new CliError({ code: "AGENT_EXITED", message: `OpenCode exited with code ${exitCode}.`, exitCode: EXIT_CODES.runtime, details: { agentExitCode: exitCode } });
-  return { data: { agentId: "opencode", profile: parsed.profile, deploymentId: binding.deploymentId, exited: true, agentExitCode: 0 }, warnings: [] as readonly string[], human: "OpenCode exited successfully." };
+  return {
+    data: { agentId: "opencode", profile: parsed.profile, deploymentId: binding.deploymentId, credentialExpiresAt: binding.expiresAt, credentialRotated: runtime.rotated, exited: true, agentExitCode: 0 },
+    warnings: runtime.warnings,
+    human: `${runtime.rotated ? "Runtime credential renewed.\n" : ""}OpenCode exited successfully.`,
+  };
 }
 
 async function executeVerify(parsed: ParsedArguments, dependencies: CliDependencies) {
@@ -696,8 +877,51 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   const inspection = await (dependencies.inspectOpenCode ?? inspectOpenCode)(detection);
   const valid = inspection.status === "configured" && inspection.managed && inspection.provider?.modelIds.length;
   if (!valid) throw new CliError({ code: "VERIFICATION_FAILED", message: inspection.warnings[0] ?? "OpenCode is not configured with a usable Apexnova provider.", exitCode: EXIT_CODES.verification, details: { status: inspection.status, managed: inspection.managed } });
-  const warnings = ["Configuration verification passed; live inference verification is gated on H1 runtime credentials."];
-  return { data: { valid: true, level: "configuration", agentId: "opencode", configPath: inspection.configPath, protocol: inspection.provider?.protocol, models: inspection.provider?.modelIds }, warnings, human: `OpenCode configuration is valid for ${inspection.provider?.modelIds.join(", ")}. Live inference was not tested.` };
+  const configuration = { agentId: "opencode", configPath: inspection.configPath, protocol: inspection.provider?.protocol, models: inspection.provider?.modelIds };
+  if (!parsed.live) {
+    const warnings = ["Configuration verification passed; use --live to perform a minimal inference check."];
+    return { data: { valid: true, level: "configuration", ...configuration }, warnings, human: `OpenCode configuration is valid for ${inspection.provider?.modelIds.join(", ")}. Live inference was not tested.` };
+  }
+
+  const binding = await new RuntimeBindingStore(credentialStore(dependencies)).load(parsed.profile);
+  if (!binding) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
+  if (Date.parse(binding.expiresAt) <= Date.now()) throw new CliError({ code: "RUNTIME_CREDENTIAL_EXPIRED", message: "The stored runtime credential has expired; reconnect before live verification.", exitCode: EXIT_CODES.authentication });
+  if (binding.protocol !== "openai-responses" && binding.protocol !== "openai-chat") {
+    throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: `Live verification does not support ${binding.protocol}.`, exitCode: EXIT_CODES.unavailable });
+  }
+  const service = hubService(parsed, dependencies);
+  const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
+  const deployment = catalog.deployments.find((item) => item.id === binding.deploymentId);
+  const protocol = deployment?.protocols.find((item) => item.protocol === binding.protocol);
+  if (!deployment || !protocol || !inspection.provider?.modelIds.includes(deployment.inferenceAlias)) {
+    throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential no longer matches the visible catalog and OpenCode configuration.", exitCode: EXIT_CODES.verification });
+  }
+  const estimate = await service.estimatePricing(parsed.profile, deployment.id, LIVE_VERIFY_ESTIMATE_USAGE, operationSignal(parsed));
+  if (!parsed.yes) {
+    throw new CliError({
+      code: "APPROVAL_REQUIRED",
+      message: `Hub estimates ${estimate.amount} ${estimate.currency} for the verification assumption; this is not a spending cap. Re-run with --yes to approve the request.`,
+      exitCode: EXIT_CODES.permission,
+      details: { estimate, estimateAssumptions: LIVE_VERIFY_ESTIMATE_USAGE },
+    });
+  }
+  const environment = dependencies.environment ?? process.env;
+  const inference = await (dependencies.verifyHubInference ?? verifyHubInference)({
+    endpoint: protocol.baseUrl,
+    protocol: binding.protocol,
+    model: deployment.inferenceAlias,
+    deploymentId: deployment.id,
+    runtimeCredential: binding.secret,
+    requestTimeoutMs: parsed.timeoutSeconds * 1_000,
+    allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
+    ...(environment.APEXNOVA_HUB_LOOPBACK_HOST_ALIAS ? { loopbackHostAlias: environment.APEXNOVA_HUB_LOOPBACK_HOST_ALIAS } : {}),
+    signal: operationSignal(parsed),
+  });
+  return {
+    data: { valid: true, level: "live", ...configuration, estimate, estimateAssumptions: LIVE_VERIFY_ESTIMATE_USAGE, inference },
+    warnings: [] as readonly string[],
+    human: [`OpenCode live verification passed for ${inference.requestedModel}.`, `Deployment: ${inference.deploymentId}`, `Resolved model: ${inference.resolvedModel}`, `Request: ${inference.requestId}`, `Non-binding estimate: ${estimate.amount} ${estimate.currency} (${LIVE_VERIFY_ESTIMATE_USAGE.inputTokens} input + ${LIVE_VERIFY_ESTIMATE_USAGE.outputTokens} output tokens assumed)`].join("\n"),
+  };
 }
 
 async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependencies) {
@@ -760,13 +984,70 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
   const receipt = await executor.getReceipt(transactionId);
   if (parsed.dryRun) return { data: { dryRun: true, transactionId, planId: receipt.planId }, warnings: ["Dry-run did not restore files."], human: `Transaction ${transactionId} can be restored. No files were changed.` };
   if (!parsed.yes) throw new CliError({ code: "APPROVAL_REQUIRED", message: "restore requires --yes after reviewing the transaction or --dry-run.", exitCode: EXIT_CODES.permission });
-  await executor.rollback(receipt);
   const warnings: string[] = [];
   let runtimeCredentialRevoked: boolean | undefined;
+  let runtimeCredentialRestored = false;
+  const bindings = summary?.integrationId === "opencode" ? new RuntimeBindingStore(credentialStore(dependencies)) : undefined;
+  const binding = bindings ? await bindings.load(parsed.profile) : null;
+  if (binding?.transactionId && binding.transactionId !== transactionId) {
+    throw new CliError({ code: "RESTORE_ORDER_CONFLICT", message: `Restore ${binding.transactionId} before restoring ${transactionId}.`, exitCode: EXIT_CODES.conflict });
+  }
+
+  let replacement: typeof binding = null;
+  if (binding?.restoreTarget) {
+    const service = hubService(parsed, dependencies);
+    const target = binding.restoreTarget;
+    const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
+    const deployment = catalog.deployments.find((item) => item.id === target.deploymentId);
+    const protocol = deployment?.protocols.find((item) => item.protocol === target.protocol);
+    if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
+      throw new CliError({ code: "BINDING_MISMATCH", message: "The previous runtime target is no longer available; configuration was not restored.", exitCode: EXIT_CODES.verification });
+    }
+    const created = await service.createRuntimeCredential(parsed.profile, {
+      name: `OpenCode (${parsed.profile})`,
+      protocols: [target.protocol],
+      publicDeploymentIds: [target.deploymentId],
+      expiresIn: 86_400,
+    }, operationSignal(parsed));
+    try {
+      const active = (await service.runtimeCredentials(parsed.profile, operationSignal(parsed))).find((item) => item.credentialId === created.credentialId);
+      if (!active || !active.protocols.includes(target.protocol) || !active.publicDeploymentIds.includes(target.deploymentId)) {
+        throw new CliError({ code: "VERIFICATION_FAILED", message: "The restored runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
+      }
+      replacement = {
+        credentialId: created.credentialId,
+        secret: created.secret,
+        expiresAt: created.expiresAt,
+        protocol: target.protocol,
+        deploymentId: target.deploymentId,
+        ...(target.transactionId ? { transactionId: target.transactionId } : {}),
+        ...(target.restoreTarget ? { restoreTarget: target.restoreTarget } : {}),
+      };
+    } catch (cause) {
+      await service.revokeRuntimeCredential(parsed.profile, created.credentialId, operationSignal(parsed)).catch(() => {});
+      throw cause;
+    }
+  }
+
+  try {
+    await executor.rollback(receipt);
+  } catch (cause) {
+    if (replacement) await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, operationSignal(parsed)).catch(() => {});
+    throw cause;
+  }
   if (summary?.integrationId === "opencode") {
-    const bindings = new RuntimeBindingStore(credentialStore(dependencies));
-    const binding = await bindings.load(parsed.profile);
     if (binding) {
+      if (replacement && bindings) {
+        try {
+          await bindings.save(parsed.profile, replacement);
+          runtimeCredentialRestored = true;
+        } catch (cause) {
+          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, operationSignal(parsed)).catch(() => {});
+          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, operationSignal(parsed)).catch(() => {});
+          await bindings.delete(parsed.profile).catch(() => {});
+          throw new CliError({ code: "RESTORE_BINDING_INCOMPLETE", message: "Configuration was restored, but the replacement runtime credential could not be saved; the profile was disconnected.", exitCode: EXIT_CODES.recovery, cause });
+        }
+      }
       try {
         await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, operationSignal(parsed));
         runtimeCredentialRevoked = true;
@@ -774,10 +1055,14 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
         runtimeCredentialRevoked = false;
         warnings.push(`Runtime credential ${binding.credentialId} could not be revoked from Hub; revoke the device or credential manually.`);
       }
-      await bindings.delete(parsed.profile);
+      if (!replacement) await bindings?.delete(parsed.profile);
     }
   }
-  return { data: { restored: true, transactionId, planId: receipt.planId, ...(runtimeCredentialRevoked === undefined ? {} : { runtimeCredentialRevoked }) }, warnings, human: `Restored transaction ${transactionId}.${runtimeCredentialRevoked === false ? " Runtime credential requires manual revocation." : ""}` };
+  return {
+    data: { restored: true, transactionId, planId: receipt.planId, runtimeCredentialRestored, ...(runtimeCredentialRevoked === undefined ? {} : { runtimeCredentialRevoked }) },
+    warnings,
+    human: `Restored transaction ${transactionId}.${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? " Runtime credential requires manual revocation." : ""}`,
+  };
 }
 
 function normalizeError(error: unknown): CliError {
@@ -787,6 +1072,14 @@ function normalizeError(error: unknown): CliError {
       code: error.code,
       message: error.message,
       exitCode: EXIT_CODES.conflict,
+      cause: error,
+    });
+  }
+  if (error instanceof OpenCodeConfigError) {
+    return new CliError({
+      code: error.code,
+      message: error.message,
+      exitCode: error.code === "INVALID_CONFIG" || error.code === "LEGACY_CONFIG" ? EXIT_CODES.conflict : EXIT_CODES.usage,
       cause: error,
     });
   }

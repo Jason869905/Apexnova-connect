@@ -108,4 +108,73 @@ describe("HubControlPlaneClient", () => {
     expect(result.credentialId).toBe("rtc_123");
     expect(JSON.stringify(result)).not.toContain("anrt_super-secret");
   });
+
+  it("returns the non-binding token estimate used by live verification", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      deploymentId: "deployment.nova",
+      model: "nova",
+      currency: "USD",
+      billingMode: "token",
+      listAmount: "0.000120",
+      discountRate: "0.5",
+      amount: "0.000060",
+      priceVersion: "2026-09-05T10:00:00Z",
+      estimateOnly: true,
+    }));
+
+    const result = await client(fetch).estimatePricing("deployment.nova", { inputTokens: 64, outputTokens: 256 });
+
+    expect(result).toMatchObject({ amount: "0.000060", estimateOnly: true });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("https://hub.example.test/v1/pricing/estimate"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ deploymentId: "deployment.nova", usage: { inputTokens: 64, outputTokens: 256 } }),
+      }),
+    );
+  });
+
+  it("rejects an estimate for a different deployment", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      deploymentId: "deployment.other",
+      model: "other",
+      currency: "USD",
+      billingMode: "token",
+      listAmount: "0.000120",
+      amount: "0.000120",
+      estimateOnly: true,
+    }));
+
+    await expect(client(fetch).estimatePricing("deployment.nova", { inputTokens: 64, outputTokens: 256 }))
+      .rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("lists active runtime credential metadata without exposing secrets", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      items: [{
+        credentialId: "rtc_123",
+        name: "OpenCode",
+        prefix: "anrt_abcd...wxyz",
+        deviceId: "device_123",
+        workspaceId: null,
+        protocols: ["openai-responses"],
+        publicDeploymentIds: ["deployment.nova"],
+        expiresAt: "2026-09-06T10:00:00Z",
+        createdAt: "2026-09-05T10:00:00Z",
+        lastUsedAt: null,
+      }],
+      nextCursor: null,
+    }));
+
+    await expect(client(fetch).runtimeCredentials()).resolves.toEqual([{
+      credentialId: "rtc_123",
+      name: "OpenCode",
+      prefix: "anrt_abcd...wxyz",
+      deviceId: "device_123",
+      protocols: ["openai-responses"],
+      publicDeploymentIds: ["deployment.nova"],
+      expiresAt: "2026-09-06T10:00:00Z",
+      createdAt: "2026-09-05T10:00:00Z",
+    }]);
+  });
 });

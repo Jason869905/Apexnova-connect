@@ -11,7 +11,10 @@ import {
   type HubAccountSummary,
   type HubBalance,
   type HubCatalogSnapshot,
+  type HubPricingEstimate,
+  type HubPricingUsage,
   type HubTokenSet,
+  type RuntimeCredentialSummary,
 } from "@apexnova-connect/hub-client";
 
 const DEFAULT_SCOPE = [
@@ -25,7 +28,9 @@ export interface HubCommandService {
   whoami(profileId: string, signal?: AbortSignal): Promise<HubAccountSummary>;
   balance(profileId: string, signal?: AbortSignal): Promise<HubBalance>;
   catalog(profileId: string, signal?: AbortSignal): Promise<HubCatalogSnapshot>;
+  estimatePricing(profileId: string, deploymentId: string, usage: HubPricingUsage, signal?: AbortSignal): Promise<HubPricingEstimate>;
   createRuntimeCredential(profileId: string, input: CreateRuntimeCredentialInput, signal?: AbortSignal): Promise<CreatedRuntimeCredential>;
+  runtimeCredentials(profileId: string, signal?: AbortSignal): Promise<readonly RuntimeCredentialSummary[]>;
   revokeRuntimeCredential(profileId: string, credentialId: string, signal?: AbortSignal): Promise<void>;
 }
 
@@ -75,7 +80,9 @@ export function createDefaultHubCommandService(options: DefaultHubCommandService
     whoami: (profileId, signal) => control(profileId).me(signal),
     balance: (profileId, signal) => control(profileId).balance(signal),
     catalog: (profileId, signal) => control(profileId).catalog(signal),
+    estimatePricing: (profileId, deploymentId, usage, signal) => control(profileId).estimatePricing(deploymentId, usage, signal),
     createRuntimeCredential: (profileId, input, signal) => control(profileId).createRuntimeCredential(input, signal),
+    runtimeCredentials: (profileId, signal) => control(profileId).runtimeCredentials(signal),
     revokeRuntimeCredential: (profileId, credentialId, signal) => control(profileId).revokeRuntimeCredential(credentialId, signal),
   };
 }

@@ -5,6 +5,10 @@ export {
   HubControlPlaneClient,
   type HubControlPlaneClientOptions,
 } from "./control-plane-client.js";
+export {
+  verifyHubInference,
+  type VerifyHubInferenceOptions,
+} from "./inference-client.js";
 export { HubSessionStore, type HubSessionStoreOptions } from "./session-store.js";
 export type {
   DeviceAuthorization,
@@ -24,4 +28,8 @@ export type {
   HubCatalogProvider,
   HubCatalogSnapshot,
   HubPromoCredit,
+  HubPricingEstimate,
+  HubPricingUsage,
+  HubInferenceVerification,
+  RuntimeCredentialSummary,
 } from "./types.js";

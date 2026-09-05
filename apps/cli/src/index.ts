@@ -1,5 +1,6 @@
 export {
   EXIT_CODES,
+  resolveOpenCodeExecutable,
   runCli,
   type CliDependencies,
   type CliIo,
@@ -13,4 +14,5 @@ export {
 export {
   RuntimeBindingStore,
   type RuntimeCredentialBinding,
+  type RuntimeCredentialRestoreTarget,
 } from "./runtime-binding-store.js";

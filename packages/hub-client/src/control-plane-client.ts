@@ -11,6 +11,9 @@ import type {
   HubCatalogProtocol,
   HubCatalogProvider,
   HubCatalogSnapshot,
+  HubPricingEstimate,
+  HubPricingUsage,
+  RuntimeCredentialSummary,
 } from "./types.js";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -56,6 +59,12 @@ function optionalString(value: unknown, field: string): string | undefined {
 function timestamp(value: unknown, field: string): string {
   const result = string(value, field, 64);
   if (!Number.isFinite(Date.parse(result))) throw invalid(field);
+  return result;
+}
+
+function money(value: unknown, field: string): string {
+  const result = string(value, field, 128);
+  if (!MONEY.test(result)) throw invalid(field);
   return result;
 }
 
@@ -247,7 +256,6 @@ export class HubControlPlaneClient {
 
   async balance(signal?: AbortSignal): Promise<HubBalance> {
     const item = object(await this.#request("/v1/billing/balance", signal ? { signal } : {}), "balance");
-    const money = (value: unknown, field: string) => { const result = string(value, field, 128); if (!MONEY.test(result)) throw invalid(field); return result; };
     return {
       currency: string(item.currency, "balance.currency", 3),
       normalBalance: money(item.normalBalance, "balance.normalBalance"),
@@ -260,6 +268,33 @@ export class HubControlPlaneClient {
       asOf: timestamp(item.asOf, "balance.asOf"),
       ...(item.eligiblePromo === undefined ? {} : { eligiblePromo: money(item.eligiblePromo, "balance.eligiblePromo") }),
       ...(item.effectiveAvailable === undefined ? {} : { effectiveAvailable: money(item.effectiveAvailable, "balance.effectiveAvailable") }),
+    };
+  }
+
+  async estimatePricing(
+    deploymentId: string,
+    usage: HubPricingUsage,
+    signal?: AbortSignal,
+  ): Promise<HubPricingEstimate> {
+    if (!deploymentId || deploymentId.length > 256) {
+      throw new HubClientError("INVALID_CONFIG", "deploymentId is invalid.");
+    }
+    const item = object(await this.#request("/v1/pricing/estimate", {
+      method: "POST",
+      body: { deploymentId, usage },
+      ...(signal ? { signal } : {}),
+    }), "pricing estimate");
+    if (item.estimateOnly !== true || item.deploymentId !== deploymentId) throw invalid("pricing estimate");
+    return {
+      deploymentId: string(item.deploymentId, "pricing estimate.deploymentId", 256),
+      model: string(item.model, "pricing estimate.model", 512),
+      currency: string(item.currency, "pricing estimate.currency", 3),
+      billingMode: string(item.billingMode, "pricing estimate.billingMode", 64),
+      listAmount: money(item.listAmount, "pricing estimate.listAmount"),
+      ...(item.discountRate === undefined ? {} : { discountRate: money(item.discountRate, "pricing estimate.discountRate") }),
+      amount: money(item.amount, "pricing estimate.amount"),
+      ...(item.priceVersion === undefined ? {} : { priceVersion: timestamp(item.priceVersion, "pricing estimate.priceVersion") }),
+      estimateOnly: true,
     };
   }
 
@@ -284,6 +319,25 @@ export class HubControlPlaneClient {
       ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "runtime credential.workspaceId", 256) }),
       ...(item.deviceId === undefined ? {} : { deviceId: string(item.deviceId, "runtime credential.deviceId", 256) }),
     };
+  }
+
+  async runtimeCredentials(signal?: AbortSignal): Promise<readonly RuntimeCredentialSummary[]> {
+    const root = object(await this.#request("/v1/runtime-credentials", signal ? { signal } : {}), "runtime credentials");
+    return array(root.items, "runtime credentials.items", (value) => {
+      const item = object(value, "runtime credential");
+      return {
+        credentialId: string(item.credentialId, "runtime credential.credentialId", 256),
+        name: string(item.name, "runtime credential.name", 256),
+        prefix: string(item.prefix, "runtime credential.prefix", 256),
+        ...(item.deviceId === null || item.deviceId === undefined ? {} : { deviceId: string(item.deviceId, "runtime credential.deviceId", 256) }),
+        ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "runtime credential.workspaceId", 256) }),
+        protocols: strings(item.protocols, "runtime credential.protocols"),
+        publicDeploymentIds: strings(item.publicDeploymentIds, "runtime credential.publicDeploymentIds"),
+        ...(item.expiresAt === null || item.expiresAt === undefined ? {} : { expiresAt: timestamp(item.expiresAt, "runtime credential.expiresAt") }),
+        createdAt: timestamp(item.createdAt, "runtime credential.createdAt"),
+        ...(item.lastUsedAt === null || item.lastUsedAt === undefined ? {} : { lastUsedAt: timestamp(item.lastUsedAt, "runtime credential.lastUsedAt") }),
+      };
+    });
   }
 
   async revokeRuntimeCredential(id: string, signal?: AbortSignal): Promise<void> {

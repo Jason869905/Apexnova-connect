@@ -44,7 +44,7 @@ export interface OpenCodeDetection {
 export interface OpenCodeManagedProvider {
   readonly id: typeof OPENCODE_PROVIDER_ID;
   readonly name?: string;
-  readonly package?: string;
+  readonly npm?: string;
   readonly protocol?: "openai-responses" | "openai-chat-completions" | "unknown";
   readonly baseUrl?: string;
   readonly environmentVariables: readonly string[];
@@ -276,8 +276,8 @@ function inferProtocol(
   packageName: string | undefined,
 ): NonNullable<OpenCodeManagedProvider["protocol"]> {
   if (!packageName) return "unknown";
-  if (packageName.endsWith("/responses")) return "openai-responses";
-  if (packageName.includes("openai-compatible")) return "openai-chat-completions";
+  if (packageName === "@ai-sdk/openai") return "openai-responses";
+  if (packageName === "@ai-sdk/openai-compatible") return "openai-chat-completions";
   return "unknown";
 }
 
@@ -331,17 +331,27 @@ export async function inspectOpenCode(
     };
   }
 
-  if ("provider" in value && !("providers" in value)) {
+  if ("providers" in value) {
     return {
       agentId: "opencode",
       configPath: detection.configPath,
       status: "legacy",
       managed: false,
-      warnings: ["Legacy OpenCode provider configuration was detected; migrate to OpenCode v2 before connecting."],
+      warnings: ["Unsupported plural OpenCode providers configuration was detected; migrate it to the current provider/npm/options schema before connecting."],
     };
   }
 
-  const providers = isJsonObject(value.providers) ? value.providers : {};
+  if ("provider" in value && !isJsonObject(value.provider)) {
+    return {
+      agentId: "opencode",
+      configPath: detection.configPath,
+      status: "invalid",
+      managed: false,
+      warnings: ["OpenCode configuration is invalid: provider must be an object."],
+    };
+  }
+
+  const providers = isJsonObject(value.provider) ? value.provider : {};
   const provider = isJsonObject(providers[OPENCODE_PROVIDER_ID])
     ? providers[OPENCODE_PROVIDER_ID]
     : undefined;
@@ -355,10 +365,10 @@ export async function inspectOpenCode(
     };
   }
 
-  const settings = isJsonObject(provider.settings) ? provider.settings : {};
+  const settings = isJsonObject(provider.options) ? provider.options : {};
   const models = isJsonObject(provider.models) ? provider.models : {};
   const providerName = optionalString(provider.name);
-  const packageName = optionalString(provider.package);
+  const packageName = optionalString(provider.npm);
   const baseUrl = sanitizeBaseUrl(optionalString(settings.baseURL));
   const defaultModel = optionalString(value.model);
   const providerPrefix = `${OPENCODE_PROVIDER_ID}/`;
@@ -371,7 +381,7 @@ export async function inspectOpenCode(
     provider: {
       id: OPENCODE_PROVIDER_ID,
       ...(providerName ? { name: providerName } : {}),
-      ...(packageName ? { package: packageName } : {}),
+      ...(packageName ? { npm: packageName } : {}),
       protocol: inferProtocol(packageName),
       ...(baseUrl.value ? { baseUrl: baseUrl.value } : {}),
       environmentVariables: stringArray(provider.env),

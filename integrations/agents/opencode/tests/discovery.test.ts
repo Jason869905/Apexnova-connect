@@ -96,12 +96,12 @@ describe("OpenCode inspection", () => {
   // unrelated user setting
   "theme": "system",
   "model": "apexnova/nova-coder",
-  "providers": {
+  "provider": {
     "apexnova": {
       "name": "Apexnova AI Hub",
       "env": ["APEXNOVA_API_KEY"],
-      "package": "@opencode-ai/ai/providers/openai-compatible/responses",
-      "settings": { "baseURL": "https://api.example.test/v1" },
+      "npm": "@ai-sdk/openai",
+      "options": { "apiKey": "{env:APEXNOVA_API_KEY}", "baseURL": "https://api.example.test/v1" },
       "models": { "nova-coder": { "name": "Nova Coder" } }
     }
   }
@@ -125,7 +125,7 @@ describe("OpenCode inspection", () => {
       provider: {
         id: "apexnova",
         name: "Apexnova AI Hub",
-        package: "@opencode-ai/ai/providers/openai-compatible/responses",
+        npm: "@ai-sdk/openai",
         protocol: "openai-responses",
         baseUrl: "https://api.example.test/v1",
         environmentVariables: ["APEXNOVA_API_KEY"],
@@ -151,7 +151,7 @@ describe("OpenCode inspection", () => {
       warnings: [],
     };
 
-    await writeFile(configPath, '{ "provider": {} }\n', "utf8");
+    await writeFile(configPath, '{ "providers": {} }\n', "utf8");
     expect((await inspectOpenCode(baseDetection)).status).toBe("legacy");
 
     await writeFile(configPath, '{ "secret": "must-not-leak",', "utf8");
@@ -166,9 +166,9 @@ describe("OpenCode inspection", () => {
     await writeFile(
       configPath,
       JSON.stringify({
-        providers: {
+        provider: {
           apexnova: {
-            settings: { baseURL: "https://user:secret@example.test/v1?api_key=hidden#token" },
+            options: { baseURL: "https://user:secret@example.test/v1?api_key=hidden#token" },
             models: {},
           },
         },
