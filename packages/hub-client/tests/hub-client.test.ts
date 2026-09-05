@@ -176,6 +176,14 @@ describe("HubOAuthClient", () => {
     expect(
       () =>
         new HubOAuthClient({
+          baseUrl: "http://api.localhost:18080",
+          clientId: "client",
+          allowInsecureLoopback: true,
+        }),
+    ).not.toThrow();
+    expect(
+      () =>
+        new HubOAuthClient({
           baseUrl: "https://hub.example.test",
           clientId: "client",
           tokenPath: "//attacker.example/token",

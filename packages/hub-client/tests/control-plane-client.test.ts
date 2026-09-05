@@ -71,6 +71,31 @@ describe("HubControlPlaneClient", () => {
     await expect(client(fetch).catalog()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
+  it("allows HTTP catalog URLs only for an explicitly enabled loopback Hub", async () => {
+    const response = (baseUrl: string) => json({
+      schemaVersion: "0.1", catalogVersion: "cat_local", generatedAt: "2026-09-03T12:00:00Z", expiresAt: "2026-09-03T12:15:00Z", providers: [], models: [],
+      deployments: [{ id: "deployment.nova", providerId: "provider.hub", modelId: "model.nova", displayName: "Nova", inferenceAlias: "nova", protocols: [{ protocol: "openai-chat", baseUrl }], capabilities: [], availability: { status: "available" } }],
+    });
+    const loopbackFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response("http://api.localhost:18080/v1/chat/completions"));
+    const loopback = new HubControlPlaneClient({
+      baseUrl: "http://localhost:18080",
+      accessToken: async () => SecretValue.from("oauth-secret"),
+      allowInsecureLoopback: true,
+      fetch: loopbackFetch,
+    });
+
+    await expect(loopback.catalog()).resolves.toMatchObject({ catalogVersion: "cat_local" });
+
+    const remoteFetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response("http://api.example.test/v1/chat/completions"));
+    const remote = new HubControlPlaneClient({
+      baseUrl: "https://hub.example.test",
+      accessToken: async () => SecretValue.from("oauth-secret"),
+      allowInsecureLoopback: true,
+      fetch: remoteFetch,
+    });
+    await expect(remote.catalog()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
   it("returns a one-time runtime secret as SecretValue", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
       credentialId: "rtc_123",

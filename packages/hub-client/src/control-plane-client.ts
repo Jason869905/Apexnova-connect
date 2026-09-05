@@ -27,7 +27,12 @@ export interface HubControlPlaneClientOptions {
 type JsonObject = Record<string, unknown>;
 
 function isInsecureLoopback(url: URL): boolean {
-  return url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  return url.protocol === "http:" && (
+    url.hostname === "localhost" ||
+    url.hostname.endsWith(".localhost") ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]"
+  );
 }
 
 function object(value: unknown, field: string): JsonObject {
@@ -68,11 +73,11 @@ function invalid(field: string): HubClientError {
   return new HubClientError("INVALID_RESPONSE", `Apexnova AI Hub returned an invalid ${field}.`);
 }
 
-function safeHttpsUrl(value: unknown, field: string): string {
+function safeHttpsUrl(value: unknown, field: string, allowInsecureLoopback: boolean): string {
   const raw = string(value, field);
   let url: URL;
   try { url = new URL(raw); } catch { throw invalid(field); }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw invalid(field);
+  if ((url.protocol !== "https:" && !(allowInsecureLoopback && isInsecureLoopback(url))) || url.username || url.password || url.search || url.hash) throw invalid(field);
   return url.toString().replace(/\/$/, "");
 }
 
@@ -100,22 +105,22 @@ function parseModel(value: unknown): HubCatalogModel {
   };
 }
 
-function parseProtocol(value: unknown): HubCatalogProtocol {
+function parseProtocol(value: unknown, allowInsecureLoopback: boolean): HubCatalogProtocol {
   const item = object(value, "deployment.protocol");
   return {
     protocol: string(item.protocol, "deployment.protocol.protocol", 128),
-    baseUrl: safeHttpsUrl(item.baseUrl, "deployment.protocol.baseUrl"),
+    baseUrl: safeHttpsUrl(item.baseUrl, "deployment.protocol.baseUrl", allowInsecureLoopback),
   };
 }
 
-function parseDeployment(value: unknown): HubCatalogDeployment {
+function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCatalogDeployment {
   const item = object(value, "deployment");
   const availabilityObject = object(item.availability, "deployment.availability");
   const availability = string(availabilityObject.status, "deployment.availability.status", 32);
   if (!["available", "degraded", "maintenance", "unavailable"].includes(availability)) {
     throw invalid("deployment.availability.status");
   }
-  const protocols = array(item.protocols, "deployment.protocols", parseProtocol);
+  const protocols = array(item.protocols, "deployment.protocols", (protocol) => parseProtocol(protocol, allowInsecureLoopback));
   if (protocols.length === 0) throw invalid("deployment.protocols");
   return {
     id: string(item.id, "deployment.id", 256),
@@ -150,6 +155,7 @@ export class HubControlPlaneClient {
   readonly #accessToken: HubControlPlaneClientOptions["accessToken"];
   readonly #fetch: typeof globalThis.fetch;
   readonly #requestTimeoutMs: number;
+  readonly #allowInsecureLoopback: boolean;
 
   constructor(options: HubControlPlaneClientOptions) {
     try { this.#baseUrl = new URL(options.baseUrl); } catch (cause) {
@@ -164,6 +170,7 @@ export class HubControlPlaneClient {
     this.#accessToken = options.accessToken;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
+    this.#allowInsecureLoopback = options.allowInsecureLoopback ?? false;
   }
 
   async #request(path: string, init: { readonly method?: "GET" | "POST" | "DELETE"; readonly body?: unknown; readonly signal?: AbortSignal } = {}): Promise<unknown> {
@@ -261,7 +268,7 @@ export class HubControlPlaneClient {
     return {
       schemaVersion: string(item.schemaVersion, "catalog.schemaVersion", 32), catalogVersion: string(item.catalogVersion, "catalog.catalogVersion", 256),
       generatedAt: timestamp(item.generatedAt, "catalog.generatedAt"), expiresAt: timestamp(item.expiresAt, "catalog.expiresAt"),
-      providers: array(item.providers, "catalog.providers", parseProvider), models: array(item.models, "catalog.models", parseModel), deployments: array(item.deployments, "catalog.deployments", parseDeployment),
+      providers: array(item.providers, "catalog.providers", parseProvider), models: array(item.models, "catalog.models", parseModel), deployments: array(item.deployments, "catalog.deployments", (deployment) => parseDeployment(deployment, this.#allowInsecureLoopback)),
     };
   }
 

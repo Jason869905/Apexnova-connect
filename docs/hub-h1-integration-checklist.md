@@ -46,3 +46,22 @@
 5. 最小 live verify 和 credential 自动轮换；
 6. Windows/Linux 真实环境验收；
 7. OpenCode Integration 从 `planned` 升为 `experimental`。
+
+## 本机 Docker 验证记录（2026-09-05）
+
+Compose 项目 `apexagent` 的真实服务已完成以下验证：
+
+- `[passed]` `web` 健康检查，以及 PostgreSQL/Redis 依赖健康检查；
+- `[passed]` OAuth discovery、Device Authorization、token exchange；
+- `[passed]` `/v1/me`、余额与原子 catalog snapshot；
+- `[passed]` runtime credential 签发、推理面 Bearer 鉴权入口和成功后的自动撤销；
+- `[passed]` 指定 `glm-5.2` 的最小 `openai-chat` 真实推理返回 HTTP 200；请求 `319f02cd-44c2-4326-a9d8-4c2ee76566f9` 记录为 17 input / 93 output tokens，实扣 `0.000203 USD`；
+- `[passed with recovery]` runtime credential 与 access token 自动撤销；Hub 开发容器在首次编译 `/oauth/revoke` 时触发内存阈值重启，导致 refresh token 的第二次撤销未执行。本次设备已手工撤销，probe 已改为优先撤销 refresh token family、瞬态失败重试，再兜底撤销 access token。
+
+本地编排还暴露出三个 Hub 侧开发环境问题：
+
+1. `apexagent-nginx-1` 因宿主机 80 端口占用无法启动，直接访问 `web:3000` 会绕过 `/oauth` 与 `/v1` 的公开路径重写；
+2. 非标准端口代理必须保留原始 Host 端口，否则 discovery 会把 `localhost:PORT` 错报为 `localhost`；
+3. SaaS catalog 在本地生成 `api.localhost`，Windows Node DNS 不一定解析该特殊域名；live probe 允许用显式 `APEXNOVA_HUB_LOOPBACK_HOST_ALIAS=localhost` 仅在 loopback 测试中覆盖解析。
+
+本机计费 live verify 已通过。后续 staging 复验仍须观察 `[passed] Minimal live inference`，并确认 runtime credential、access token、refresh token 全部撤销；不得通过修改余额、跳过计费或使用控制面 token 调推理来绕过该门槛。
