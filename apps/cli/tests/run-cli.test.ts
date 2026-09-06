@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { EXIT_CODES, RuntimeBindingStore, resolveOpenCodeExecutable, runCli, type CliIo, type HubCommandService } from "../src/index.js";
+import { HubClientError } from "@apexnova-connect/hub-client";
 import type { OpenCodeDetection, OpenCodeInspection } from "@apexnova-connect/integration-opencode";
 
 function captureIo() {
@@ -50,6 +51,7 @@ function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService 
       deployments: [{ id: "deployment.nova", providerId: "provider.apexnova-ai-hub", modelId: "model.nova", displayName: "Nova Coder", inferenceAlias: "nova", aliases: ["nova"], protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }], limits: { contextWindow: 128000, maxOutputTokens: 8192 }, capabilities: ["tool.calling"], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } }],
     }),
     estimatePricing: async () => ({ deploymentId: "deployment.nova", model: "nova", currency: "USD", billingMode: "token", listAmount: "0.000120", discountRate: "0.5", amount: "0.000060", priceVersion: "2026-09-05T10:00:00Z", estimateOnly: true }),
+    usage: async () => undefined,
     createRuntimeCredential: async () => ({ credentialId: "rtc_1", expiresAt: "2099-09-05T12:00:00Z", deviceId: "device_1", secret: SecretValue.from("runtime-secret") }),
     runtimeCredentials: async () => [{ credentialId: "rtc_1", name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], expiresAt: "2099-09-05T12:00:00Z", createdAt: "2026-09-05T12:00:00Z" }],
     revokeRuntimeCredential: async () => undefined,
@@ -558,6 +560,39 @@ describe("CLI", () => {
     expect(capture.stdout()).not.toContain("runtime-secret");
   });
 
+  it("reconciles the real billed cost from the Hub after live verification", async () => {
+    const capture = captureIo();
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("default", {
+      credentialId: "rtc_1",
+      secret: SecretValue.from("runtime-secret"),
+      expiresAt: "2099-09-05T12:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    const live = vi.fn(async () => ({ status: 200, protocol: "openai-responses" as const, requestId: "req_billed", providerId: "provider.apexnova-ai-hub", requestedModel: "nova", resolvedModel: "nova", deploymentId: "deployment.nova" }));
+    const usage = vi.fn(async () => ({
+      id: "use_1", requestId: "req_billed", at: "2026-09-05T23:00:00Z", status: "success" as const,
+      resolvedModel: "nova", source: "api", currency: "USD", amount: "0.006978",
+      usage: { inputTokens: 6964, outputTokens: 7 },
+    }));
+    const result = await runCli(["verify", "opencode", "--live", "--yes", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      hubService: mockHub({ usage }),
+      detectOpenCode: async () => installed,
+      inspectOpenCode: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, provider: { id: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }),
+      verifyHubInference: live,
+      createRequestId: () => "local_billed",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output).toMatchObject({ data: { usage: { requestId: "req_billed", amount: "0.006978", currency: "USD" } } });
+    expect(output.warnings).toEqual([]);
+    expect(usage).toHaveBeenCalledWith("default", "req_billed", expect.any(AbortSignal));
+  });
+
   it("lists restore transactions without creating local state", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-restore-"));
     const capture = captureIo();
@@ -604,5 +639,63 @@ describe("CLI", () => {
     });
     expect(result.exitCode).toBe(EXIT_CODES.runtime);
     expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "INVALID_CONFIG" } });
+  });
+
+  it("retries a rate-limited control-plane call using Retry-After and succeeds", async () => {
+    const capture = captureIo();
+    let calls = 0;
+    const balance = vi.fn(async () => {
+      calls++;
+      if (calls === 1) throw new HubClientError("RATE_LIMITED", "Rate limited.", { retryable: true, retryAfterSeconds: 2 });
+      return { currency: "USD", normalBalance: "20.000000", held: "0.000000", normalAvailable: "20.000000", promoCredits: [], asOf: "2026-09-04T12:00:00Z" };
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const result = await runCli(["balance", "--json"], {
+      io: capture.io,
+      hubService: mockHub({ balance }),
+      sleep,
+      createRequestId: () => "local_retry",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(balance).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(2000, expect.any(AbortSignal));
+  });
+
+  it("stops retrying after the limit and surfaces retryAfterSeconds in the error", async () => {
+    const capture = captureIo();
+    const balance = vi.fn(async () => {
+      throw new HubClientError("RATE_LIMITED", "Rate limited.", { retryable: true, retryAfterSeconds: 1 });
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const result = await runCli(["balance", "--json"], {
+      io: capture.io,
+      hubService: mockHub({ balance }),
+      sleep,
+      createRequestId: () => "local_retry_exhausted",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.network);
+    expect(balance).toHaveBeenCalledTimes(4);
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "RATE_LIMITED", retryable: true, retryAfterSeconds: 1 } });
+  });
+
+  it("does not retry a billing-blocked error", async () => {
+    const capture = captureIo();
+    const balance = vi.fn(async () => {
+      throw new HubClientError("BILLING_BLOCKED", "Insufficient balance.", { retryable: false });
+    });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const result = await runCli(["balance", "--json"], {
+      io: capture.io,
+      hubService: mockHub({ balance }),
+      sleep,
+      createRequestId: () => "local_billing",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.billing);
+    expect(balance).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 });

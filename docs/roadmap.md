@@ -47,7 +47,7 @@ M6 能跨领域复制
 
 预计：4～6 周。目标版本：`v0.1`。
 
-当前状态：进行中，进入 M1 收口。已对齐 Hub H1 P6 OpenAPI/fixtures，并通过官方 mock、本机 Docker 和 Windows OpenCode CLI 1.18.29 的完整真实流程：device flow、账号、余额、目录、runtime credential、现行 Provider 配置、GLM 5.2 真实调用、计费归因、事务恢复与凭据撤销。CLI 已实现 `detect/inspect/login/logout/whoami/balance/models`、`connect --dry-run`、`connect --yes`、`switch`、安全 `run opencode` launcher、配置级与显式付费 `verify --live`、启动前 runtime credential 预续期、`doctor` 和事务 `restore`。剩余发布门槛是 Linux 验收和稳定 staging contract test。
+当前状态：M1 收口。已对齐 Hub H1 P6 OpenAPI/fixtures，并通过官方 mock、本机 Docker、Windows OpenCode CLI 1.18.29 和 Linux 现网（`api.apexnova-consulting.com`）的完整真实流程：device flow、账号、余额、目录、runtime credential、现行 Provider 配置、GLM 5.2 真实调用、requestId 精确对账、限流退避重试、事务恢复与凭据撤销。CLI 已实现 `detect/inspect/login/logout/whoami/balance/models`、`connect --dry-run`、`connect --yes`、`switch`、安全 `run opencode` launcher、配置级与显式付费 `verify --live`、启动前 runtime credential 预续期、`doctor` 和事务 `restore`。OpenCode Integration 已从 `planned` 升为 `experimental`。
 
 首个正式目标：OpenCode。
 

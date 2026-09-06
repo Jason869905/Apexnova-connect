@@ -177,4 +177,58 @@ describe("HubControlPlaneClient", () => {
       createdAt: "2026-09-05T10:00:00Z",
     }]);
   });
+
+  it("reconciles a single request by its requestId", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      items: [{
+        id: "use_00000000000000000000000001",
+        requestId: "55978fdf-a840-4673-b6a5-8f3e237cae6f",
+        at: "2026-09-05T23:00:00Z",
+        status: "success",
+        statusCode: null,
+        requestedModel: "glm-5.2",
+        requestedDeploymentId: "deployment.apexnova.mdl00000000000000000000001",
+        resolvedModel: "glm-5.2",
+        resolvedDeploymentId: "deployment.apexnova.mdl00000000000000000000001",
+        fallbackApplied: false,
+        workspaceId: "wsp_00000000000000000000000001",
+        source: "api",
+        usage: { inputTokens: 6964, outputTokens: 7, cachedInputTokens: 0, items: 0 },
+        currency: "USD",
+        amount: "0.006978",
+        promoCovered: "0.000000",
+        balanceCovered: "0.006978",
+        discountRate: null,
+      }],
+      nextCursor: null,
+    }));
+
+    const result = await client(fetch).usage("55978fdf-a840-4673-b6a5-8f3e237cae6f");
+
+    expect(result).toMatchObject({ requestId: "55978fdf-a840-4673-b6a5-8f3e237cae6f", amount: "0.006978", currency: "USD" });
+    expect(result?.usage).toMatchObject({ inputTokens: 6964, outputTokens: 7 });
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("https://hub.example.test/v1/billing/usage?requestId=55978fdf-a840-4673-b6a5-8f3e237cae6f"),
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer oauth-secret" }) }),
+    );
+  });
+
+  it("returns undefined when the usage record is not found or not visible", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({ items: [], nextCursor: null }));
+    await expect(client(fetch).usage("00000000-0000-0000-0000-000000000000")).resolves.toBeUndefined();
+  });
+
+  it("rejects a malformed usage record", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      items: [{ id: "use_1", requestId: "req_1", at: "not-a-date", status: "success", resolvedModel: "glm-5.2", usage: {}, currency: "USD", amount: "0.01" }],
+      nextCursor: null,
+    }));
+    await expect(client(fetch).usage("req_1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("rejects an invalid requestId argument", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    await expect(client(fetch).usage("")).rejects.toMatchObject({ code: "INVALID_CONFIG" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

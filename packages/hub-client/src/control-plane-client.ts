@@ -13,6 +13,7 @@ import type {
   HubCatalogSnapshot,
   HubPricingEstimate,
   HubPricingUsage,
+  HubUsageRecord,
   RuntimeCredentialSummary,
 } from "./types.js";
 
@@ -159,6 +160,48 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
   };
 }
 
+function parseUsageRecord(value: unknown): HubUsageRecord {
+  const item = object(value, "usage record");
+  const status = string(item.status, "usage record.status", 32);
+  if (status !== "success" && status !== "error") throw invalid("usage record.status");
+  const usage = object(item.usage, "usage record.usage");
+  const integer = (value: unknown, field: string): number | undefined => {
+    if (value === null || value === undefined) return undefined;
+    if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalid(field);
+    return value as number;
+  };
+  const statusCode = integer(item.statusCode, "usage record.statusCode");
+  const inputTokens = integer(usage.inputTokens, "usage record.usage.inputTokens");
+  const outputTokens = integer(usage.outputTokens, "usage record.usage.outputTokens");
+  const cachedInputTokens = integer(usage.cachedInputTokens, "usage record.usage.cachedInputTokens");
+  const usageItems = integer(usage.items, "usage record.usage.items");
+  return {
+    id: string(item.id, "usage record.id", 256),
+    requestId: string(item.requestId, "usage record.requestId", 512),
+    at: timestamp(item.at, "usage record.at"),
+    status,
+    ...(statusCode === undefined ? {} : { statusCode }),
+    ...(item.requestedModel === null || item.requestedModel === undefined ? {} : { requestedModel: string(item.requestedModel, "usage record.requestedModel", 512) }),
+    ...(item.requestedDeploymentId === null || item.requestedDeploymentId === undefined ? {} : { requestedDeploymentId: string(item.requestedDeploymentId, "usage record.requestedDeploymentId", 256) }),
+    resolvedModel: string(item.resolvedModel, "usage record.resolvedModel", 512),
+    ...(item.resolvedDeploymentId === null || item.resolvedDeploymentId === undefined ? {} : { resolvedDeploymentId: string(item.resolvedDeploymentId, "usage record.resolvedDeploymentId", 256) }),
+    ...(item.fallbackApplied === undefined ? {} : typeof item.fallbackApplied === "boolean" ? { fallbackApplied: item.fallbackApplied } : (() => { throw invalid("usage record.fallbackApplied"); })()),
+    ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "usage record.workspaceId", 256) }),
+    source: string(item.source, "usage record.source", 64),
+    usage: {
+      ...(inputTokens === undefined ? {} : { inputTokens }),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
+      ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+      ...(usageItems === undefined ? {} : { items: usageItems }),
+    },
+    currency: string(item.currency, "usage record.currency", 3),
+    amount: money(item.amount, "usage record.amount"),
+    ...(item.promoCovered === undefined ? {} : { promoCovered: money(item.promoCovered, "usage record.promoCovered") }),
+    ...(item.balanceCovered === undefined ? {} : { balanceCovered: money(item.balanceCovered, "usage record.balanceCovered") }),
+    ...(item.discountRate === null || item.discountRate === undefined ? {} : { discountRate: money(item.discountRate, "usage record.discountRate") }),
+  };
+}
+
 export class HubControlPlaneClient {
   readonly #baseUrl: URL;
   readonly #accessToken: HubControlPlaneClientOptions["accessToken"];
@@ -269,6 +312,15 @@ export class HubControlPlaneClient {
       ...(item.eligiblePromo === undefined ? {} : { eligiblePromo: money(item.eligiblePromo, "balance.eligiblePromo") }),
       ...(item.effectiveAvailable === undefined ? {} : { effectiveAvailable: money(item.effectiveAvailable, "balance.effectiveAvailable") }),
     };
+  }
+
+  async usage(requestId: string, signal?: AbortSignal): Promise<HubUsageRecord | undefined> {
+    if (!requestId || requestId.length > 512 || /[\u0000-\u001f\u007f]/.test(requestId)) {
+      throw new HubClientError("INVALID_CONFIG", "requestId is invalid.");
+    }
+    const root = object(await this.#request(`/v1/billing/usage?requestId=${encodeURIComponent(requestId)}`, signal ? { signal } : {}), "usage list");
+    const items = array(root.items, "usage.items", parseUsageRecord);
+    return items[0];
   }
 
   async estimatePricing(

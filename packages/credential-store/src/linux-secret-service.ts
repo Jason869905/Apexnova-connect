@@ -43,6 +43,7 @@ export class LinuxSecretServiceBackend implements CredentialBackend {
         executable: "secret-tool",
         args: ["lookup", "service", service, "account", account],
       });
+      if (result.exitCode === 1) return null;
       if (result.exitCode !== 0) throw backendFailure("Secret Service");
       if (result.stdout.length === 0) return null;
       return result.stdout;
@@ -58,6 +59,7 @@ export class LinuxSecretServiceBackend implements CredentialBackend {
         executable: "secret-tool",
         args: ["clear", "service", service, "account", account],
       });
+      if (result.exitCode === 1) return;
       if (result.exitCode !== 0) throw backendFailure("Secret Service");
     } catch (cause) {
       if (cause instanceof CredentialStoreError) throw cause;

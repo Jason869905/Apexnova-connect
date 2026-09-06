@@ -71,3 +71,18 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 3. SaaS catalog 在本地生成 `api.localhost`，Windows Node DNS 不一定解析该特殊域名；live probe 允许用显式 `APEXNOVA_HUB_LOOPBACK_HOST_ALIAS=localhost` 仅在 loopback 测试中覆盖解析。
 
 本机计费 live verify 与 Windows OpenCode 真实 Agent 流程均已通过，临时配置和活动凭据已清理。OpenCode 自身对未配置静态价格的自定义 Provider 报告 `cost: 0`，但 Hub 实际扣费 `0.006978 USD`；M1 必须继续把 Hub 余额/用量作为计费事实来源，不能展示 OpenCode 的本地 cost 为实际费用。后续发布门槛剩余稳定 staging contract test 与 Linux 真实环境验收，并须再次确认所有临时凭据撤销；不得通过修改余额、跳过计费或使用控制面 token 调推理来绕过该门槛。
+
+## Linux 现网验收记录（2026-09-06）
+
+在 WSL Ubuntu 上经 Hub 现网 `https://api.apexnova-consulting.com` 完成全流程验收。凭证后端为 `libsecret-tools` + `gnome-keyring-daemon`（D-Bus session bus），OpenCode `1.18.29` 为 Linux 原生 npm 安装（`~/.npm-global/bin/opencode`）。
+
+- `[passed]` `detect opencode` 识别 Linux 原生 OpenCode `1.18.29`，配置路径 `/home/wanke/.config/opencode/opencode.jsonc`；
+- `[passed]` OAuth device flow 登录现网，scope 含 `account:read catalog:read billing:read usage:read devices:read devices:revoke runtime-credentials:write`；
+- `[passed]` `whoami`（`testpro@test.com`，personal plan）、`balance`（`26.592538 USD`）、`models`（原子目录含 GLM-5.2 等 30+ deployment）；
+- `[passed]` `connect opencode --deployment glm-5.2 --dry-run` 与 `--yes`：runtime credential 签发、OpenCode 配置写入、配置验证均成功；
+- `[passed]` `verify opencode --live --yes`：经 `openai-responses` 调用 `glm-5.2` 真实推理返回 HTTP 200，请求 `1984d5b9-83fe-44da-859c-9222c6d6daff`；**requestId 精确对账命中**——`GET /v1/billing/usage?requestId=1984d5b9...` 返回实扣 `0.000166 USD`（17 input / 70 output tokens），非约束估价为 `0.000608 USD`（64 input / 256 output assumed），两者差异证明对账的必要性；
+- `[passed]` `restore --list` 与 `restore --yes`：配置事务逆序恢复成功；
+- `[passed]` `logout`：本地会话删除，服务端 token 撤销（`serverRevoked: true`）；
+- `[fixed]` `secret-tool lookup` 对不存在的条目返回 exit code 1（而非 0 + 空输出），`LinuxSecretServiceBackend.get` 之前将其当作后端故障抛出，导致首次 `connect`（无历史 binding）时 `RuntimeBindingStore.load` 失败。已修正：exit code 1 视为 not-found 返回 `null`，`delete` 同理容忍 exit code 1。
+
+本机计费 live verify 与 Linux 真实环境验收均已通过，临时配置和活动凭据已清理。M1 发布门槛剩余稳定 staging contract test。

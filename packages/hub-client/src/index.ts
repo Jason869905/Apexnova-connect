@@ -31,5 +31,6 @@ export type {
   HubPricingEstimate,
   HubPricingUsage,
   HubInferenceVerification,
+  HubUsageRecord,
   RuntimeCredentialSummary,
 } from "./types.js";

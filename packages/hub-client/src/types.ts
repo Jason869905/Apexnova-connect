@@ -202,3 +202,29 @@ export interface RuntimeCredentialSummary {
   readonly createdAt: string;
   readonly lastUsedAt?: string;
 }
+
+export interface HubUsageRecord {
+  readonly id: string;
+  readonly requestId: string;
+  readonly at: string;
+  readonly status: "success" | "error";
+  readonly statusCode?: number;
+  readonly requestedModel?: string;
+  readonly requestedDeploymentId?: string;
+  readonly resolvedModel: string;
+  readonly resolvedDeploymentId?: string;
+  readonly fallbackApplied?: boolean;
+  readonly workspaceId?: string;
+  readonly source: string;
+  readonly usage: {
+    readonly inputTokens?: number;
+    readonly outputTokens?: number;
+    readonly cachedInputTokens?: number;
+    readonly items?: number;
+  };
+  readonly currency: string;
+  readonly amount: string;
+  readonly promoCovered?: string;
+  readonly balanceCovered?: string;
+  readonly discountRate?: string;
+}

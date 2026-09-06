@@ -18,6 +18,7 @@ import {
   HubClientError,
   verifyHubInference,
   type HubInferenceVerification,
+  type HubUsageRecord,
   type VerifyHubInferenceOptions,
 } from "@apexnova-connect/hub-client";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
@@ -68,6 +69,7 @@ export interface CliDependencies {
   readonly verifyHubInference?: (options: VerifyHubInferenceOptions) => Promise<HubInferenceVerification>;
   readonly createRequestId?: () => string;
   readonly now?: () => Date;
+  readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface CliRunResult {
@@ -100,6 +102,7 @@ interface CliErrorShape {
   readonly code: string;
   readonly message: string;
   readonly retryable: boolean;
+  readonly retryAfterSeconds?: number;
   readonly details?: Readonly<Record<string, unknown>>;
 }
 
@@ -107,6 +110,7 @@ class CliError extends Error {
   readonly code: string;
   readonly exitCode: ExitCode;
   readonly retryable: boolean;
+  readonly retryAfterSeconds?: number;
   readonly details?: Readonly<Record<string, unknown>>;
 
   constructor(options: {
@@ -114,6 +118,7 @@ class CliError extends Error {
     readonly message: string;
     readonly exitCode: ExitCode;
     readonly retryable?: boolean;
+    readonly retryAfterSeconds?: number;
     readonly details?: Readonly<Record<string, unknown>>;
     readonly cause?: unknown;
   }) {
@@ -122,6 +127,7 @@ class CliError extends Error {
     this.code = options.code;
     this.exitCode = options.exitCode;
     this.retryable = options.retryable ?? false;
+    if (options.retryAfterSeconds !== undefined) this.retryAfterSeconds = options.retryAfterSeconds;
     if (options.details) this.details = options.details;
   }
 }
@@ -459,15 +465,63 @@ function noOperands(parsed: ParsedArguments): void {
 }
 
 function hubService(parsed: ParsedArguments, dependencies: CliDependencies): HubCommandService {
-  return dependencies.hubService ?? createDefaultHubCommandService({
+  const base = dependencies.hubService ?? createDefaultHubCommandService({
     ...(dependencies.environment ? { environment: dependencies.environment } : {}),
     ...(dependencies.platform ? { platform: dependencies.platform } : {}),
     requestTimeoutMs: parsed.timeoutSeconds * 1_000,
   });
+  return withRetryableHub(base, dependencies.sleep ?? defaultSleep);
 }
 
 function operationSignal(parsed: ParsedArguments): AbortSignal {
   return AbortSignal.timeout(parsed.timeoutSeconds * 1_000);
+}
+
+function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds);
+    if (signal) {
+      if (signal.aborted) { clearTimeout(timer); reject(signal.reason ?? new Error("aborted")); }
+      else signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("aborted")); }, { once: true });
+    }
+  });
+}
+
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  options: {
+    readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+    readonly maxRetries?: number;
+    readonly signal?: AbortSignal;
+  },
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? 3;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= maxRetries) throw error;
+      if (!(error instanceof HubClientError) || error.code !== "RATE_LIMITED") throw error;
+      const backoffMs = Math.min(Math.max(error.retryAfterSeconds ?? 1, 1), 30) * 1000;
+      await options.sleep(backoffMs, options.signal);
+    }
+  }
+}
+
+function withRetryableHub(service: HubCommandService, sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>): HubCommandService {
+  const retry = <T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> => withRetry(operation, { sleep, ...(signal ? { signal } : {}) });
+  return {
+    login: service.login,
+    logout: service.logout,
+    whoami: (profileId, signal) => retry(() => service.whoami(profileId, signal), signal),
+    balance: (profileId, signal) => retry(() => service.balance(profileId, signal), signal),
+    catalog: (profileId, signal) => retry(() => service.catalog(profileId, signal), signal),
+    estimatePricing: (profileId, deploymentId, usage, signal) => retry(() => service.estimatePricing(profileId, deploymentId, usage, signal), signal),
+    usage: (profileId, requestId, signal) => retry(() => service.usage(profileId, requestId, signal), signal),
+    createRuntimeCredential: (profileId, input, signal) => retry(() => service.createRuntimeCredential(profileId, input, signal), signal),
+    runtimeCredentials: (profileId, signal) => retry(() => service.runtimeCredentials(profileId, signal), signal),
+    revokeRuntimeCredential: (profileId, credentialId, signal) => retry(() => service.revokeRuntimeCredential(profileId, credentialId, signal), signal),
+  };
 }
 
 function credentialStore(dependencies: CliDependencies): CredentialStore {
@@ -889,6 +943,7 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   if (binding.protocol !== "openai-responses" && binding.protocol !== "openai-chat") {
     throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: `Live verification does not support ${binding.protocol}.`, exitCode: EXIT_CODES.unavailable });
   }
+  const bindingProtocol = binding.protocol;
   const service = hubService(parsed, dependencies);
   const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
   const deployment = catalog.deployments.find((item) => item.id === binding.deploymentId);
@@ -906,9 +961,9 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
     });
   }
   const environment = dependencies.environment ?? process.env;
-  const inference = await (dependencies.verifyHubInference ?? verifyHubInference)({
+  const inference = await withRetry(() => (dependencies.verifyHubInference ?? verifyHubInference)({
     endpoint: protocol.baseUrl,
-    protocol: binding.protocol,
+    protocol: bindingProtocol,
     model: deployment.inferenceAlias,
     deploymentId: deployment.id,
     runtimeCredential: binding.secret,
@@ -916,11 +971,22 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
     allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
     ...(environment.APEXNOVA_HUB_LOOPBACK_HOST_ALIAS ? { loopbackHostAlias: environment.APEXNOVA_HUB_LOOPBACK_HOST_ALIAS } : {}),
     signal: operationSignal(parsed),
-  });
+  }), { sleep: dependencies.sleep ?? defaultSleep, signal: operationSignal(parsed) });
+  let usage: HubUsageRecord | undefined;
+  let usageWarning: string | undefined;
+  try {
+    usage = await service.usage(parsed.profile, inference.requestId, operationSignal(parsed));
+    if (!usage) usageWarning = "The Hub has not settled this request yet; reconcile the billed cost later with the requestId below.";
+  } catch (error) {
+    usageWarning = `Billing reconciliation skipped: ${normalizeError(error).code}. The requestId below is the source of truth for the real cost.`;
+  }
+  const billedLine = usage
+    ? `Billed: ${usage.amount} ${usage.currency} (${usage.usage.inputTokens ?? 0} input + ${usage.usage.outputTokens ?? 0} output tokens)`
+    : `Billed: not yet available`;
   return {
-    data: { valid: true, level: "live", ...configuration, estimate, estimateAssumptions: LIVE_VERIFY_ESTIMATE_USAGE, inference },
-    warnings: [] as readonly string[],
-    human: [`OpenCode live verification passed for ${inference.requestedModel}.`, `Deployment: ${inference.deploymentId}`, `Resolved model: ${inference.resolvedModel}`, `Request: ${inference.requestId}`, `Non-binding estimate: ${estimate.amount} ${estimate.currency} (${LIVE_VERIFY_ESTIMATE_USAGE.inputTokens} input + ${LIVE_VERIFY_ESTIMATE_USAGE.outputTokens} output tokens assumed)`].join("\n"),
+    data: { valid: true, level: "live", ...configuration, estimate, estimateAssumptions: LIVE_VERIFY_ESTIMATE_USAGE, inference, ...(usage ? { usage } : {}) },
+    warnings: usageWarning ? [usageWarning] : [] as readonly string[],
+    human: [`OpenCode live verification passed for ${inference.requestedModel}.`, `Deployment: ${inference.deploymentId}`, `Resolved model: ${inference.resolvedModel}`, `Request: ${inference.requestId}`, billedLine, `Non-binding estimate: ${estimate.amount} ${estimate.currency} (${LIVE_VERIFY_ESTIMATE_USAGE.inputTokens} input + ${LIVE_VERIFY_ESTIMATE_USAGE.outputTokens} output tokens assumed)`].join("\n"),
   };
 }
 
@@ -1093,7 +1159,7 @@ function normalizeError(error: unknown): CliError {
           : error.code === "BILLING_BLOCKED"
             ? EXIT_CODES.billing
             : EXIT_CODES.runtime;
-    return new CliError({ code: error.code, message: error.message, exitCode, retryable: error.retryable, ...(error.requestId ? { details: { requestId: error.requestId } } : {}), cause: error });
+    return new CliError({ code: error.code, message: error.message, exitCode, retryable: error.retryable, ...(error.retryAfterSeconds !== undefined ? { retryAfterSeconds: error.retryAfterSeconds } : {}), ...(error.requestId ? { details: { requestId: error.requestId } } : {}), cause: error });
   }
   if (error instanceof ConfigExecutionError) {
     return new CliError({ code: error.code, message: error.message, exitCode: error.code === "ROLLBACK_FAILED" || error.code === "INVALID_RECEIPT" ? EXIT_CODES.recovery : error.code === "CONFLICT" ? EXIT_CODES.conflict : EXIT_CODES.runtime, cause: error });
@@ -1186,6 +1252,7 @@ export async function runCli(
       code: normalized.code,
       message: normalized.message,
       retryable: normalized.retryable,
+      ...(normalized.retryAfterSeconds !== undefined ? { retryAfterSeconds: normalized.retryAfterSeconds } : {}),
       ...(normalized.details ? { details: normalized.details } : {}),
     };
     if (parsed?.json ?? args.includes("--json")) writeJsonFailure(io, command, requestId, shape);

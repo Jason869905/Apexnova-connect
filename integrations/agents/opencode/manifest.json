@@ -5,7 +5,7 @@
   "displayName": "OpenCode",
   "description": "Connect OpenCode provider configuration to models served by Apexnova AI Hub.",
   "version": "0.1.0",
-  "status": "planned",
+  "status": "experimental",
   "category": "agent",
   "delivery": {
     "modes": ["config-adapter", "launcher"]
@@ -30,8 +30,21 @@
       "transport": "direct"
     }
   ],
-  "capabilities": [],
-  "permissions": [],
+  "capabilities": [
+    "authentication",
+    "balance",
+    "model-catalog",
+    "provider-config",
+    "hot-switch",
+    "restart-required",
+    "backup-and-restore"
+  ],
+  "permissions": [
+    { "kind": "filesystem-write", "reason": "Writes OpenCode provider configuration to the user config file." },
+    { "kind": "network", "reason": "Calls Apexnova AI Hub OAuth, control-plane, and inference endpoints." },
+    { "kind": "credential-store", "reason": "Stores OAuth tokens and runtime credentials in the OS credential backend." },
+    { "kind": "process-launch", "reason": "Launches OpenCode with a runtime credential injected via environment." }
+  ],
   "links": {
     "documentation": "https://opencode.ai/docs/providers/",
     "repository": "https://github.com/anomalyco/opencode"

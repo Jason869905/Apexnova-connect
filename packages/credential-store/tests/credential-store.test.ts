@@ -174,6 +174,18 @@ describe("system backends", () => {
     expect(runner.requests.flatMap((request) => request.args)).not.toContain(rawSecret);
   });
 
+  it("treats secret-tool lookup exit code 1 as missing, not a backend failure", async () => {
+    const runner = new FakeCommandRunner((request) => {
+      if (request.args[0] === "lookup") return { exitCode: 1, stdout: "", stderr: "" };
+      if (request.args[0] === "clear") return { exitCode: 1, stdout: "", stderr: "" };
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const store = new SystemCredentialStore(new LinuxSecretServiceBackend(runner));
+
+    expect(await store.get(key)).toBeNull();
+    await store.delete(key);
+  });
+
   it("preserves a trailing newline returned by Secret Service", async () => {
     const runner = new FakeCommandRunner(() => ({
       exitCode: 0,
