@@ -176,6 +176,7 @@ H1 是 OAuth 2 授权服务器，不宣称 OpenID Connect，因此不使用 `ope
 ```text
 account:read catalog:read billing:read usage:read
 devices:read devices:revoke runtime-credentials:write
+api-keys:write api-keys:read api-keys:revoke
 ```
 
 设备批准页面必须展示请求 scope、设备名称、平台和将使用的账号。未知 scope 必须拒绝，不能静默忽略。
@@ -295,6 +296,65 @@ ApeXagent 的余额不是简单的 `cash + credits`：
 
 用量投影可返回 requested model、resolved public model、public deployment、Workspace、输入/输出/缓存用量、促销抵扣、正常余额抵扣、币种和金额；不得返回内部 deployment、买价、毛利和上游凭证信息。
 
+### 9.4 用量聚合查询
+
+`GET /v1/billing/usage` 在现有 `requestId` 单查基础上扩展为支持按 key、时间、模型、Workspace 聚合与分页。这是 Connect `apexnova usage --key` 和"这个工具用了多少"的前置条件。
+
+查询参数：
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `requestId` | string | 单条精确查（保留，向后兼容） |
+| `apiKeyId` | string | 按 user key / runtime credential 过滤 |
+| `workspaceId` | string | 按 Workspace 过滤 |
+| `model` | string | 按 public deployment id 或 inference alias 过滤 |
+| `from` | RFC3339 | 起始时间（含） |
+| `to` | RFC3339 | 结束时间（含） |
+| `granularity` | enum `hour\|day\|month` | 聚合粒度；省略时返回逐条记录 |
+| `cursor` | string | 上一页返回的 `nextCursor` |
+| `limit` | int | 每页条数，默认 100，上限 500 |
+
+聚合响应（`granularity` 非空时）：
+
+```json
+{
+  "schemaVersion": "0.1",
+  "granularity": "day",
+  "from": "2026-09-01T00:00:00Z",
+  "to": "2026-09-06T23:59:59Z",
+  "items": [
+    {
+      "bucketStart": "2026-09-06T00:00:00Z",
+      "apiKeyId": "cm8qr4cngr000dn1q69bbrl1vw",
+      "apiKeyName": "opencode on laptop",
+      "publicDeploymentId": "deployment.apexnova.cm123example",
+      "requestedModel": "glm-5.2",
+      "resolvedModel": "glm-5.2",
+      "requestCount": 142,
+      "inputTokens": 18432,
+      "outputTokens": 41280,
+      "cachedTokens": 0,
+      "normalCost": "0.042100",
+      "promoCost": "0.000000",
+      "currency": "USD"
+    }
+  ],
+  "nextCursor": null,
+  "asOf": "2026-09-06T12:00:00Z"
+}
+```
+
+逐条响应（`granularity` 省略时）每条记录新增字段：`apiKeyId`、`apiKeyName`、`apiKeyKind`（`user`/`runtime`），其余字段保持现有 `HubUsageRecord`。
+
+要求：
+
+- 不得返回内部 `ModelDeployment.id`、`litellmModelId`、买价、毛利、上游凭证、prompt/response 内容；
+- `apiKeyId` 过滤时只能看到当前账号/设备有权访问的 key；跨 Workspace 需 `workspaceId` 显式指定且有权限；
+- 时间区间最大跨度 90 天，超限返回 `400 range_too_large`；
+- 聚合口径必须与 `UsageLog`/`BillingAttempt` 最终计费一致（requested/resolved model、公共 deployment、促销抵扣、正常余额抵扣）；
+- 复用现有 cursor pagination（`items` + `nextCursor`）、`X-Apexnova-Request-Id`、限流 `429`+`Retry-After`；
+- OAuth scope 已有 `usage:read` 覆盖，不新增。
+
 ## 10. Runtime Credential
 
 | 方法 | 路径 | 用途 |
@@ -325,6 +385,76 @@ ApeXagent 的余额不是简单的 `cash + credits`：
 - 若服务端 fallback 最终命中不在 `allowedPublicDeployments` 的模型，必须 fail closed，或在签发时把整条允许链显式加入；
 - 删除、过期、设备撤销、账号停用、成员移除或 Workspace 失权都必须导致鉴权失败；
 - Connect 只把 secret 放入 OS credential store，通过环境变量、本地 Gateway 或目标 Agent 的安全凭证机制引用。
+
+## 10A. 长期 User API Key
+
+Connect 简化 UX 后，`apexnova opencode` 默认为每个 Agent 创建/复用一个长期 key，并支持 `--key <id>` 绑定已有 key 做按工具计费追踪。runtime credential 的 24h TTL 和设备绑定不适合此默认路径，因此新增账号级长期 API Key。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/v1/api-keys` | 为当前账号创建长期 API Key |
+| GET | `/v1/api-keys` | 列当前账号可见的 key 元数据（不含 secret） |
+| GET | `/v1/api-keys/{id}` | 单个 key 元数据 |
+| PATCH | `/v1/api-keys/{id}` | 更新 name / allowedPublicDeployments / allowedProtocols / expiresAt（不改 secret） |
+| DELETE | `/v1/api-keys/{id}` | 立即撤销 |
+
+创建请求：
+
+```json
+{
+  "name": "opencode on laptop",
+  "workspaceId": "workspace_public_id",
+  "protocols": ["openai-responses", "anthropic-messages"],
+  "publicDeploymentIds": ["deployment.apexnova.cm123example"],
+  "expiresIn": null,
+  "scopes": ["inference"]
+}
+```
+
+创建响应：
+
+```json
+{
+  "id": "cm8qr4cngr000dn1q69bbrl1vw",
+  "name": "opencode on laptop",
+  "prefix": "sk_abcd...wxyz",
+  "secret": "sk-xxxxxxxxxxxxxxxxxx",
+  "kind": "user",
+  "workspaceId": "workspace_public_id",
+  "protocols": ["openai-responses", "anthropic-messages"],
+  "publicDeploymentIds": ["deployment.apexnova.cm123example"],
+  "expiresAt": null,
+  "createdAt": "2026-09-06T12:00:00Z",
+  "lastUsedAt": null
+}
+```
+
+要求：
+
+- 复用现有 `ApiKey` 表与安全链路（SHA-256 存储、明文只返回一次），`kind=user`；与 `kind=runtime`（`anrt_`）共享推理鉴权/计费路径，不另造第二套限额；
+- `expiresIn` 为 `null` 时永不过期；为整数时按秒计算过期时间（允许长于 24h，如 90d/365d）；过期后鉴权失败；
+- 不绑定设备（区别于 runtime credential 的 `oauthDeviceId`），账号级凭据，可在任何机器使用；撤销由账号主动发起；
+- 继承当前 Workspace 的模型白名单、RPM/TPM、预算、组织隔离、私有模型授权、IP 白名单、审计和计费；
+- `publicDeploymentIds`/`protocols` 为空或省略时继承 Workspace 全部授权范围；非空时每次推理校验协议与请求模型是否在允许集，fallback 命中不在集内的模型必须 fail closed（与 runtime credential §10 一致）；
+- 占用普通用户 API Key 数量配额（区别于 runtime credential 不占配额）；每账号活动 key 数量有上限，超限返回 `409 api_key_quota_exceeded`；
+- 列表/单个接口只返回 `prefix`（前 8 + 后 4 字符），不返回 `secret`；`secret` 仅 `POST` 响应出现一次；
+- `lastUsedAt` 由推理路径回写，用于 `apexnova usage` 展示 key 活跃度；
+- 撤销、过期、账号停用、成员移除、Workspace 失权都必须导致鉴权失败；撤销操作写审计事件；
+- token、secret 不得进入 URL、普通日志、trace、分析事件和 fixtures（脱敏为 `sk_****`）；
+- OAuth scope 使用 §7.2 新增的 `api-keys:write` `api-keys:read` `api-keys:revoke`；未知 scope 拒绝。
+- **重新授权要求**：三个新 scope 不在已签发的 access/refresh token 中。旧 token 调用 `/v1/api-keys` 会收到 `403 insufficient_scope`（错误码 `insufficient_scope`）。Connect 检测到此错误时提示用户重新 `apexnova login`；Hub 批准页面必须展示新增 scope 并要求明确同意。
+
+与 runtime credential 的分工：
+
+| | `kind=user`（`sk_`） | `kind=runtime`（`anrt_`） |
+| --- | --- | --- |
+| 默认 TTL | 永久 / 用户指定 | 24h 上限 |
+| 设备绑定 | 否 | 是 |
+| 占 key 配额 | 是 | 否 |
+| Connect 用途 | 默认模式，`apexnova opencode` | `--rotating` 模式 |
+| 自动轮换 | 不轮换 | Connect 在 OAuth 会话内自动续期 |
+
+Connect 侧行为：默认 `POST /v1/api-keys`（永久）；`--rotating` 走现有 `POST /v1/runtime-credentials`；`--key <id>` 跳过创建，直接绑定已有 key。secret 只存 OS credential store，不写进 opencode 配置明文。
 
 ## 11. 推理入口补充契约
 
@@ -384,7 +514,7 @@ X-Apexnova-Deployment-Id
 
 1. `openapi/apexnova-hub-v1.yaml`；
 2. OAuth discovery 的 staging 地址；
-3. account、catalog、billing、runtime credential 和 inference 的脱敏 fixtures；
+3. account、catalog、billing、runtime credential、api-keys 和 inference 的脱敏 fixtures；
 4. 可本地启动的 mock server 或稳定 staging；
 5. API changelog、版本和弃用策略；
 6. 测试账号及取消、过期、token 复用、零余额、私有模型、组织权限、限流、维护和上游错误场景；
@@ -408,6 +538,11 @@ X-Apexnova-Deployment-Id
 - [ ] api 子域正确路由 OAuth metadata 与 `/oauth/*`；
 - [ ] 撤销设备后 access/refresh token 和该设备 runtime credential 立即失效；
 - [ ] Runtime Credential 继承 Workspace、组织、模型、协议、限额与计费约束；
+- [ ] `POST /v1/api-keys` 创建的 `sk_` key 可立即调用推理，响应头与 `anrt_` 一致；
+- [ ] `expiresIn: null` 的 key 不过期，`expiresIn` 到期后鉴权失败；
+- [ ] `GET /v1/api-keys` 与 `GET /v1/api-keys/{id}` 不返回 `secret`；
+- [ ] `GET /v1/billing/usage?apiKeyId=...&granularity=day` 聚合金额与逐条求和一致；
+- [ ] 按 key 用量不泄露内部 deployment、买价、prompt/response；
 - [ ] `/v1/catalog/snapshot` 不泄露内部供应线路、买价或私有模型；
 - [ ] 相同可见目录产生相同 catalogVersion/ETag；
 - [ ] `/v1/models` 保持 OpenAI 兼容，完整目录只使用 `/v1/catalog/*`；

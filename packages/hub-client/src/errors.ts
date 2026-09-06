@@ -9,6 +9,8 @@ export type HubClientErrorCode =
   | "SESSION_CORRUPT"
   | "REFRESH_TOKEN_MISSING"
   | "UNAUTHENTICATED"
+  | "INSUFFICIENT_SCOPE"
+  | "KEY_TTL_POLICY"
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "RATE_LIMITED"

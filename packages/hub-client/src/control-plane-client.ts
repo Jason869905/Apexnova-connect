@@ -2,6 +2,9 @@ import { SecretValue } from "@apexnova-connect/credential-store";
 
 import { HubClientError } from "./errors.js";
 import type {
+  ApiKeySummary,
+  CreateApiKeyInput,
+  CreatedApiKey,
   CreateRuntimeCredentialInput,
   CreatedRuntimeCredential,
   HubAccountSummary,
@@ -15,6 +18,11 @@ import type {
   HubPricingUsage,
   HubUsageRecord,
   RuntimeCredentialSummary,
+  UpdateApiKeyInput,
+  UsageAggregateRecord,
+  UsageAggregateResult,
+  UsageListResult,
+  UsageQuery,
 } from "./types.js";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -26,6 +34,7 @@ export interface HubControlPlaneClientOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly requestTimeoutMs?: number;
   readonly allowInsecureLoopback?: boolean;
+  readonly apiPrefix?: string;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -202,12 +211,59 @@ function parseUsageRecord(value: unknown): HubUsageRecord {
   };
 }
 
+function parseApiKeySummary(value: unknown): ApiKeySummary {
+  const item = object(value, "api key");
+  const kind = string(item.kind, "api key.kind", 32);
+  if (kind !== "user") throw invalid("api key.kind");
+  return {
+    id: string(item.id, "api key.id", 256),
+    name: string(item.name, "api key.name", 256),
+    prefix: string(item.prefix, "api key.prefix", 256),
+    kind,
+    ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "api key.workspaceId", 256) }),
+    protocols: item.protocols === undefined ? [] : strings(item.protocols, "api key.protocols"),
+    publicDeploymentIds: item.publicDeploymentIds === undefined ? [] : strings(item.publicDeploymentIds, "api key.publicDeploymentIds"),
+    ...(item.expiresAt === null || item.expiresAt === undefined ? {} : { expiresAt: timestamp(item.expiresAt, "api key.expiresAt") }),
+    createdAt: timestamp(item.createdAt, "api key.createdAt"),
+    ...(item.lastUsedAt === null || item.lastUsedAt === undefined ? {} : { lastUsedAt: timestamp(item.lastUsedAt, "api key.lastUsedAt") }),
+  };
+}
+
+function parseUsageAggregate(value: unknown): UsageAggregateRecord {
+  const item = object(value, "usage aggregate");
+  const integer = (v: unknown, field: string): number | undefined => {
+    if (v === null || v === undefined) return undefined;
+    if (!Number.isSafeInteger(v) || (v as number) < 0) throw invalid(field);
+    return v as number;
+  };
+  const requestCount = integer(item.requestCount, "usage aggregate.requestCount") ?? 0;
+  const inputTokens = integer(item.inputTokens, "usage aggregate.inputTokens");
+  const outputTokens = integer(item.outputTokens, "usage aggregate.outputTokens");
+  const cachedTokens = integer(item.cachedTokens, "usage aggregate.cachedTokens");
+  return {
+    bucketStart: timestamp(item.bucketStart, "usage aggregate.bucketStart"),
+    ...(item.apiKeyId === null || item.apiKeyId === undefined ? {} : { apiKeyId: string(item.apiKeyId, "usage aggregate.apiKeyId", 256) }),
+    ...(item.apiKeyName === null || item.apiKeyName === undefined ? {} : { apiKeyName: string(item.apiKeyName, "usage aggregate.apiKeyName", 256) }),
+    ...(item.publicDeploymentId === null || item.publicDeploymentId === undefined ? {} : { publicDeploymentId: string(item.publicDeploymentId, "usage aggregate.publicDeploymentId", 256) }),
+    ...(item.requestedModel === null || item.requestedModel === undefined ? {} : { requestedModel: string(item.requestedModel, "usage aggregate.requestedModel", 512) }),
+    ...(item.resolvedModel === null || item.resolvedModel === undefined ? {} : { resolvedModel: string(item.resolvedModel, "usage aggregate.resolvedModel", 512) }),
+    requestCount,
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(cachedTokens === undefined ? {} : { cachedTokens }),
+    normalCost: money(item.normalCost, "usage aggregate.normalCost"),
+    ...(item.promoCost === undefined ? {} : { promoCost: money(item.promoCost, "usage aggregate.promoCost") }),
+    currency: string(item.currency, "usage aggregate.currency", 3),
+  };
+}
+
 export class HubControlPlaneClient {
   readonly #baseUrl: URL;
   readonly #accessToken: HubControlPlaneClientOptions["accessToken"];
   readonly #fetch: typeof globalThis.fetch;
   readonly #requestTimeoutMs: number;
   readonly #allowInsecureLoopback: boolean;
+  readonly #apiPrefix: string;
 
   constructor(options: HubControlPlaneClientOptions) {
     try { this.#baseUrl = new URL(options.baseUrl); } catch (cause) {
@@ -223,9 +279,14 @@ export class HubControlPlaneClient {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
     this.#allowInsecureLoopback = options.allowInsecureLoopback ?? false;
+    this.#apiPrefix = options.apiPrefix ?? "";
   }
 
-  async #request(path: string, init: { readonly method?: "GET" | "POST" | "DELETE"; readonly body?: unknown; readonly signal?: AbortSignal } = {}): Promise<unknown> {
+  #path(path: string): string {
+    return `${this.#apiPrefix}${path}`;
+  }
+
+  async #request(path: string, init: { readonly method?: "GET" | "POST" | "PATCH" | "DELETE"; readonly body?: unknown; readonly signal?: AbortSignal } = {}): Promise<unknown> {
     const token = await this.#accessToken(init.signal);
     const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(this.#requestTimeoutMs)]) : AbortSignal.timeout(this.#requestTimeoutMs);
     let response: Response;
@@ -261,7 +322,7 @@ export class HubControlPlaneClient {
       const message = typeof api.message === "string" && api.message.length <= 2_048 ? api.message : "Apexnova AI Hub rejected the request.";
       const retryable = typeof api.retryable === "boolean" ? api.retryable : response.status >= 500;
       const retryAfter = Number(response.headers.get("retry-after"));
-      const code = response.status === 401 ? "UNAUTHENTICATED" : response.status === 403 ? "FORBIDDEN" : response.status === 404 ? "NOT_FOUND" : response.status === 429 ? "RATE_LIMITED" : apiCode === "insufficient_balance" || apiCode === "budget_exceeded" ? "BILLING_BLOCKED" : "API_ERROR";
+      const code = response.status === 401 ? "UNAUTHENTICATED" : response.status === 403 && apiCode === "insufficient_scope" ? "INSUFFICIENT_SCOPE" : response.status === 403 && apiCode === "key_ttl_policy" ? "KEY_TTL_POLICY" : response.status === 403 ? "FORBIDDEN" : response.status === 404 ? "NOT_FOUND" : response.status === 429 ? "RATE_LIMITED" : apiCode === "insufficient_balance" || apiCode === "budget_exceeded" ? "BILLING_BLOCKED" : "API_ERROR";
       throw new HubClientError(code, message, {
         retryable,
         ...(requestId ? { requestId } : {}),
@@ -272,7 +333,7 @@ export class HubControlPlaneClient {
   }
 
   async me(signal?: AbortSignal): Promise<HubAccountSummary> {
-    const item = object(await this.#request("/v1/me", signal ? { signal } : {}), "account");
+    const item = object(await this.#request(this.#path("/v1/me"), signal ? { signal } : {}), "account");
     const context = object(item.context, "account.context");
     const contextType = string(context.type, "account.context.type", 32);
     if (contextType !== "personal" && contextType !== "organization") throw invalid("account.context.type");
@@ -298,7 +359,7 @@ export class HubControlPlaneClient {
   }
 
   async balance(signal?: AbortSignal): Promise<HubBalance> {
-    const item = object(await this.#request("/v1/billing/balance", signal ? { signal } : {}), "balance");
+    const item = object(await this.#request(this.#path("/v1/billing/balance"), signal ? { signal } : {}), "balance");
     return {
       currency: string(item.currency, "balance.currency", 3),
       normalBalance: money(item.normalBalance, "balance.normalBalance"),
@@ -318,7 +379,7 @@ export class HubControlPlaneClient {
     if (!requestId || requestId.length > 512 || /[\u0000-\u001f\u007f]/.test(requestId)) {
       throw new HubClientError("INVALID_CONFIG", "requestId is invalid.");
     }
-    const root = object(await this.#request(`/v1/billing/usage?requestId=${encodeURIComponent(requestId)}`, signal ? { signal } : {}), "usage list");
+    const root = object(await this.#request(this.#path(`/v1/billing/usage?requestId=${encodeURIComponent(requestId)}`), signal ? { signal } : {}), "usage list");
     const items = array(root.items, "usage.items", parseUsageRecord);
     return items[0];
   }
@@ -331,7 +392,7 @@ export class HubControlPlaneClient {
     if (!deploymentId || deploymentId.length > 256) {
       throw new HubClientError("INVALID_CONFIG", "deploymentId is invalid.");
     }
-    const item = object(await this.#request("/v1/pricing/estimate", {
+    const item = object(await this.#request(this.#path("/v1/pricing/estimate"), {
       method: "POST",
       body: { deploymentId, usage },
       ...(signal ? { signal } : {}),
@@ -351,7 +412,7 @@ export class HubControlPlaneClient {
   }
 
   async catalog(signal?: AbortSignal): Promise<HubCatalogSnapshot> {
-    const item = object(await this.#request("/v1/catalog/snapshot", signal ? { signal } : {}), "catalog snapshot");
+    const item = object(await this.#request(this.#path("/v1/catalog/snapshot"), signal ? { signal } : {}), "catalog snapshot");
     return {
       schemaVersion: string(item.schemaVersion, "catalog.schemaVersion", 32), catalogVersion: string(item.catalogVersion, "catalog.catalogVersion", 256),
       generatedAt: timestamp(item.generatedAt, "catalog.generatedAt"), expiresAt: timestamp(item.expiresAt, "catalog.expiresAt"),
@@ -363,7 +424,7 @@ export class HubControlPlaneClient {
     if (!input.name.trim() || input.protocols.length === 0 || input.publicDeploymentIds.length === 0 || (input.expiresIn !== undefined && (!Number.isSafeInteger(input.expiresIn) || input.expiresIn <= 0 || input.expiresIn > 86_400))) {
       throw new HubClientError("INVALID_CONFIG", "Runtime credential request is invalid.");
     }
-    const item = object(await this.#request("/v1/runtime-credentials", { method: "POST", body: input, ...(signal ? { signal } : {}) }), "runtime credential response");
+    const item = object(await this.#request(this.#path("/v1/runtime-credentials"), { method: "POST", body: input, ...(signal ? { signal } : {}) }), "runtime credential response");
     return {
       credentialId: string(item.credentialId, "runtime credential.credentialId", 256),
       secret: SecretValue.from(string(item.secret, "runtime credential secret", 65_536)),
@@ -374,7 +435,7 @@ export class HubControlPlaneClient {
   }
 
   async runtimeCredentials(signal?: AbortSignal): Promise<readonly RuntimeCredentialSummary[]> {
-    const root = object(await this.#request("/v1/runtime-credentials", signal ? { signal } : {}), "runtime credentials");
+    const root = object(await this.#request(this.#path("/v1/runtime-credentials"), signal ? { signal } : {}), "runtime credentials");
     return array(root.items, "runtime credentials.items", (value) => {
       const item = object(value, "runtime credential");
       return {
@@ -394,6 +455,101 @@ export class HubControlPlaneClient {
 
   async revokeRuntimeCredential(id: string, signal?: AbortSignal): Promise<void> {
     if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) throw new HubClientError("INVALID_CONFIG", "Runtime credential id is invalid.");
-    await this.#request(`/v1/runtime-credentials/${encodeURIComponent(id)}`, { method: "DELETE", ...(signal ? { signal } : {}) });
+    await this.#request(this.#path(`/v1/runtime-credentials/${encodeURIComponent(id)}`), { method: "DELETE", ...(signal ? { signal } : {}) });
+  }
+
+  async createApiKey(input: CreateApiKeyInput, signal?: AbortSignal): Promise<CreatedApiKey> {
+    if (!input.name.trim() || (input.expiresIn !== undefined && input.expiresIn !== null && (!Number.isSafeInteger(input.expiresIn) || input.expiresIn <= 0))) {
+      throw new HubClientError("INVALID_CONFIG", "API key request is invalid.");
+    }
+    const body: Record<string, unknown> = { name: input.name, scopes: input.scopes ?? ["inference"] };
+    if (input.workspaceId !== undefined) body.workspaceId = input.workspaceId;
+    if (input.protocols !== undefined) body.protocols = input.protocols;
+    if (input.publicDeploymentIds !== undefined) body.publicDeploymentIds = input.publicDeploymentIds;
+    body.expiresIn = input.expiresIn ?? null;
+    const item = object(await this.#request(this.#path("/v1/api-keys"), { method: "POST", body, ...(signal ? { signal } : {}) }), "api key response");
+    const kind = string(item.kind, "api key.kind", 32);
+    if (kind !== "user") throw invalid("api key.kind");
+    return {
+      id: string(item.id, "api key.id", 256),
+      name: string(item.name, "api key.name", 256),
+      prefix: string(item.prefix, "api key.prefix", 256),
+      secret: SecretValue.from(string(item.secret, "api key secret", 65_536)),
+      kind,
+      ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "api key.workspaceId", 256) }),
+      protocols: item.protocols === undefined ? [] : strings(item.protocols, "api key.protocols"),
+      publicDeploymentIds: item.publicDeploymentIds === undefined ? [] : strings(item.publicDeploymentIds, "api key.publicDeploymentIds"),
+      ...(item.expiresAt === null || item.expiresAt === undefined ? {} : { expiresAt: timestamp(item.expiresAt, "api key.expiresAt") }),
+      createdAt: timestamp(item.createdAt, "api key.createdAt"),
+      ...(item.lastUsedAt === null || item.lastUsedAt === undefined ? {} : { lastUsedAt: timestamp(item.lastUsedAt, "api key.lastUsedAt") }),
+    };
+  }
+
+  async apiKeys(signal?: AbortSignal): Promise<readonly ApiKeySummary[]> {
+    const root = object(await this.#request(this.#path("/v1/api-keys"), signal ? { signal } : {}), "api keys");
+    return array(root.items, "api keys.items", parseApiKeySummary);
+  }
+
+  async apiKey(id: string, signal?: AbortSignal): Promise<ApiKeySummary> {
+    if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) throw new HubClientError("INVALID_CONFIG", "API key id is invalid.");
+    return parseApiKeySummary(await this.#request(this.#path(`/v1/api-keys/${encodeURIComponent(id)}`), signal ? { signal } : {}));
+  }
+
+  async updateApiKey(id: string, input: UpdateApiKeyInput, signal?: AbortSignal): Promise<ApiKeySummary> {
+    if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) throw new HubClientError("INVALID_CONFIG", "API key id is invalid.");
+    if (input.name === undefined && input.protocols === undefined && input.publicDeploymentIds === undefined && input.expiresIn === undefined) {
+      throw new HubClientError("INVALID_CONFIG", "API key update is empty.");
+    }
+    if (input.expiresIn !== undefined && input.expiresIn !== null && (!Number.isSafeInteger(input.expiresIn) || input.expiresIn <= 0)) {
+      throw new HubClientError("INVALID_CONFIG", "API key expiresIn is invalid.");
+    }
+    const body: Record<string, unknown> = {};
+    if (input.name !== undefined) body.name = input.name;
+    if (input.protocols !== undefined) body.protocols = input.protocols;
+    if (input.publicDeploymentIds !== undefined) body.publicDeploymentIds = input.publicDeploymentIds;
+    if (input.expiresIn !== undefined) body.expiresIn = input.expiresIn;
+    return parseApiKeySummary(await this.#request(this.#path(`/v1/api-keys/${encodeURIComponent(id)}`), { method: "PATCH", body, ...(signal ? { signal } : {}) }));
+  }
+
+  async revokeApiKey(id: string, signal?: AbortSignal): Promise<void> {
+    if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) throw new HubClientError("INVALID_CONFIG", "API key id is invalid.");
+    await this.#request(this.#path(`/v1/api-keys/${encodeURIComponent(id)}`), { method: "DELETE", ...(signal ? { signal } : {}) });
+  }
+
+  async usageQuery(query: UsageQuery, signal?: AbortSignal): Promise<UsageAggregateResult | UsageListResult> {
+    const params = new URLSearchParams();
+    if (query.requestId) {
+      if (query.requestId.length > 512 || /[\u0000-\u001f\u007f]/.test(query.requestId)) throw new HubClientError("INVALID_CONFIG", "requestId is invalid.");
+      params.set("requestId", query.requestId);
+    }
+    if (query.apiKeyId) params.set("apiKeyId", query.apiKeyId);
+    if (query.workspaceId) params.set("workspaceId", query.workspaceId);
+    if (query.model) params.set("model", query.model);
+    if (query.from) params.set("from", query.from);
+    if (query.to) params.set("to", query.to);
+    if (query.granularity) params.set("granularity", query.granularity);
+    if (query.cursor) params.set("cursor", query.cursor);
+    if (query.limit !== undefined) {
+      if (!Number.isSafeInteger(query.limit) || query.limit <= 0 || query.limit > 500) throw new HubClientError("INVALID_CONFIG", "limit must be 1..500.");
+      params.set("limit", String(query.limit));
+    }
+    const root = object(await this.#request(this.#path(`/v1/billing/usage?${params.toString()}`), signal ? { signal } : {}), "usage query");
+    const nextCursor = root.nextCursor === undefined || root.nextCursor === null ? undefined : string(root.nextCursor, "usage.nextCursor", 1_024);
+    const asOf = root.asOf === undefined || root.asOf === null ? undefined : timestamp(root.asOf, "usage.asOf");
+    if (query.granularity) {
+      return {
+        granularity: query.granularity,
+        ...(query.from ? { from: query.from } : {}),
+        ...(query.to ? { to: query.to } : {}),
+        items: array(root.items, "usage.items", parseUsageAggregate),
+        ...(nextCursor ? { nextCursor } : {}),
+        ...(asOf ? { asOf } : {}),
+      } as UsageAggregateResult;
+    }
+    return {
+      items: array(root.items, "usage.items", parseUsageRecord),
+      ...(nextCursor ? { nextCursor } : {}),
+      ...(asOf ? { asOf } : {}),
+    } as UsageListResult;
   }
 }

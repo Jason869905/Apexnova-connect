@@ -227,4 +227,95 @@ export interface HubUsageRecord {
   readonly promoCovered?: string;
   readonly balanceCovered?: string;
   readonly discountRate?: string;
+  readonly apiKeyId?: string;
+  readonly apiKeyName?: string;
+  readonly apiKeyKind?: "user" | "runtime";
+}
+
+export interface CreateApiKeyInput {
+  readonly name: string;
+  readonly workspaceId?: string;
+  readonly protocols?: readonly string[];
+  readonly publicDeploymentIds?: readonly string[];
+  readonly expiresIn?: number | null;
+  readonly scopes?: readonly string[];
+}
+
+export interface CreatedApiKey {
+  readonly id: string;
+  readonly name: string;
+  readonly prefix: string;
+  readonly secret: SecretValue;
+  readonly kind: "user";
+  readonly workspaceId?: string;
+  readonly protocols: readonly string[];
+  readonly publicDeploymentIds: readonly string[];
+  readonly expiresAt?: string;
+  readonly createdAt: string;
+  readonly lastUsedAt?: string;
+}
+
+export interface ApiKeySummary {
+  readonly id: string;
+  readonly name: string;
+  readonly prefix: string;
+  readonly kind: "user";
+  readonly workspaceId?: string;
+  readonly protocols: readonly string[];
+  readonly publicDeploymentIds: readonly string[];
+  readonly expiresAt?: string;
+  readonly createdAt: string;
+  readonly lastUsedAt?: string;
+}
+
+export interface UpdateApiKeyInput {
+  readonly name?: string;
+  readonly protocols?: readonly string[];
+  readonly publicDeploymentIds?: readonly string[];
+  readonly expiresIn?: number | null;
+}
+
+export type UsageGranularity = "hour" | "day" | "month";
+
+export interface UsageQuery {
+  readonly requestId?: string;
+  readonly apiKeyId?: string;
+  readonly workspaceId?: string;
+  readonly model?: string;
+  readonly from?: string;
+  readonly to?: string;
+  readonly granularity?: UsageGranularity;
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
+export interface UsageAggregateRecord {
+  readonly bucketStart: string;
+  readonly apiKeyId?: string;
+  readonly apiKeyName?: string;
+  readonly publicDeploymentId?: string;
+  readonly requestedModel?: string;
+  readonly resolvedModel?: string;
+  readonly requestCount: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cachedTokens?: number;
+  readonly normalCost: string;
+  readonly promoCost?: string;
+  readonly currency: string;
+}
+
+export interface UsageAggregateResult {
+  readonly granularity: UsageGranularity;
+  readonly from?: string;
+  readonly to?: string;
+  readonly items: readonly UsageAggregateRecord[];
+  readonly nextCursor?: string;
+  readonly asOf: string;
+}
+
+export interface UsageListResult {
+  readonly items: readonly HubUsageRecord[];
+  readonly nextCursor?: string;
+  readonly asOf?: string;
 }

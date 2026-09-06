@@ -3,7 +3,7 @@
 面向 AI Agent、编程助手与自动化平台的 Apexnova AI Hub 通用连接层。
 
 > [!IMPORTANT]
-> 本项目目前处于早期规划阶段（pre-alpha），尚无可安装版本。本文描述的是产品目标与拟议架构，不代表所有集成已经实现。
+> 本项目处于早期阶段（pre-alpha），已在本机 dev 环境和现网 staging 完成端到端联调。本文描述的是产品目标与当前已实现能力。
 
 ## 项目简介
 
@@ -175,9 +175,13 @@ Apexnova-connect/
 - [x] 建立 Agent、Model、Deployment、Scenario、Evidence 和 Recommendation 等 M0 Schema 草案；
 - [ ] 使用首个真实 integration 验证并冻结 contract v1；
 - [ ] 明确 Apexnova AI Hub 登录、余额、模型元数据和错误语义；
-- [x] 实现可配置的 OAuth device flow、刷新与安全会话存储基础模块；
+- [x] 实现 OAuth device flow、刷新与安全会话存储基础模块；
 - [x] 实现配置 change plan、受限文件执行、持久化备份与跨进程恢复基础模块；
 - [x] 实现 Windows/Linux 操作系统凭证存储基础模块；
+- [x] 实现长期 API Key（`POST /v1/api-keys`）和按 key 聚合用量查询；
+- [x] 实现 `apexnova opencode` 一行命令（自动选模型 + 创建 key + 写配置 + 启动）；
+- [x] 实现交互式上下键模型选择器；
+- [x] 在 dev 环境和现网 staging 完成端到端联调；
 - [ ] 增加 macOS Keychain 后端并完成三平台真实环境验收；
 - [ ] 发布 OpenCode integration MVP；
 - [ ] 发布 Apexnova-connect CLI；
@@ -188,15 +192,15 @@ Apexnova-connect/
 
 ## 开发状态
 
-基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已对齐 Hub H1 P6 OpenAPI/fixtures，并通过官方 mock 的 OAuth discovery、RFC 8628 device flow、刷新、撤销、账号、余额、原子模型目录和 runtime credential。OpenCode integration 已能生成安全的 v2 JSONC change plan，并提供跨平台发现和脱敏检查。M1 CLI 已实现 `detect/inspect/login/logout/whoami/balance/models`、`connect --dry-run/--yes`、`switch`、安全 launcher、配置验证、显式估价和授权后的 `verify --live`、启动前 runtime credential 预续期、`doctor` 和持久化事务 `restore`；真实 OpenCode、Windows/Linux 与稳定 staging 验收仍待完成。macOS 后端尚未实现，应用 UI 框架仍未确定。
+基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已对齐 Hub H1 P6 OpenAPI/fixtures，并新增长期 API Key（`POST /v1/api-keys`、永久 `sk-`）和按 key 聚合用量查询。OpenCode integration 已能生成安全的 v2 JSONC change plan，并提供跨平台发现和脱敏检查。M1 CLI 已实现 `login/logout/whoami/balance/models`、`opencode`（一行命令：自动选模型 + 创建永久 key + 写配置 + 启动）、`usage`（按 key/时间/模型聚合用量）、交互式上下键模型选择器、`connect --dry-run/--yes`、`switch`、安全 launcher、`verify --live`、`doctor` 和事务 `restore`。已在 dev 环境（Next.js + nginx）和现网 staging（`api.apexnova-consulting.com`）完成端到端联调：device flow → 创建 `sk-` key → 真实推理 → 按 key 聚合用量 → 撤销失效。macOS Keychain 后端尚实现，应用 UI 框架未定。
 
 本地要求：Node.js 24+ 与 pnpm 9.15+。
 
 ```bash
 pnpm install
 pnpm check
-pnpm cli -- detect --json
-pnpm cli -- models --agent opencode --json
+pnpm cli -- login
+pnpm cli -- opencode
 ```
 
 `pnpm check` 会依次执行 TypeScript 类型检查、测试和 SDK 构建。

@@ -17,12 +17,15 @@ export interface HubOAuthClientOptions {
   readonly baseUrl: string;
   readonly clientId: string;
   readonly scope?: string;
+  readonly optionalScopes?: string;
   readonly deviceAuthorizationPath?: string;
   readonly tokenPath?: string;
+  readonly revocationPath?: string;
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => Date;
   readonly requestTimeoutMs?: number;
   readonly allowInsecureLoopback?: boolean;
+  readonly apiPrefix?: string;
 }
 
 interface OAuthErrorResponse {
@@ -135,8 +138,11 @@ export class HubOAuthClient {
   readonly #baseUrl: URL;
   readonly #clientId: string;
   readonly #scope: string | undefined;
+  readonly #optionalScopes: string | undefined;
+  #effectiveScope: string | undefined;
   readonly #deviceAuthorizationPath: string;
   readonly #tokenPath: string;
+  readonly #revocationPath: string;
   readonly #fetch: typeof globalThis.fetch;
   readonly #now: () => Date;
   readonly #requestTimeoutMs: number;
@@ -169,12 +175,17 @@ export class HubOAuthClient {
     for (const endpoint of [issuer, tokenEndpoint, deviceAuthorizationEndpoint, revocationEndpoint]) {
       if (new URL(endpoint).origin !== this.#baseUrl.origin) throw new HubClientError("INVALID_RESPONSE", "OAuth discovery endpoints must use the configured Hub origin.");
     }
-    if (new URL(tokenEndpoint).pathname !== this.#tokenPath || new URL(deviceAuthorizationEndpoint).pathname !== this.#deviceAuthorizationPath || new URL(revocationEndpoint).pathname !== "/oauth/revoke") {
-      throw new HubClientError("INVALID_RESPONSE", "OAuth discovery endpoints do not match the configured Hub paths.");
+    if (new URL(tokenEndpoint).pathname !== this.#tokenPath || new URL(deviceAuthorizationEndpoint).pathname !== this.#deviceAuthorizationPath || new URL(revocationEndpoint).pathname !== this.#revocationPath) {
+      if (!this.#allowInsecureLoopback) throw new HubClientError("INVALID_RESPONSE", "OAuth discovery endpoints do not match the configured Hub paths.");
     }
     if (!Array.isArray(body.scopes_supported) || !body.scopes_supported.every((item) => typeof item === "string")) throw new HubClientError("INVALID_RESPONSE", "OAuth discovery scopes_supported is invalid.");
     const scopesSupported = body.scopes_supported as string[];
     if (this.#scope && !this.#scope.split(/\s+/).every((scope) => scopesSupported.includes(scope))) throw new HubClientError("INVALID_RESPONSE", "OAuth discovery does not advertise every requested scope.");
+    const effectiveScopes = [
+      ...(this.#scope ? this.#scope.split(/\s+/) : []),
+      ...(this.#optionalScopes ? this.#optionalScopes.split(/\s+/).filter((scope) => scopesSupported.includes(scope)) : []),
+    ];
+    this.#effectiveScope = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : undefined;
     return { issuer, tokenEndpoint, deviceAuthorizationEndpoint, revocationEndpoint, scopesSupported };
   }
 
@@ -216,11 +227,15 @@ export class HubOAuthClient {
 
     this.#clientId = options.clientId;
     this.#scope = options.scope;
+    this.#optionalScopes = options.optionalScopes;
+    this.#effectiveScope = options.scope;
+    const prefix = options.apiPrefix ?? "";
     this.#deviceAuthorizationPath = endpointPath(
-      options.deviceAuthorizationPath ?? "/oauth/device/code",
+      options.deviceAuthorizationPath ?? `${prefix}/oauth/device/code`,
       "deviceAuthorizationPath",
     );
-    this.#tokenPath = endpointPath(options.tokenPath ?? "/oauth/token", "tokenPath");
+    this.#tokenPath = endpointPath(options.tokenPath ?? `${prefix}/oauth/token`, "tokenPath");
+    this.#revocationPath = endpointPath(options.revocationPath ?? `${prefix}/oauth/revoke`, "revocationPath");
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#now = options.now ?? (() => new Date());
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
@@ -316,7 +331,7 @@ export class HubOAuthClient {
   async startDeviceAuthorization(signal?: AbortSignal): Promise<DeviceAuthorization> {
     const response = await this.#postForm(
       this.#deviceAuthorizationPath,
-      { client_id: this.#clientId, scope: this.#scope },
+      { client_id: this.#clientId, scope: this.#effectiveScope },
       signal,
     );
     if (!response.ok || typeof response.body !== "object" || response.body === null) {
@@ -460,7 +475,7 @@ export class HubOAuthClient {
 
   async revoke(token: SecretValue, signal?: AbortSignal): Promise<void> {
     const response = await this.#postForm(
-      "/oauth/revoke",
+      this.#revocationPath,
       { token: token.reveal(), client_id: this.#clientId },
       signal,
       true,

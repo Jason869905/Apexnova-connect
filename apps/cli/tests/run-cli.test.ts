@@ -52,9 +52,15 @@ function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService 
     }),
     estimatePricing: async () => ({ deploymentId: "deployment.nova", model: "nova", currency: "USD", billingMode: "token", listAmount: "0.000120", discountRate: "0.5", amount: "0.000060", priceVersion: "2026-09-05T10:00:00Z", estimateOnly: true }),
     usage: async () => undefined,
+    usageQuery: async () => ({ items: [], asOf: "2026-09-06T12:00:00Z" }),
     createRuntimeCredential: async () => ({ credentialId: "rtc_1", expiresAt: "2099-09-05T12:00:00Z", deviceId: "device_1", secret: SecretValue.from("runtime-secret") }),
     runtimeCredentials: async () => [{ credentialId: "rtc_1", name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], expiresAt: "2099-09-05T12:00:00Z", createdAt: "2026-09-05T12:00:00Z" }],
     revokeRuntimeCredential: async () => undefined,
+    createApiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z", secret: SecretValue.from("api-key-secret") }),
+    apiKeys: async () => [],
+    apiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z" }),
+    updateApiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z" }),
+    revokeApiKey: async () => undefined,
     ...overrides,
   };
 }
@@ -626,7 +632,7 @@ describe("CLI", () => {
     expect(loaded?.restoreTarget).toBeUndefined();
     await bindings.save("legacy", loaded!);
 
-    expect(JSON.parse((await credentials.get(key))!.reveal())).toMatchObject({ version: 2, credentialId: "rtc_legacy" });
+    expect(JSON.parse((await credentials.get(key))!.reveal())).toMatchObject({ version: 3, credentialId: "rtc_legacy", kind: "runtime" });
   });
 
   it("does not fall back to an implicit production Hub", async () => {

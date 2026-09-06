@@ -7,9 +7,10 @@ import { HubClientError } from "@apexnova-connect/hub-client";
 export interface RuntimeCredentialBinding {
   readonly credentialId: string;
   readonly secret: SecretValue;
-  readonly expiresAt: string;
+  readonly expiresAt?: string;
   readonly protocol: string;
   readonly deploymentId: string;
+  readonly kind?: "user" | "runtime";
   readonly transactionId?: string;
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
 }
@@ -41,7 +42,19 @@ interface StoredBindingV2 {
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
 }
 
-type StoredBinding = StoredBindingV1 | StoredBindingV2;
+interface StoredBindingV3 {
+  readonly version: 3;
+  readonly credentialId: string;
+  readonly secret: string;
+  readonly expiresAt?: string;
+  readonly protocol: string;
+  readonly deploymentId: string;
+  readonly kind?: "user" | "runtime";
+  readonly transactionId?: string;
+  readonly restoreTarget?: RuntimeCredentialRestoreTarget;
+}
+
+type StoredBinding = StoredBindingV1 | StoredBindingV2 | StoredBindingV3;
 
 function key(profileId: string) {
   return { integrationId: "opencode", accountId: profileId, kind: "runtime-credential" } as const;
@@ -67,21 +80,25 @@ function parseRestoreTarget(value: unknown, depth = 0): RuntimeCredentialRestore
   };
 }
 
-function parse(value: unknown): StoredBindingV2 {
+function parse(value: unknown): StoredBindingV3 {
   if (typeof value !== "object" || value === null) throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
-  const item = value as Partial<StoredBinding>;
-  if ((item.version !== 1 && item.version !== 2) || typeof item.expiresAt !== "string" || !Number.isFinite(Date.parse(item.expiresAt))) {
+  const item = value as Omit<Partial<StoredBindingV3>, "version"> & { version?: number };
+  if ((item.version !== 1 && item.version !== 2 && item.version !== 3) || (item.version !== 3 && (typeof item.expiresAt !== "string" || !Number.isFinite(Date.parse(item.expiresAt))))) {
+    throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
+  }
+  if (item.version === 3 && item.expiresAt !== undefined && (typeof item.expiresAt !== "string" || !Number.isFinite(Date.parse(item.expiresAt)))) {
     throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
   }
   return {
-    version: 2,
+    version: 3,
     credentialId: requiredString(item.credentialId),
     secret: requiredString(item.secret),
-    expiresAt: item.expiresAt,
+    ...(item.expiresAt !== undefined && item.expiresAt !== null ? { expiresAt: requiredString(item.expiresAt) } : {}),
     protocol: requiredString(item.protocol),
     deploymentId: requiredString(item.deploymentId),
-    ...(item.version === 2 && item.transactionId !== undefined ? { transactionId: requiredString(item.transactionId) } : {}),
-    ...(item.version === 2 && item.restoreTarget !== undefined ? { restoreTarget: parseRestoreTarget(item.restoreTarget) } : {}),
+    ...(item.version === 3 && item.kind !== undefined ? { kind: item.kind } : { kind: "runtime" as const }),
+    ...((item.version ?? 0) >= 2 && item.transactionId !== undefined ? { transactionId: requiredString(item.transactionId) } : {}),
+    ...((item.version ?? 0) >= 2 && item.restoreTarget !== undefined ? { restoreTarget: parseRestoreTarget(item.restoreTarget) } : {}),
   };
 }
 
@@ -103,9 +120,10 @@ export class RuntimeBindingStore {
     return {
       credentialId: binding.credentialId,
       secret: SecretValue.from(binding.secret),
-      expiresAt: binding.expiresAt,
+      ...(binding.expiresAt ? { expiresAt: binding.expiresAt } : {}),
       protocol: binding.protocol,
       deploymentId: binding.deploymentId,
+      ...(binding.kind ? { kind: binding.kind } : {}),
       ...(binding.transactionId ? { transactionId: binding.transactionId } : {}),
       ...(binding.restoreTarget ? { restoreTarget: binding.restoreTarget } : {}),
     };
@@ -113,12 +131,13 @@ export class RuntimeBindingStore {
 
   async save(profileId: string, binding: RuntimeCredentialBinding): Promise<void> {
     const stored = parse({
-      version: 2,
+      version: 3,
       credentialId: binding.credentialId,
       secret: binding.secret.reveal(),
-      expiresAt: binding.expiresAt,
+      ...(binding.expiresAt ? { expiresAt: binding.expiresAt } : {}),
       protocol: binding.protocol,
       deploymentId: binding.deploymentId,
+      ...(binding.kind ? { kind: binding.kind } : {}),
       ...(binding.transactionId ? { transactionId: binding.transactionId } : {}),
       ...(binding.restoreTarget ? { restoreTarget: binding.restoreTarget } : {}),
     });

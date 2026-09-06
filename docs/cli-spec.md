@@ -32,6 +32,11 @@ CLI 是首个可审计、可脚本化宿主。它负责用户交互和编排，�
 --yes                  接受已经输出或通过 --plan-file 指定的 Plan
 --timeout <seconds>    单次网络或短操作超时；设备登录遵循设备码有效期
 --verbose              输出脱敏诊断
+--key <id>             使用已有 API key（opencode/usage 命令）
+--rotating             使用 24h 短期 credential 而非永久 key（opencode 命令）
+--from <RFC3339>       用量查询起始时间（usage 命令）
+--to <RFC3339>         用量查询结束时间（usage 命令）
+--granularity <g>      用量聚合粒度 hour|day|month（usage 命令）
 --version
 --help
 ```
@@ -93,7 +98,59 @@ apexnova logout --all-devices
 
 显示余额、币种、信用额度、更新时间和计费主体。
 
+### `apexnova opencode`
+
+一行命令完成连接与启动：自动选模型 → 创建 key → 写配置 → 启动 OpenCode。
+
+```text
+apexnova opencode
+apexnova opencode --deployment <id>
+apexnova opencode --key <keyId>
+apexnova opencode --rotating
+apexnova opencode -- --model apexnova/glm-5.2
+```
+
+选项：
+
+```text
+--deployment <id>      指定模型（省略时自动选第一个；交互模式弹出上下键选择器）
+--key <id>             绑定已有 API key（跳过创建，用于按工具追踪用量）
+--rotating             使用 24h 短期 runtime credential 而非永久 key
+-- <agent args>        透传参数给 OpenCode
+```
+
+流程：`detect → resolve deployment → ensure key → plan → apply → launch`。
+
+`ensure key` 行为：默认 `POST /v1/api-keys` 创建永久 `sk-` key；`--rotating` 创建 24h `anrt_`；`--key <id>` 验证存在并提示输入 secret。已有配置时跳过 plan/apply 直接 launch。永久 key 不过期无需续期；`--rotating` 剩余不足 1 小时时自动续期。
+
 ### `apexnova models`
+
+查询 Model 与 Deployment 目录。交互模式下列出模型，上下键选择并回车切换。
+
+```text
+apexnova models
+apexnova models --agent opencode
+apexnova models --protocol openai-responses
+apexnova models --compatible-only
+```
+
+`--compatible-only` 只隐藏明确不兼容项；未验证项必须单独标记，不能当作兼容。交互模式（TTY + 非 `--json` + 非 `--non-interactive`）：上下键选择，回车切换（创建 key + 更新配置），Esc 取消。
+
+### `apexnova usage`
+
+查询用量，支持按 key、时间、模型过滤和聚合。
+
+```text
+apexnova usage
+apexnova usage --key <keyId>
+apexnova usage --granularity day
+apexnova usage --key <keyId> --from 2026-09-01T00:00:00Z --to 2026-09-07T00:00:001Z --granularity day
+```
+
++D
+```
+
+选项：`--key <id>`、`--from <RFC3339>`、`--to <RFC3339>`、`--granularity hour|day|month`。
 
 查询 Model 与 Deployment 目录。
 
