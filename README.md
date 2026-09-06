@@ -5,6 +5,32 @@
 > [!IMPORTANT]
 > 本项目处于早期阶段（pre-alpha），已在本机 dev 环境和现网 staging 完成端到端联调。本文描述的是产品目标与当前已实现能力。
 
+## 快速安装
+
+一行命令下载源码、安装全部依赖并构建（自动通过 fnm 安装 Node 24、corepack 启用 pnpm，产物放到 `~/.apexnova-connect`，`apexnova` 软链到 `~/.local/bin`）：
+
+**Linux / macOS：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell)：**
+
+```powershell
+irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
+```
+
+钉定某个 release tag：
+
+```bash
+APEXNOVA_REF=v0.1.0 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+```
+
+可用环境变量覆盖默认行为：`APEXNOVA_REF`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`NODE_MAJOR`、`PNPM_VERSION`。安装完成后运行 `apexnova --help`。
+
+> 注：脚本会 `git clone` 对应 ref 到 `~/.apexnova-connect`，若已存在则 fetch 更新。如需从开发源码构建，见下方「开发状态」一节。
+
 ## 项目简介
 
 Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hub 的账号、余额、模型目录和模型调用能力接入不同的 AI 工具。

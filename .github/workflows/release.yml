@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## 一行安装
+
+            **Linux / macOS (bash):**
+
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/${{ github.ref_name }}/scripts/install.sh | bash
+            ```
+
+            **Windows (PowerShell):**
+
+            ```powershell
+            irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/${{ github.ref_name }}/scripts/install.ps1 | iex
+            ```
+
+            脚本会自动通过 fnm 安装 Node 24、用 corepack 启用 pnpm、下载本版本源码到 `~/.apexnova-connect`、安装依赖并构建，最后把 `apexnova` 放到 `~/.local/bin`。
+
+            环境变量可覆盖默认行为：`APEXNOVA_REF`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`NODE_MAJOR`、`PNPM_VERSION`。
