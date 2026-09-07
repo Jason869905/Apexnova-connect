@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 钉定某个 release：
 
 ```bash
-APEXNOVA_VERSION=v0.1.1 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+APEXNOVA_VERSION=v0.1.2 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 ```
 
 可用环境变量覆盖默认行为：`APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
