@@ -156,9 +156,17 @@ jobs:
           $env:APEXNOVA_ASSET_URL = 'http://127.0.0.1:1/apexnova.mjs'
           $env:APEXNOVA_HOME = Join-Path $env:RUNNER_TEMP 'apexnova-fail'
           $env:APEXNOVA_BIN = Join-Path $env:RUNNER_TEMP 'apexnova-fail-bin'
-          & pwsh -NoProfile -File ./scripts/install.ps1
-          if ($LASTEXITCODE -eq 0) { throw 'a failed install must not exit 0' }
-          Write-Host "failed install exited $LASTEXITCODE as expected"
+          # Start-Process rather than `& pwsh`: PowerShell 7.4 defaults
+          # $PSNativeCommandUseErrorActionPreference to $true, so with the
+          # runner's $ErrorActionPreference='stop' a native command that exits
+          # non-zero throws before the exit code can be inspected -- which is
+          # exactly the code this step needs to read.
+          $script = (Resolve-Path ./scripts/install.ps1).Path
+          $proc = Start-Process -FilePath 'pwsh' `
+            -ArgumentList '-NoProfile', '-File', $script `
+            -WorkingDirectory $PWD -NoNewWindow -Wait -PassThru
+          Write-Host "install.ps1 exited $($proc.ExitCode)"
+          if ($proc.ExitCode -eq 0) { throw 'a failed install must not exit 0' }
 
       - name: Launcher works without node on PATH
         run: |
