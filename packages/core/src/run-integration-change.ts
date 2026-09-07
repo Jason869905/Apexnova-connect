@@ -1,12 +1,16 @@
 import {
   assertIntegrationManifest,
+  isDetectionAvailable,
   type ApplyReceipt,
+  type AvailableDetection,
   type ChangeApproval,
   type ChangeExecutor,
   type ChangePlan,
   type DetectionResult,
   type IntegrationAdapter,
   type IntegrationContext,
+  type MissingDetection,
+  type UnsupportedDetection,
   type VerificationResult,
 } from "@apexnova-connect/integration-sdk";
 
@@ -33,7 +37,7 @@ export class IntegrationChangeError extends Error {
 export type IntegrationChangeResult =
   | {
       readonly status: "unavailable";
-      readonly detection: Exclude<DetectionResult, { readonly status: "available" }>;
+      readonly detection: MissingDetection | UnsupportedDetection;
     }
   | {
       readonly status: "declined" | "no-change";
@@ -57,6 +61,11 @@ export interface RunIntegrationChangeOptions<Intent, Snapshot> {
   readonly context: IntegrationContext;
   readonly intent: Intent;
   readonly approve: ChangeApproval;
+  /**
+   * A detection the caller already performed. Supplying it skips a second
+   * version probe, which would spawn the target product again.
+   */
+  readonly detection?: AvailableDetection;
 }
 
 async function rollbackAfterFailure(
@@ -93,20 +102,24 @@ export async function runIntegrationChange<Intent, Snapshot>(
   }
 
   let detection: DetectionResult;
-  try {
-    detection = await adapter.detect(context);
-  } catch (cause) {
-    throw new IntegrationChangeError("detect", "Integration detection failed.", { cause });
+  if (options.detection) {
+    detection = options.detection;
+  } else {
+    try {
+      detection = await adapter.detect(context);
+    } catch (cause) {
+      throw new IntegrationChangeError("detect", "Integration detection failed.", { cause });
+    }
   }
 
-  if (detection.status !== "available") {
+  if (!isDetectionAvailable(detection)) {
     return {
       status: "unavailable",
       detection,
     };
   }
 
-  let inspection;
+  let inspection: Snapshot;
   try {
     inspection = await adapter.inspect(context, detection);
   } catch (cause) {
@@ -115,7 +128,7 @@ export async function runIntegrationChange<Intent, Snapshot>(
 
   let plan: ChangePlan;
   try {
-    plan = await adapter.plan(context, inspection, intent);
+    plan = await adapter.plan(context, detection, inspection, intent);
   } catch (cause) {
     throw new IntegrationChangeError("plan", "Integration planning failed.", { cause });
   }

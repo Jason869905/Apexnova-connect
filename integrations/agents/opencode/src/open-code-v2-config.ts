@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 
-import type { ChangePlan } from "@apexnova-connect/integration-sdk";
+import {
+  AgentIntegrationError,
+  type ChangePlan,
+} from "@apexnova-connect/integration-sdk";
 import {
   applyEdits,
   modify,
@@ -37,17 +40,18 @@ export interface PlanOpenCodeV2ConfigOptions {
   readonly defaultModelId?: string;
 }
 
-export class OpenCodeConfigError extends Error {
-  readonly code:
-    | "INVALID_CONFIG"
-    | "LEGACY_CONFIG"
-    | "INVALID_INPUT"
-    | "MIXED_PROTOCOLS";
+export type OpenCodeConfigErrorCode =
+  | "INVALID_CONFIG"
+  | "LEGACY_CONFIG"
+  | "INVALID_INPUT"
+  | "MIXED_PROTOCOLS";
 
-  constructor(code: OpenCodeConfigError["code"], message: string) {
-    super(message);
+export class OpenCodeConfigError extends AgentIntegrationError {
+  declare readonly code: OpenCodeConfigErrorCode;
+
+  constructor(code: OpenCodeConfigErrorCode, message: string) {
+    super(code, message);
     this.name = "OpenCodeConfigError";
-    this.code = code;
   }
 }
 

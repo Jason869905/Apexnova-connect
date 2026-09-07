@@ -1,25 +1,66 @@
 import type { IntegrationManifest, Platform } from "./types.js";
 
+/**
+ * Everything an integration is allowed to know about the machine it runs on.
+ * `configPath` is set only when the caller pointed at an explicit file, which
+ * suppresses the integration's own candidate search.
+ */
 export interface IntegrationContext {
   readonly platform: Platform;
   readonly workingDirectory: string;
+  readonly homeDirectory: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly configPath?: string;
+}
+
+export type DetectionStatus =
+  | "installed"
+  | "config-only"
+  | "not-found"
+  | "unsupported";
+
+export type ConfigScope = "explicit" | "project" | "global";
+
+interface DetectionBase {
+  readonly agentId: string;
+  readonly displayName: string;
+  readonly productVersion?: string;
+  /** The file a change plan would target, whether or not it exists yet. */
+  readonly configPath: string;
+  readonly configExists: boolean;
+  readonly configScope: ConfigScope;
+  readonly evidence: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+/**
+ * `installed` means the executable answered a version probe; `config-only`
+ * means only a configuration file was found. Both are enough to plan a change,
+ * but a launcher requires `installed`.
+ */
+export interface AvailableDetection extends DetectionBase {
+  readonly status: "installed" | "config-only";
+}
+
+export interface MissingDetection extends DetectionBase {
+  readonly status: "not-found";
+}
+
+/** The product was found but sits outside the manifest's supported range. */
+export interface UnsupportedDetection extends DetectionBase {
+  readonly status: "unsupported";
+  readonly unsupportedReason: string;
 }
 
 export type DetectionResult =
-  | {
-      readonly status: "available";
-      readonly productVersion?: string;
-      readonly configPath?: string;
-    }
-  | {
-      readonly status: "not-installed" | "unsupported";
-      readonly reason: string;
-      readonly productVersion?: string;
-    };
+  | AvailableDetection
+  | MissingDetection
+  | UnsupportedDetection;
 
-export interface InspectionResult<Snapshot> {
-  readonly snapshot: Snapshot;
-  readonly warnings: readonly string[];
+export function isDetectionAvailable(
+  detection: DetectionResult,
+): detection is AvailableDetection {
+  return detection.status === "installed" || detection.status === "config-only";
 }
 
 export interface WriteFileOperation {
@@ -64,11 +105,12 @@ export interface IntegrationAdapter<Intent, Snapshot> {
   detect(context: IntegrationContext): Promise<DetectionResult>;
   inspect(
     context: IntegrationContext,
-    detection: Extract<DetectionResult, { readonly status: "available" }>,
-  ): Promise<InspectionResult<Snapshot>>;
+    detection: AvailableDetection,
+  ): Promise<Snapshot>;
   plan(
     context: IntegrationContext,
-    inspection: InspectionResult<Snapshot>,
+    detection: AvailableDetection,
+    inspection: Snapshot,
     intent: Intent,
   ): Promise<ChangePlan>;
   verify(
@@ -84,4 +126,3 @@ export interface ChangeExecutor {
 }
 
 export type ChangeApproval = (plan: ChangePlan) => Promise<boolean>;
-

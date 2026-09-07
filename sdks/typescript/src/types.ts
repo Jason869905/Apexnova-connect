@@ -75,19 +75,24 @@ export interface IntegrationManifest {
   readonly links?: IntegrationLinks;
 }
 
-export interface ManifestValidationIssue {
+export interface SchemaValidationIssue {
   readonly instancePath: string;
   readonly schemaPath: string;
   readonly keyword: string;
   readonly message: string;
 }
 
-export type ManifestValidationResult =
+/** Kept for callers written against the manifest-only validator. */
+export type ManifestValidationIssue = SchemaValidationIssue;
+
+export type SchemaValidationResult<Value> =
   | {
       readonly valid: true;
-      readonly value: IntegrationManifest;
+      readonly value: Value;
     }
   | {
       readonly valid: false;
-      readonly errors: readonly ManifestValidationIssue[];
+      readonly errors: readonly SchemaValidationIssue[];
     };
+
+export type ManifestValidationResult = SchemaValidationResult<IntegrationManifest>;

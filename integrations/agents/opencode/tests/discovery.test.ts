@@ -33,13 +33,15 @@ describe("OpenCode discovery", () => {
     const configPath = join(root, "opencode.jsonc");
     await writeFile(configPath, "{ // valid\n}\n", "utf8");
 
-    const result = await detectOpenCode({
-      cwd: root,
-      homeDirectory: join(root, "home"),
-      environment: {},
-      platform: "linux",
-      runVersionCommand: async () => ({ found: true, stdout: "opencode 2.4.1\n" }),
-    });
+    const result = await detectOpenCode(
+      {
+        workingDirectory: root,
+        homeDirectory: join(root, "home"),
+        environment: {},
+        platform: "linux",
+      },
+      async () => ({ found: true, stdout: "opencode 2.4.1\n" })
+    );
 
     expect(result).toMatchObject({
       status: "installed",
@@ -56,13 +58,15 @@ describe("OpenCode discovery", () => {
     await mkdir(configRoot, { recursive: true });
     await writeFile(join(configRoot, "opencode.json"), "{}\n", "utf8");
 
-    const result = await detectOpenCode({
-      cwd: root,
-      homeDirectory: join(root, "home"),
-      environment: { XDG_CONFIG_HOME: join(root, "xdg") },
-      platform: "linux",
-      runVersionCommand: async () => ({ found: false }),
-    });
+    const result = await detectOpenCode(
+      {
+        workingDirectory: root,
+        homeDirectory: join(root, "home"),
+        environment: { XDG_CONFIG_HOME: join(root, "xdg") },
+        platform: "linux",
+      },
+      async () => ({ found: false })
+    );
 
     expect(result.status).toBe("config-only");
     expect(result.configScope).toBe("global");
@@ -72,13 +76,16 @@ describe("OpenCode discovery", () => {
   it("uses an explicit absent path as the preferred future configuration", async () => {
     const root = await createTestRoot();
     const configPath = join(root, "custom", "opencode.jsonc");
-    const result = await detectOpenCode({
-      cwd: root,
-      homeDirectory: join(root, "home"),
-      environment: {},
-      configPath,
-      runVersionCommand: async () => ({ found: true, stdout: "2.0.0" }),
-    });
+    const result = await detectOpenCode(
+      {
+        workingDirectory: root,
+        homeDirectory: join(root, "home"),
+        environment: {},
+        platform: "linux",
+        configPath,
+      },
+      async () => ({ found: true, stdout: "2.0.0" }),
+    );
 
     expect(result.configPath).toBe(configPath);
     expect(result.configExists).toBe(false);
@@ -109,11 +116,16 @@ describe("OpenCode inspection", () => {
 `,
       "utf8",
     );
-    const detection = await detectOpenCode({
-      cwd: root,
-      configPath,
-      runVersionCommand: async () => ({ found: true, stdout: "2.1.0" }),
-    });
+    const detection = await detectOpenCode(
+      {
+        workingDirectory: root,
+        homeDirectory: join(root, "home"),
+        environment: {},
+        platform: "linux",
+        configPath,
+      },
+      async () => ({ found: true, stdout: "2.1.0" }),
+    );
 
     const result = await inspectOpenCode(detection);
 
@@ -122,10 +134,10 @@ describe("OpenCode inspection", () => {
       configPath,
       status: "configured",
       managed: true,
-      provider: {
-        id: "apexnova",
-        name: "Apexnova AI Hub",
-        npm: "@ai-sdk/openai",
+      connection: {
+        providerId: "apexnova",
+        displayName: "Apexnova AI Hub",
+        packageName: "@ai-sdk/openai",
         protocol: "openai-responses",
         baseUrl: "https://api.example.test/v1",
         environmentVariables: ["APEXNOVA_API_KEY"],
@@ -140,16 +152,7 @@ describe("OpenCode inspection", () => {
   it("reports legacy and invalid configurations without returning their content", async () => {
     const root = await createTestRoot();
     const configPath = join(root, "opencode.json");
-    const baseDetection = {
-      agentId: "opencode" as const,
-      displayName: "OpenCode" as const,
-      status: "installed" as const,
-      configPath,
-      configExists: true,
-      configScope: "explicit" as const,
-      evidence: [],
-      warnings: [],
-    };
+    const baseDetection = { configPath, configExists: true };
 
     await writeFile(configPath, '{ "providers": {} }\n', "utf8");
     expect((await inspectOpenCode(baseDetection)).status).toBe("legacy");
@@ -175,18 +178,9 @@ describe("OpenCode inspection", () => {
       }),
       "utf8",
     );
-    const result = await inspectOpenCode({
-      agentId: "opencode",
-      displayName: "OpenCode",
-      status: "installed",
-      configPath,
-      configExists: true,
-      configScope: "explicit",
-      evidence: [],
-      warnings: [],
-    });
+    const result = await inspectOpenCode({ configPath, configExists: true });
 
-    expect(result.provider?.baseUrl).toBe("https://example.test/v1");
+    expect(result.connection?.baseUrl).toBe("https://example.test/v1");
     expect(JSON.stringify(result)).not.toContain("secret");
     expect(JSON.stringify(result)).not.toContain("hidden");
     expect(result.warnings).toHaveLength(1);

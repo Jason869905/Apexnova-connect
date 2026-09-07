@@ -5,9 +5,19 @@ import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { EXIT_CODES, RuntimeBindingStore, resolveOpenCodeExecutable, runCli, type CliIo, type HubCommandService } from "../src/index.js";
+import { EXIT_CODES, RuntimeBindingStore, runCli, type CliIo, type HubCommandService } from "../src/index.js";
 import { HubClientError } from "@apexnova-connect/hub-client";
-import type { OpenCodeDetection, OpenCodeInspection } from "@apexnova-connect/integration-opencode";
+import { createIntegrationRegistry } from "@apexnova-connect/core";
+import {
+  openCodeIntegration,
+  resolveOpenCodeExecutable,
+} from "@apexnova-connect/integration-opencode";
+import type {
+  AgentInspection,
+  AgentIntegration,
+  DetectionResult,
+  IntegrationContext,
+} from "@apexnova-connect/integration-sdk";
 
 function captureIo() {
   let stdout = "";
@@ -24,17 +34,35 @@ function captureIo() {
   };
 }
 
-const installed: OpenCodeDetection = {
+const installed: DetectionResult = {
   agentId: "opencode",
   displayName: "OpenCode",
   status: "installed",
-  productVersion: "2.4.1",
+  productVersion: "1.18.29",
   configPath: "/safe/opencode.jsonc",
   configExists: true,
   configScope: "project",
   evidence: ["test"],
   warnings: [],
 };
+
+/**
+ * The CLI is driven through the registry, so a test swaps in the real OpenCode
+ * integration with only the parts it wants to control replaced.
+ */
+function registryWith(overrides: Partial<AgentIntegration> = {}) {
+  return createIntegrationRegistry([{
+    ...openCodeIntegration,
+    // Executable resolution has its own unit test; CLI tests must not depend on
+    // an OpenCode binary existing on the machine running them.
+    planLaunch: async (request) => ({
+      executable: "opencode",
+      args: [...request.args],
+      environment: { ...request.context.environment, ...request.credentialEnvironment },
+    }),
+    ...overrides,
+  }]);
+}
 
 function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService {
   return {
@@ -78,8 +106,14 @@ function memoryCredentials(): CredentialStore {
 describe("CLI", () => {
   it("resolves the native OpenCode target behind an npm Windows shim without a shell", () => {
     const expected = "C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe";
-    expect(resolveOpenCodeExecutable("win32", { PATH: "C:\\other;C:\\npm" }, (path) => path === expected)).toBe(expected);
-    expect(resolveOpenCodeExecutable("linux", {}, () => false)).toBe("opencode");
+    const context = (platform: "windows" | "linux", environment: Record<string, string>): IntegrationContext => ({
+      platform,
+      workingDirectory: "/workspace",
+      homeDirectory: "/home/tester",
+      environment,
+    });
+    expect(resolveOpenCodeExecutable(context("windows", { PATH: "C:\\other;C:\\npm" }), (path: string) => path === expected)).toBe(expected);
+    expect(resolveOpenCodeExecutable(context("linux", {}), () => false)).toBe("opencode");
   });
 
   it("emits the versioned JSON envelope for detect", async () => {
@@ -87,7 +121,7 @@ describe("CLI", () => {
     const detect = vi.fn(async () => installed);
     const result = await runCli(["detect", "opencode", "--json"], {
       io: capture.io,
-      detectOpenCode: detect,
+      registry: registryWith({ detect: detect }),
       createRequestId: () => "local_test",
     });
 
@@ -97,7 +131,7 @@ describe("CLI", () => {
       command: "detect",
       requestId: "local_test",
       ok: true,
-      data: installed,
+      data: { schemaVersion: "0.1", ...installed },
       warnings: [],
     });
     expect(capture.stderr()).toBe("");
@@ -107,12 +141,13 @@ describe("CLI", () => {
     const capture = captureIo();
     const result = await runCli(["detect", "opencode", "--json"], {
       io: capture.io,
-      detectOpenCode: async () => ({
-        ...installed,
-        status: "not-found",
-        productVersion: undefined,
-        configExists: false,
-      } as unknown as OpenCodeDetection),
+      registry: registryWith({
+        detect: async () => ({
+          ...installed,
+          status: "not-found",
+          configExists: false,
+        }),
+      }),
       createRequestId: () => "local_missing",
     });
 
@@ -125,13 +160,13 @@ describe("CLI", () => {
 
   it("returns sanitized inspection metadata", async () => {
     const capture = captureIo();
-    const inspection: OpenCodeInspection = {
+    const inspection: AgentInspection = {
       agentId: "opencode",
       configPath: installed.configPath,
       status: "configured",
       managed: true,
-      provider: {
-        id: "apexnova",
+      connection: {
+        providerId: "apexnova",
         protocol: "openai-responses",
         baseUrl: "https://api.example.test/v1",
         environmentVariables: ["APEXNOVA_API_KEY"],
@@ -141,26 +176,27 @@ describe("CLI", () => {
     };
     const result = await runCli(["inspect", "opencode", "--json"], {
       io: capture.io,
-      detectOpenCode: async () => installed,
-      inspectOpenCode: async () => inspection,
+      registry: registryWith({ detect: async () => installed, inspect: async () => inspection }),
       createRequestId: () => "local_inspect",
     });
 
     expect(result.exitCode).toBe(EXIT_CODES.success);
-    expect(JSON.parse(capture.stdout()).data).toEqual(inspection);
+    expect(JSON.parse(capture.stdout()).data).toEqual({ schemaVersion: "0.1", ...inspection });
   });
 
   it("rejects legacy config with the documented conflict exit code", async () => {
     const capture = captureIo();
     const result = await runCli(["inspect", "opencode", "--json"], {
       io: capture.io,
-      detectOpenCode: async () => installed,
-      inspectOpenCode: async () => ({
-        agentId: "opencode",
-        configPath: installed.configPath,
-        status: "legacy",
-        managed: false,
-        warnings: ["Legacy config detected."],
+      registry: registryWith({
+        detect: async () => installed,
+        inspect: async () => ({
+          agentId: "opencode",
+          configPath: installed.configPath,
+          status: "legacy",
+          managed: false,
+          warnings: ["Legacy config detected."],
+        }),
       }),
       createRequestId: () => "local_legacy",
     });
@@ -220,8 +256,7 @@ describe("CLI", () => {
     const result = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--dry-run", "--json"], {
       io: capture.io,
       hubService: mockHub(),
-      detectOpenCode: async () => ({ ...installed, configPath }),
-      inspectOpenCode: async () => ({ agentId: "opencode", configPath, status: "not-configured", managed: false, warnings: [] }),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }), inspect: async () => ({ agentId: "opencode", configPath, status: "not-configured", managed: false, warnings: [] }) }),
       createRequestId: () => "local_plan",
     });
     const output = JSON.parse(capture.stdout());
@@ -238,7 +273,7 @@ describe("CLI", () => {
     await writeFile(configPath, "{}\n", "utf8");
     const capture = captureIo();
     const issue = vi.fn(mockHub().createRuntimeCredential);
-    const result = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--json"], { io: capture.io, hubService: mockHub({ createRuntimeCredential: issue }), detectOpenCode: async () => ({ ...installed, configPath }), createRequestId: () => "local_approval" });
+    const result = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--json"], { io: capture.io, hubService: mockHub({ createRuntimeCredential: issue }), registry: registryWith({ detect: async () => ({ ...installed, configPath }) }), createRequestId: () => "local_approval" });
     expect(result.exitCode).toBe(EXIT_CODES.permission);
     expect(JSON.parse(capture.stdout()).error.code).toBe("APPROVAL_REQUIRED");
     expect(issue).not.toHaveBeenCalled();
@@ -257,7 +292,7 @@ describe("CLI", () => {
       io: capture.io,
       hubService: hub,
       credentialStore: credentials,
-      detectOpenCode: async () => ({ ...installed, configPath }),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
       platform: "win32" as const,
       environment: { LOCALAPPDATA: root },
       homeDirectory: root,
@@ -280,7 +315,7 @@ describe("CLI", () => {
     const launched = await runCli(["run", "opencode", "--json", "--", "--help"], {
       ...common,
       io: launchCapture.io,
-      launchOpenCode: async (args, environment) => {
+      launchAgent: async ({ args: args, environment: environment }) => {
         expect(args).toEqual(["--help"]);
         launchedSecret = environment.APEXNOVA_API_KEY;
         return 0;
@@ -339,7 +374,7 @@ describe("CLI", () => {
     const common = {
       hubService: hub,
       credentialStore: credentials,
-      detectOpenCode: async () => ({ ...installed, configPath }),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
       platform: "win32" as const,
       environment: { LOCALAPPDATA: root },
       homeDirectory: root,
@@ -357,7 +392,7 @@ describe("CLI", () => {
     expect(switched.exitCode).toBe(EXIT_CODES.success);
     const switchTransactionId = JSON.parse(switchCapture.stdout()).data.transactionId as string;
     expect(switchTransactionId).not.toBe(initialTransactionId);
-    expect((await bindings.load("default"))).toMatchObject({
+    expect((await bindings.load("opencode", "default"))).toMatchObject({
       credentialId: "rtc_2",
       protocol: "openai-chat",
       transactionId: switchTransactionId,
@@ -371,18 +406,18 @@ describe("CLI", () => {
     const outOfOrder = await runCli(["restore", initialTransactionId, "--yes", "--json"], { ...common, io: outOfOrderCapture.io });
     expect(outOfOrder.exitCode).toBe(EXIT_CODES.conflict);
     expect(JSON.parse(outOfOrderCapture.stdout())).toMatchObject({ error: { code: "RESTORE_ORDER_CONFLICT" } });
-    expect((await bindings.load("default"))?.credentialId).toBe("rtc_2");
+    expect((await bindings.load("opencode", "default"))?.credentialId).toBe("rtc_2");
 
     const restoreSwitchCapture = captureIo();
     const restoredSwitch = await runCli(["restore", switchTransactionId, "--yes", "--json"], { ...common, io: restoreSwitchCapture.io });
     expect(restoredSwitch.exitCode).toBe(EXIT_CODES.success);
     expect(JSON.parse(restoreSwitchCapture.stdout())).toMatchObject({ data: { runtimeCredentialRestored: true, runtimeCredentialRevoked: true } });
-    expect((await bindings.load("default"))).toMatchObject({
+    expect((await bindings.load("opencode", "default"))).toMatchObject({
       credentialId: "rtc_3",
       protocol: "openai-responses",
       transactionId: initialTransactionId,
     });
-    expect((await bindings.load("default"))?.restoreTarget).toBeUndefined();
+    expect((await bindings.load("opencode", "default"))?.restoreTarget).toBeUndefined();
     expect(active.has("rtc_2")).toBe(false);
 
     const restoreInitialCapture = captureIo();
@@ -390,7 +425,7 @@ describe("CLI", () => {
     expect(restoredInitial.exitCode).toBe(EXIT_CODES.success);
     expect(JSON.parse(restoreInitialCapture.stdout())).toMatchObject({ data: { runtimeCredentialRestored: false, runtimeCredentialRevoked: true } });
     expect(await readFile(configPath, "utf8")).toBe(original);
-    expect(await bindings.load("default")).toBeNull();
+    expect(await bindings.load("opencode", "default")).toBeNull();
     expect(active.size).toBe(0);
     expect(revokeRuntimeCredential.mock.calls.map((call) => call[1])).toEqual(["rtc_1", "rtc_2", "rtc_3"]);
   });
@@ -399,7 +434,7 @@ describe("CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-renew-"));
     const credentials = memoryCredentials();
     const bindings = new RuntimeBindingStore(credentials);
-    await bindings.save("default", {
+    await bindings.save("opencode", "default", {
       credentialId: "rtc_old",
       secret: SecretValue.from("old-runtime-secret"),
       expiresAt: "2026-09-05T10:30:00Z",
@@ -413,13 +448,13 @@ describe("CLI", () => {
     const result = await runCli(["run", "opencode", "--json"], {
       io: capture.io,
       credentialStore: credentials,
-      detectOpenCode: async () => installed,
+      registry: registryWith({ detect: async () => installed }),
       hubService: mockHub({
         createRuntimeCredential: issue,
         runtimeCredentials: async () => [{ credentialId: "rtc_new", name: "OpenCode", prefix: "anrt_new...test", deviceId: "device_1", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], expiresAt: "2026-09-06T10:00:00Z", createdAt: "2026-09-05T10:00:00Z" }],
         revokeRuntimeCredential: revoke,
       }),
-      launchOpenCode: async (_args, environment) => { launchedSecret = environment.APEXNOVA_API_KEY; return 0; },
+      launchAgent: async ({ args: _args, environment: environment }) => { launchedSecret = environment.APEXNOVA_API_KEY; return 0; },
       platform: "win32",
       environment: { LOCALAPPDATA: root },
       homeDirectory: root,
@@ -432,7 +467,7 @@ describe("CLI", () => {
     expect(issue).toHaveBeenCalledOnce();
     expect(revoke).toHaveBeenCalledWith("default", "rtc_old", expect.any(AbortSignal));
     expect(launchedSecret).toBe("new-runtime-secret");
-    expect((await bindings.load("default"))?.credentialId).toBe("rtc_new");
+    expect((await bindings.load("opencode", "default"))?.credentialId).toBe("rtc_new");
     expect(capture.stdout()).not.toContain("new-runtime-secret");
   });
 
@@ -440,7 +475,7 @@ describe("CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-renew-fail-"));
     const credentials = memoryCredentials();
     const bindings = new RuntimeBindingStore(credentials);
-    await bindings.save("default", {
+    await bindings.save("opencode", "default", {
       credentialId: "rtc_old",
       secret: SecretValue.from("old-runtime-secret"),
       expiresAt: "2026-09-05T10:30:00Z",
@@ -453,13 +488,13 @@ describe("CLI", () => {
     const result = await runCli(["run", "opencode", "--json"], {
       io: capture.io,
       credentialStore: credentials,
-      detectOpenCode: async () => installed,
+      registry: registryWith({ detect: async () => installed }),
       hubService: mockHub({
         createRuntimeCredential: async () => ({ credentialId: "rtc_new", expiresAt: "2026-09-06T10:00:00Z", deviceId: "device_1", secret: SecretValue.from("new-runtime-secret") }),
         runtimeCredentials: async () => [],
         revokeRuntimeCredential: revoke,
       }),
-      launchOpenCode: launch,
+      launchAgent: launch,
       platform: "win32",
       environment: { LOCALAPPDATA: root },
       homeDirectory: root,
@@ -470,7 +505,7 @@ describe("CLI", () => {
     expect(result.exitCode).toBe(EXIT_CODES.verification);
     expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "VERIFICATION_FAILED" } });
     expect(revoke).toHaveBeenCalledWith("default", "rtc_new", expect.any(AbortSignal));
-    expect((await bindings.load("default"))?.credentialId).toBe("rtc_old");
+    expect((await bindings.load("opencode", "default"))?.credentialId).toBe("rtc_old");
     expect(launch).not.toHaveBeenCalled();
   });
 
@@ -484,11 +519,13 @@ describe("CLI", () => {
     const result = await runCli(["run", "opencode", "--json"], {
       io: capture.io,
       credentialStore: credentials,
-      detectOpenCode: async () => {
-        const { productVersion: _productVersion, ...configOnly } = installed;
-        return { ...configOnly, status: "config-only" };
-      },
-      launchOpenCode: launch,
+      registry: registryWith({
+        detect: async () => {
+          const { productVersion: _productVersion, ...configOnly } = installed;
+          return { ...configOnly, status: "config-only" };
+        },
+      }),
+      launchAgent: launch,
       createRequestId: () => "local_run_missing",
     });
 
@@ -502,8 +539,7 @@ describe("CLI", () => {
     const capture = captureIo();
     const result = await runCli(["verify", "opencode", "--json"], {
       io: capture.io,
-      detectOpenCode: async () => installed,
-      inspectOpenCode: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, provider: { id: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }),
+      registry: registryWith({ detect: async () => installed, inspect: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, connection: { providerId: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }) }),
       createRequestId: () => "local_verify",
     });
     expect(result.exitCode).toBe(EXIT_CODES.success);
@@ -513,7 +549,7 @@ describe("CLI", () => {
   it("shows a non-binding estimate and requires approval before live verification", async () => {
     const capture = captureIo();
     const credentials = memoryCredentials();
-    await new RuntimeBindingStore(credentials).save("default", {
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
       credentialId: "rtc_1",
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
@@ -525,8 +561,7 @@ describe("CLI", () => {
       io: capture.io,
       credentialStore: credentials,
       hubService: mockHub(),
-      detectOpenCode: async () => installed,
-      inspectOpenCode: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, provider: { id: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }),
+      registry: registryWith({ detect: async () => installed, inspect: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, connection: { providerId: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }) }),
       verifyHubInference: live,
       createRequestId: () => "local_live_approval",
     });
@@ -542,7 +577,7 @@ describe("CLI", () => {
   it("performs an approved live verification without exposing the credential", async () => {
     const capture = captureIo();
     const credentials = memoryCredentials();
-    await new RuntimeBindingStore(credentials).save("default", {
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
       credentialId: "rtc_1",
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
@@ -554,8 +589,7 @@ describe("CLI", () => {
       io: capture.io,
       credentialStore: credentials,
       hubService: mockHub(),
-      detectOpenCode: async () => installed,
-      inspectOpenCode: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, provider: { id: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }),
+      registry: registryWith({ detect: async () => installed, inspect: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, connection: { providerId: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }) }),
       verifyHubInference: live,
       createRequestId: () => "local_live",
     });
@@ -569,7 +603,7 @@ describe("CLI", () => {
   it("reconciles the real billed cost from the Hub after live verification", async () => {
     const capture = captureIo();
     const credentials = memoryCredentials();
-    await new RuntimeBindingStore(credentials).save("default", {
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
       credentialId: "rtc_1",
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
@@ -586,8 +620,7 @@ describe("CLI", () => {
       io: capture.io,
       credentialStore: credentials,
       hubService: mockHub({ usage }),
-      detectOpenCode: async () => installed,
-      inspectOpenCode: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, provider: { id: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }),
+      registry: registryWith({ detect: async () => installed, inspect: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, connection: { providerId: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }) }),
       verifyHubInference: live,
       createRequestId: () => "local_billed",
     });
@@ -627,10 +660,10 @@ describe("CLI", () => {
     })));
     const bindings = new RuntimeBindingStore(credentials);
 
-    const loaded = await bindings.load("legacy");
+    const loaded = await bindings.load("opencode", "legacy");
     expect(loaded).toMatchObject({ credentialId: "rtc_legacy", protocol: "openai-responses", deploymentId: "deployment.nova" });
     expect(loaded?.restoreTarget).toBeUndefined();
-    await bindings.save("legacy", loaded!);
+    await bindings.save("opencode", "legacy", loaded!);
 
     expect(JSON.parse((await credentials.get(key))!.reveal())).toMatchObject({ version: 3, credentialId: "rtc_legacy", kind: "runtime" });
   });
@@ -673,15 +706,17 @@ describe("CLI", () => {
       io: doctorCapture.io,
       hubService: mockHub(),
       credentialStore: memoryCredentials(),
-      detectOpenCode: async () => installed,
+      registry: registryWith({ detect: async () => installed }),
       createRequestId: () => "local_doctor",
     });
     expect(doctor.exitCode).toBe(EXIT_CODES.success);
-    expect(JSON.parse(doctorCapture.stdout()).data.checks).toContainEqual({
-      name: "hub-endpoint",
-      status: "pass",
-      message: "https://hub.example.test (config-file)",
-    });
+    expect(JSON.parse(doctorCapture.stdout()).data.checks).toContainEqual(
+      expect.objectContaining({
+        id: "hub-endpoint",
+        status: "pass",
+        message: "https://hub.example.test (config-file)",
+      }),
+    );
   });
 
   it("init refuses to clobber an existing config without --force", async () => {
@@ -723,21 +758,23 @@ describe("CLI", () => {
       homeDirectory: home,
       hubService: mockHub(),
       credentialStore: memoryCredentials(),
-      detectOpenCode: async () => installed,
+      registry: registryWith({ detect: async () => installed }),
       createRequestId: () => "local_env",
     });
-    expect(JSON.parse(capture.stdout()).data.checks).toContainEqual({
-      name: "hub-endpoint",
-      status: "pass",
-      message: "https://env.example.test (environment)",
-    });
+    expect(JSON.parse(capture.stdout()).data.checks).toContainEqual(
+      expect.objectContaining({
+        id: "hub-endpoint",
+        status: "pass",
+        message: "https://env.example.test (environment)",
+      }),
+    );
   });
 
   it("refuses an oversized OpenCode config on both the connect and opencode paths", async () => {
     const dir = await mkdtemp(join(tmpdir(), "apexnova-bigconfig-"));
     const configPath = join(dir, "opencode.jsonc");
     await writeFile(configPath, `{"$schema":"https://opencode.ai/config.json","x":"${"a".repeat(2 * 1024 * 1024)}"}`, "utf8");
-    const detection: OpenCodeDetection = { ...installed, configPath, configExists: true };
+    const detection: DetectionResult = { ...installed, configPath, configExists: true };
 
     const shared = {
       environment: {},
@@ -745,8 +782,8 @@ describe("CLI", () => {
       homeDirectory: dir,
       hubService: mockHub(),
       credentialStore: memoryCredentials(),
-      detectOpenCode: async () => detection,
-      launchOpenCode: async () => 0,
+      registry: registryWith({ detect: async () => detection }),
+      launchAgent: async () => 0,
     };
 
     const connectCapture = captureIo();
@@ -776,8 +813,8 @@ describe("CLI", () => {
       homeDirectory: "/nonexistent-apexnova-home",
       hubService: mockHub(),
       credentialStore: memoryCredentials(),
-      detectOpenCode: async () => installed,
-      launchOpenCode: async () => 0,
+      registry: registryWith({ detect: async () => installed }),
+      launchAgent: async () => 0,
       createRequestId: () => "local_pick",
     });
     expect(result.exitCode).toBe(EXIT_CODES.usage);

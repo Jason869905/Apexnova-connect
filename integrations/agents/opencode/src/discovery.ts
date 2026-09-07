@@ -1,79 +1,44 @@
-import { execFile } from "node:child_process";
 import { stat, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
+import {
+  AgentIntegrationError,
+  probeExecutableVersion,
+  type AgentInspection,
+  type CommandProbe,
+  type ConfigScope,
+  type DetectionResult,
+  type IntegrationContext,
+  type ManagedConnection,
+} from "@apexnova-connect/integration-sdk";
 import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 
 import { OPENCODE_PROVIDER_ID } from "./open-code-v2-config.js";
 
 const MAX_CONFIG_BYTES = 2 * 1024 * 1024;
-const VERSION_TIMEOUT_MS = 3_000;
-const VERSION_OUTPUT_BYTES = 64 * 1024;
 
-export type OpenCodeConfigScope = "explicit" | "project" | "global";
+export const OPENCODE_AGENT_ID = "opencode" as const;
+export const OPENCODE_DISPLAY_NAME = "OpenCode" as const;
+export const OPENCODE_EXECUTABLE = "opencode" as const;
 
-export interface OpenCodeCommandResult {
-  readonly found: boolean;
-  readonly stdout?: string;
-  readonly stderr?: string;
-  readonly error?: string;
-}
+export type OpenCodeInspectionErrorCode = "CONFIG_TOO_LARGE" | "CONFIG_READ_FAILED";
 
-export interface OpenCodeDetectionOptions {
-  readonly cwd?: string;
-  readonly platform?: NodeJS.Platform;
-  readonly environment?: NodeJS.ProcessEnv;
-  readonly homeDirectory?: string;
-  readonly configPath?: string;
-  readonly runVersionCommand?: () => Promise<OpenCodeCommandResult>;
-}
+export class OpenCodeInspectionError extends AgentIntegrationError {
+  declare readonly code: OpenCodeInspectionErrorCode;
 
-export interface OpenCodeDetection {
-  readonly agentId: "opencode";
-  readonly displayName: "OpenCode";
-  readonly status: "installed" | "config-only" | "not-found";
-  readonly productVersion?: string;
-  readonly configPath: string;
-  readonly configExists: boolean;
-  readonly configScope: OpenCodeConfigScope;
-  readonly evidence: readonly string[];
-  readonly warnings: readonly string[];
-}
-
-export interface OpenCodeManagedProvider {
-  readonly id: typeof OPENCODE_PROVIDER_ID;
-  readonly name?: string;
-  readonly npm?: string;
-  readonly protocol?: "openai-responses" | "openai-chat-completions" | "unknown";
-  readonly baseUrl?: string;
-  readonly environmentVariables: readonly string[];
-  readonly modelIds: readonly string[];
-  readonly defaultModelId?: string;
-}
-
-export interface OpenCodeInspection {
-  readonly agentId: "opencode";
-  readonly configPath: string;
-  readonly status: "not-configured" | "configured" | "legacy" | "invalid";
-  readonly managed: boolean;
-  readonly provider?: OpenCodeManagedProvider;
-  readonly warnings: readonly string[];
-}
-
-export class OpenCodeInspectionError extends Error {
-  readonly code: "CONFIG_TOO_LARGE" | "CONFIG_READ_FAILED";
-
-  constructor(code: OpenCodeInspectionError["code"], message: string, options?: ErrorOptions) {
-    super(message, options);
+  constructor(
+    code: OpenCodeInspectionErrorCode,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(code, message, options ?? {});
     this.name = "OpenCodeInspectionError";
-    this.code = code;
   }
 }
 
 interface ConfigCandidate {
   readonly path: string;
-  readonly scope: OpenCodeConfigScope;
+  readonly scope: ConfigScope;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -84,29 +49,38 @@ function isJsonObject(value: unknown): value is JsonObject {
 
 function uniqueCandidates(
   candidates: readonly ConfigCandidate[],
-  platform: NodeJS.Platform,
+  context: IntegrationContext,
 ): ConfigCandidate[] {
   const seen = new Set<string>();
   return candidates.filter((candidate) => {
-    const key = platform === "win32" ? candidate.path.toLowerCase() : candidate.path;
+    const key =
+      context.platform === "windows" ? candidate.path.toLowerCase() : candidate.path;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-function configCandidates(options: OpenCodeDetectionOptions): ConfigCandidate[] {
-  const cwd = resolve(options.cwd ?? process.cwd());
-  const platform = options.platform ?? process.platform;
-  const environment = options.environment ?? process.env;
-  const homeDirectory = resolve(options.homeDirectory ?? homedir());
+export function openCodeConfigRoots(context: IntegrationContext): readonly string[] {
+  return [...new Set(configCandidates(context).map((candidate) => dirnameOf(candidate.path)))];
+}
+
+function dirnameOf(path: string): string {
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return index <= 0 ? path : path.slice(0, index);
+}
+
+function configCandidates(context: IntegrationContext): ConfigCandidate[] {
+  const cwd = resolve(context.workingDirectory);
+  const homeDirectory = resolve(context.homeDirectory);
+  const environment = context.environment;
   const candidates: ConfigCandidate[] = [];
 
-  if (options.configPath) {
+  if (context.configPath) {
     candidates.push({
-      path: isAbsolute(options.configPath)
-        ? resolve(options.configPath)
-        : resolve(cwd, options.configPath),
+      path: isAbsolute(context.configPath)
+        ? resolve(context.configPath)
+        : resolve(cwd, context.configPath),
       scope: "explicit",
     });
   }
@@ -128,14 +102,14 @@ function configCandidates(options: OpenCodeDetectionOptions): ConfigCandidate[] 
     { path: join(homeDirectory, ".config", "opencode", "opencode.json"), scope: "global" },
   );
 
-  if (platform === "win32" && environment.APPDATA) {
+  if (context.platform === "windows" && environment.APPDATA) {
     candidates.push(
       { path: join(environment.APPDATA, "opencode", "opencode.jsonc"), scope: "global" },
       { path: join(environment.APPDATA, "opencode", "opencode.json"), scope: "global" },
     );
   }
 
-  return uniqueCandidates(candidates, platform);
+  return uniqueCandidates(candidates, context);
 }
 
 async function isRegularFile(path: string): Promise<boolean> {
@@ -147,55 +121,11 @@ async function isRegularFile(path: string): Promise<boolean> {
   }
 }
 
-function defaultVersionCommand(platform: NodeJS.Platform): Promise<OpenCodeCommandResult> {
-  const execute = (executable: string, args: readonly string[]) => new Promise<OpenCodeCommandResult>((resolveCommand) => {
-    execFile(
-      executable,
-      [...args],
-      {
-        encoding: "utf8",
-        timeout: VERSION_TIMEOUT_MS,
-        maxBuffer: VERSION_OUTPUT_BYTES,
-        windowsHide: true,
-      },
-      (error, stdout, stderr) => {
-        if (!error) {
-          resolveCommand({ found: true, stdout, stderr });
-          return;
-        }
-        const code = "code" in error ? error.code : undefined;
-        if (code === "ENOENT") {
-          resolveCommand({ found: false });
-          return;
-        }
-        resolveCommand({
-          found: true,
-          stdout,
-          stderr,
-          error: error.message,
-        });
-      },
-    );
-  });
-
-  if (platform !== "win32") return execute("opencode", ["--version"]);
-
-  return execute("where.exe", ["opencode"]).then((located) => {
-    if (!located.found || located.error || !located.stdout?.trim()) return { found: false };
-    // `.cmd` shims need cmd.exe on Windows. The command is constant; no user input is interpolated.
-    return execute("cmd.exe", ["/d", "/s", "/c", "opencode.cmd --version"]);
-  });
-}
-
-function extractVersion(result: OpenCodeCommandResult): string | undefined {
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  return output.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/)?.[0];
-}
-
 export async function detectOpenCode(
-  options: OpenCodeDetectionOptions = {},
-): Promise<OpenCodeDetection> {
-  const candidates = configCandidates(options);
+  context: IntegrationContext,
+  runVersionCommand?: CommandProbe,
+): Promise<DetectionResult> {
+  const candidates = configCandidates(context);
   const explicitCandidate = candidates.find((candidate) => candidate.scope === "explicit");
   let existingCandidate: ConfigCandidate | undefined;
   const candidatesToProbe = explicitCandidate ? [explicitCandidate] : candidates;
@@ -213,29 +143,28 @@ export async function detectOpenCode(
     candidates[0];
   if (!preferredCandidate) throw new Error("No OpenCode configuration candidate is available.");
 
-  const platform = options.platform ?? process.platform;
-  const commandResult = await (options.runVersionCommand ?? (() => defaultVersionCommand(platform)))();
-  const productVersion = extractVersion(commandResult);
-  const evidence: string[] = [];
-  const warnings: string[] = [];
-  if (commandResult.found) evidence.push("opencode executable responded to --version");
-  if (existingCandidate) evidence.push(`configuration file found (${existingCandidate.scope})`);
-  if (commandResult.error) {
-    warnings.push("The OpenCode executable was found but its version command did not complete successfully.");
-  } else if (commandResult.found && !productVersion) {
-    warnings.push("The OpenCode executable did not return a recognizable semantic version.");
+  const probe = await probeExecutableVersion({
+    executable: OPENCODE_EXECUTABLE,
+    displayName: OPENCODE_DISPLAY_NAME,
+    platform: context.platform,
+    ...(runVersionCommand ? { run: runVersionCommand } : {}),
+  });
+
+  const evidence = [...probe.evidence];
+  if (existingCandidate) {
+    evidence.push(`configuration file found (${existingCandidate.scope})`);
   }
 
   return {
-    agentId: "opencode",
-    displayName: "OpenCode",
-    status: commandResult.found ? "installed" : existingCandidate ? "config-only" : "not-found",
-    ...(productVersion ? { productVersion } : {}),
+    agentId: OPENCODE_AGENT_ID,
+    displayName: OPENCODE_DISPLAY_NAME,
+    status: probe.found ? "installed" : existingCandidate ? "config-only" : "not-found",
+    ...(probe.version ? { productVersion: probe.version } : {}),
     configPath: preferredCandidate.path,
     configExists: existingCandidate !== undefined,
     configScope: preferredCandidate.scope,
     evidence,
-    warnings,
+    warnings: probe.warnings,
   };
 }
 
@@ -274,19 +203,24 @@ function stringArray(value: unknown): string[] {
 
 function inferProtocol(
   packageName: string | undefined,
-): NonNullable<OpenCodeManagedProvider["protocol"]> {
-  if (!packageName) return "unknown";
+): NonNullable<ManagedConnection["protocol"]> {
   if (packageName === "@ai-sdk/openai") return "openai-responses";
   if (packageName === "@ai-sdk/openai-compatible") return "openai-chat-completions";
   return "unknown";
 }
 
+/** Only the target file matters here, so a plan's write target can be re-inspected. */
+export interface OpenCodeInspectionTarget {
+  readonly configPath: string;
+  readonly configExists: boolean;
+}
+
 export async function inspectOpenCode(
-  detection: OpenCodeDetection,
-): Promise<OpenCodeInspection> {
+  detection: OpenCodeInspectionTarget,
+): Promise<AgentInspection> {
   if (!detection.configExists) {
     return {
-      agentId: "opencode",
+      agentId: OPENCODE_AGENT_ID,
       configPath: detection.configPath,
       status: "not-configured",
       managed: false,
@@ -323,7 +257,7 @@ export async function inspectOpenCode(
       ? errors.map((error) => `${printParseErrorCode(error.error)} at offset ${error.offset}`).join(", ")
       : "configuration root is not an object";
     return {
-      agentId: "opencode",
+      agentId: OPENCODE_AGENT_ID,
       configPath: detection.configPath,
       status: "invalid",
       managed: false,
@@ -333,7 +267,7 @@ export async function inspectOpenCode(
 
   if ("providers" in value) {
     return {
-      agentId: "opencode",
+      agentId: OPENCODE_AGENT_ID,
       configPath: detection.configPath,
       status: "legacy",
       managed: false,
@@ -343,7 +277,7 @@ export async function inspectOpenCode(
 
   if ("provider" in value && !isJsonObject(value.provider)) {
     return {
-      agentId: "opencode",
+      agentId: OPENCODE_AGENT_ID,
       configPath: detection.configPath,
       status: "invalid",
       managed: false,
@@ -357,7 +291,7 @@ export async function inspectOpenCode(
     : undefined;
   if (!provider) {
     return {
-      agentId: "opencode",
+      agentId: OPENCODE_AGENT_ID,
       configPath: detection.configPath,
       status: "not-configured",
       managed: false,
@@ -374,14 +308,14 @@ export async function inspectOpenCode(
   const providerPrefix = `${OPENCODE_PROVIDER_ID}/`;
 
   return {
-    agentId: "opencode",
+    agentId: OPENCODE_AGENT_ID,
     configPath: detection.configPath,
     status: "configured",
     managed: true,
-    provider: {
-      id: OPENCODE_PROVIDER_ID,
-      ...(providerName ? { name: providerName } : {}),
-      ...(packageName ? { npm: packageName } : {}),
+    connection: {
+      providerId: OPENCODE_PROVIDER_ID,
+      ...(providerName ? { displayName: providerName } : {}),
+      ...(packageName ? { packageName } : {}),
       protocol: inferProtocol(packageName),
       ...(baseUrl.value ? { baseUrl: baseUrl.value } : {}),
       environmentVariables: stringArray(provider.env),

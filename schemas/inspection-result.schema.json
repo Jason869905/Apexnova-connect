@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/inspection-result.schema.json",
+  "title": "Agent Inspection Result",
+  "description": "Read-only projection of a target product's current provider configuration. Never carries secrets; credential references are reported as environment variable names only.",
+  "type": "object",
+  "required": ["schemaVersion", "agentId", "configPath", "status", "managed", "warnings"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "agentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "configPath": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "status": {
+      "description": "not-configured: readable, without an Apexnova connection. configured: an Apexnova connection is present. legacy: a recognized but unsupported configuration format. invalid: unreadable or not parseable, and must never be guessed at or rewritten.",
+      "enum": ["not-configured", "configured", "legacy", "invalid"]
+    },
+    "managed": {
+      "description": "True only when the Apexnova connection in this file was written by Apexnova-connect.",
+      "type": "boolean"
+    },
+    "connection": {
+      "type": "object",
+      "required": ["providerId", "modelIds", "environmentVariables"],
+      "properties": {
+        "providerId": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "protocol": {
+          "anyOf": [
+            { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
+            { "const": "unknown" }
+          ]
+        },
+        "baseUrl": { "type": "string", "pattern": "^https?://", "maxLength": 2048 },
+        "packageName": { "type": "string", "maxLength": 214 },
+        "modelIds": {
+          "type": "array",
+          "maxItems": 512,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        },
+        "defaultModelId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "environmentVariables": {
+          "description": "Names of the environment variables the configuration references for its credential. Values are never included.",
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "maxLength": 128 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string", "maxLength": 1000 }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "configured" } }, "required": ["status"] },
+      "then": {
+        "properties": { "connection": { "type": "object" } },
+        "required": ["connection"]
+      }
+    }
+  ],
+  "additionalProperties": false
+}

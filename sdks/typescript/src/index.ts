@@ -32,21 +32,67 @@ export type {
   Platform,
   ProductCompatibility,
   ProtocolId,
+  SchemaValidationIssue,
+  SchemaValidationResult,
 } from "./types.js";
+
+export { isDetectionAvailable } from "./lifecycle.js";
 
 export type {
   ApplyReceipt,
+  AvailableDetection,
   ChangeApproval,
   ChangeExecutor,
   ChangeOperation,
   ChangePlan,
+  ConfigScope,
   DetectionResult,
-  InspectionResult,
+  DetectionStatus,
   IntegrationAdapter,
   IntegrationContext,
+  MissingDetection,
+  UnsupportedDetection,
   VerificationResult,
   WriteFileOperation,
 } from "./lifecycle.js";
+
+export { AgentIntegrationError } from "./agent.js";
+
+export type {
+  AgentInspection,
+  AgentIntegration,
+  ConnectionIntent,
+  DiagnosticCheck,
+  InspectionStatus,
+  LaunchPlan,
+  LaunchRequest,
+  ManagedConnection,
+  ModelLimits,
+} from "./agent.js";
+
+export { probeExecutableVersion, toPlatform } from "./process-probe.js";
+
+export type {
+  CommandProbe,
+  CommandProbeResult,
+  ExecutableProbe,
+  ProbeExecutableOptions,
+} from "./process-probe.js";
+
+export {
+  AGENT_CONTRACT_SCHEMA_VERSION,
+  assertDetectionDocument,
+  assertInspectionDocument,
+  toDetectionDocument,
+  toInspectionDocument,
+  validateDetectionDocument,
+  validateInspectionDocument,
+} from "./validate-agent-contract.js";
+
+export type {
+  DetectionResultDocument,
+  InspectionResultDocument,
+} from "./validate-agent-contract.js";
 
 export {
   assertIntegrationManifest,

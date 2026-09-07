@@ -26,6 +26,9 @@ importers:
       '@apexnova-connect/config-engine':
         specifier: workspace:*
         version: link:../../packages/config-engine
+      '@apexnova-connect/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@apexnova-connect/credential-store':
         specifier: workspace:*
         version: link:../../packages/credential-store
@@ -35,6 +38,9 @@ importers:
       '@apexnova-connect/integration-opencode':
         specifier: workspace:*
         version: link:../../integrations/agents/opencode
+      '@apexnova-connect/integration-sdk':
+        specifier: workspace:*
+        version: link:../../sdks/typescript
       '@inquirer/prompts':
         specifier: ^7.0.0
         version: 7.10.1(@types/node@24.13.3)

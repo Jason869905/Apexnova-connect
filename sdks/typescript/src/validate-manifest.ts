@@ -1,36 +1,18 @@
 import integrationManifestSchema from "@apexnova-connect/schemas/integration-manifest" with {
   type: "json",
 };
-import {
-  Ajv2020,
-  type ErrorObject,
-  type ValidateFunction,
-} from "ajv/dist/2020.js";
+import { type ValidateFunction } from "ajv/dist/2020.js";
 
+import { ajv, describeIssues, toValidationIssue } from "./ajv.js";
 import type {
   IntegrationManifest,
-  ManifestValidationIssue,
   ManifestValidationResult,
 } from "./types.js";
 
-const ajv = new Ajv2020({
-  allErrors: true,
-  strict: true,
-});
-
-const validate: ValidateFunction<IntegrationManifest> =
-  ajv.compile<IntegrationManifest>(integrationManifestSchema);
-
-function toValidationIssue(error: ErrorObject): ManifestValidationIssue {
-  return {
-    instancePath: error.instancePath,
-    schemaPath: error.schemaPath,
-    keyword: error.keyword,
-    message: error.message ?? "Manifest validation failed.",
-  };
-}
+let validate: ValidateFunction<IntegrationManifest> | undefined;
 
 export function validateIntegrationManifest(value: unknown): ManifestValidationResult {
+  validate ??= ajv.compile<IntegrationManifest>(integrationManifestSchema);
   if (validate(value)) {
     return {
       valid: true,
@@ -50,10 +32,8 @@ export function assertIntegrationManifest(
   const result = validateIntegrationManifest(value);
 
   if (!result.valid) {
-    const details = result.errors
-      .map((error) => `${error.instancePath || "/"}: ${error.message}`)
-      .join("; ");
-
-    throw new TypeError(`Invalid integration manifest: ${details}`);
+    throw new TypeError(
+      `Invalid integration manifest: ${describeIssues(result.errors)}`,
+    );
   }
 }

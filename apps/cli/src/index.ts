@@ -1,11 +1,12 @@
+export { runCli } from "./run-cli.js";
 export {
   EXIT_CODES,
-  resolveOpenCodeExecutable,
-  runCli,
   type CliDependencies,
   type CliIo,
+  type CliPickerItem,
   type CliRunResult,
-} from "./run-cli.js";
+} from "./cli-core.js";
+export { defaultAgentIntegrations } from "./integrations.js";
 export {
   createDefaultHubCommandService,
   type DefaultHubCommandServiceOptions,

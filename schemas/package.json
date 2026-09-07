@@ -16,7 +16,9 @@
     "./compatibility-evidence": "./compatibility-evidence.schema.json",
     "./recommendation": "./recommendation.schema.json",
     "./connection-profile": "./connection-profile.schema.json",
-    "./diagnostic-result": "./diagnostic-result.schema.json"
+    "./diagnostic-result": "./diagnostic-result.schema.json",
+    "./detection-result": "./detection-result.schema.json",
+    "./inspection-result": "./inspection-result.schema.json"
   },
   "files": [
     "*.schema.json"

@@ -56,8 +56,13 @@ interface StoredBindingV3 {
 
 type StoredBinding = StoredBindingV1 | StoredBindingV2 | StoredBindingV3;
 
-function key(profileId: string) {
-  return { integrationId: "opencode", accountId: profileId, kind: "runtime-credential" } as const;
+/**
+ * v0.1 stored the single binding under the hard-coded integration ID
+ * `opencode`, which is exactly what this produces for that agent, so existing
+ * installs keep their credential across the upgrade without a migration.
+ */
+function key(agentId: string, profileId: string) {
+  return { integrationId: agentId, accountId: profileId, kind: "runtime-credential" } as const;
 }
 
 function requiredString(value: unknown): string {
@@ -109,8 +114,8 @@ export class RuntimeBindingStore {
     this.#credentials = credentials;
   }
 
-  async load(profileId: string): Promise<RuntimeCredentialBinding | null> {
-    const stored = await this.#credentials.get(key(profileId));
+  async load(agentId: string, profileId: string): Promise<RuntimeCredentialBinding | null> {
+    const stored = await this.#credentials.get(key(agentId, profileId));
     if (stored === null) return null;
     let parsed: unknown;
     try { parsed = JSON.parse(stored.reveal()); } catch (cause) {
@@ -129,7 +134,7 @@ export class RuntimeBindingStore {
     };
   }
 
-  async save(profileId: string, binding: RuntimeCredentialBinding): Promise<void> {
+  async save(agentId: string, profileId: string, binding: RuntimeCredentialBinding): Promise<void> {
     const stored = parse({
       version: 3,
       credentialId: binding.credentialId,
@@ -141,10 +146,10 @@ export class RuntimeBindingStore {
       ...(binding.transactionId ? { transactionId: binding.transactionId } : {}),
       ...(binding.restoreTarget ? { restoreTarget: binding.restoreTarget } : {}),
     });
-    await this.#credentials.set(key(profileId), SecretValue.from(JSON.stringify(stored)));
+    await this.#credentials.set(key(agentId, profileId), SecretValue.from(JSON.stringify(stored)));
   }
 
-  async delete(profileId: string): Promise<void> {
-    await this.#credentials.delete(key(profileId));
+  async delete(agentId: string, profileId: string): Promise<void> {
+    await this.#credentials.delete(key(agentId, profileId));
   }
 }

@@ -23,10 +23,12 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@apexnova-connect/core": "workspace:*",
     "@apexnova-connect/credential-store": "workspace:*",
     "@apexnova-connect/config-engine": "workspace:*",
     "@apexnova-connect/hub-client": "workspace:*",
     "@apexnova-connect/integration-opencode": "workspace:*",
+    "@apexnova-connect/integration-sdk": "workspace:*",
     "@inquirer/prompts": "^7.0.0"
   }
 }

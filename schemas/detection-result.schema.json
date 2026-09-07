@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/detection-result.schema.json",
+  "title": "Agent Detection Result",
+  "description": "Read-only result of probing whether a target product is installed and where its configuration lives.",
+  "type": "object",
+  "required": ["schemaVersion", "agentId", "displayName", "status", "configPath", "configExists", "configScope", "evidence", "warnings"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "agentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "status": {
+      "description": "installed: the executable answered a version probe. config-only: no executable, but a configuration file exists. not-found: neither. unsupported: found, but outside the manifest version range or platform support.",
+      "enum": ["installed", "config-only", "not-found", "unsupported"]
+    },
+    "productVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "configPath": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "configExists": { "type": "boolean" },
+    "configScope": {
+      "description": "explicit: supplied by the caller. project: found in the working directory. global: found in a per-user configuration directory.",
+      "enum": ["explicit", "project", "global"]
+    },
+    "unsupportedReason": { "type": "string", "maxLength": 1000 },
+    "evidence": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string", "maxLength": 500 }
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string", "maxLength": 1000 }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "unsupported" } }, "required": ["status"] },
+      "then": {
+        "properties": { "unsupportedReason": { "type": "string", "maxLength": 1000 } },
+        "required": ["unsupportedReason"]
+      }
+    }
+  ],
+  "additionalProperties": false
+}

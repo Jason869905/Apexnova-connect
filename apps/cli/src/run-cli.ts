@@ -1,183 +1,92 @@
-import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { access, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
-import { dirname, join, resolve, win32 } from "node:path";
-import { spawn } from "node:child_process";
-import { input, select, password } from "@inquirer/prompts";
+import { access } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { dirname, join, resolve } from "node:path";
+import { input } from "@inquirer/prompts";
 
 import {
-  detectOpenCode,
-  inspectOpenCode,
-  OpenCodeInspectionError,
-  OpenCodeConfigError,
-  planOpenCodeV2Config,
-  type OpenCodeDetection,
-  type OpenCodeDetectionOptions,
-  type OpenCodeInspection,
-} from "@apexnova-connect/integration-opencode";
+  AgentIntegrationError,
+  isDetectionAvailable,
+  toDetectionDocument,
+  toInspectionDocument,
+  type AgentInspection,
+  type AgentIntegration,
+  type ChangePlan,
+  type DiagnosticCheck,
+} from "@apexnova-connect/integration-sdk";
+import { IntegrationChangeError } from "@apexnova-connect/core";
 import {
   HubClientError,
   verifyHubInference,
   type HubCatalogDeployment,
-  type HubCatalogProtocol,
-  type HubCatalogSnapshot,
-  type HubInferenceVerification,
   type HubUsageRecord,
   type UsageQuery,
-  type VerifyHubInferenceOptions,
 } from "@apexnova-connect/hub-client";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
-import {
-  createDefaultCredentialStore,
-  SecretValue,
-  type CredentialStore,
-} from "@apexnova-connect/credential-store";
 
 import {
-  createDefaultHubCommandService,
-  type HubCommandService,
-} from "./hub-command-service.js";
-import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-binding-store.js";
+  agentOperand,
+  compensationSignal,
+  credentialStore,
+  defaultIo,
+  defaultSleep,
+  hubConfigContext,
+  hubService,
+  integrationContext,
+  integrationRegistry,
+  localStateRoot,
+  noOperands,
+  operationSignal,
+  resolveIntegration,
+  resolvePicker,
+  withRetry,
+  CliError,
+  EXIT_CODES,
+  type CliDependencies,
+  type CliErrorShape,
+  type CliIo,
+  type CliPickerItem,
+  type CliRunResult,
+  type ParsedArguments,
+} from "./cli-core.js";
+import {
+  configureAgent,
+  connectionIntent,
+  detectForCommand,
+  hubProtocolsFor,
+  launchAgent,
+  requireAvailable,
+  resolveDeployment,
+  runtimeCredentialForLaunch,
+  selectProtocol,
+  toProtocolId,
+} from "./agent-workflow.js";
+import { RuntimeBindingStore } from "./runtime-binding-store.js";
 import {
   hubConfigDefaults,
   hubConfigPath,
   readHubConfigFile,
   resolveHubConfig,
   writeHubConfigFile,
-  type HubConfigContext,
 } from "./hub-config.js";
 import { CLI_VERSION } from "./version.js";
 
-export const EXIT_CODES = {
-  success: 0,
-  runtime: 1,
-  usage: 2,
-  authentication: 3,
-  permission: 4,
-  unavailable: 5,
-  conflict: 6,
-  verification: 7,
-  network: 8,
-  billing: 9,
-  recovery: 10,
-} as const;
-
-type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
-
-export interface CliIo {
-  readonly stdout: (text: string) => void;
-  readonly stderr: (text: string) => void;
-  readonly isInteractive: boolean;
-}
-
-export interface CliPickerItem<T> {
-  readonly label: string;
-  readonly description?: string;
-  readonly value: T;
-}
-
-export interface CliDependencies {
-  readonly io?: CliIo;
-  readonly cwd?: string;
-  readonly platform?: NodeJS.Platform;
-  readonly environment?: NodeJS.ProcessEnv;
-  readonly homeDirectory?: string;
-  readonly detectOpenCode?: (options?: OpenCodeDetectionOptions) => Promise<OpenCodeDetection>;
-  readonly inspectOpenCode?: (detection: OpenCodeDetection) => Promise<OpenCodeInspection>;
-  readonly hubService?: HubCommandService;
-  readonly credentialStore?: CredentialStore;
-  readonly launchOpenCode?: (args: readonly string[], environment: NodeJS.ProcessEnv) => Promise<number>;
-  readonly verifyHubInference?: (options: VerifyHubInferenceOptions) => Promise<HubInferenceVerification>;
-  readonly createRequestId?: () => string;
-  readonly now?: () => Date;
-  readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
-  readonly pick?: <T>(message: string, items: readonly CliPickerItem<T>[]) => Promise<T>;
-}
-
-export interface CliRunResult {
-  readonly exitCode: ExitCode;
-  readonly requestId: string;
-}
-
-interface ParsedArguments {
-  readonly command?: string;
-  readonly operands: readonly string[];
-  readonly json: boolean;
-  readonly help: boolean;
-  readonly version: boolean;
-  readonly profile: string;
-  readonly configPath?: string;
-  readonly timeoutSeconds: number;
-  readonly verbose: boolean;
-  readonly nonInteractive: boolean;
-  readonly yes: boolean;
-  readonly agent?: string;
-  readonly protocol?: string;
-  readonly compatibleOnly: boolean;
-  readonly deployment?: string;
-  readonly dryRun: boolean;
-  readonly list: boolean;
-  readonly live: boolean;
-  readonly apiKeyId?: string;
-  readonly rotating: boolean;
-  readonly from?: string;
-  readonly to?: string;
-  readonly granularity?: "hour" | "day" | "month";
-  readonly hubUrl?: string;
-  readonly clientId?: string;
-  readonly pathPrefix?: string;
-  readonly force: boolean;
-}
-
-interface CliErrorShape {
-  readonly code: string;
-  readonly message: string;
-  readonly retryable: boolean;
-  readonly retryAfterSeconds?: number;
-  readonly details?: Readonly<Record<string, unknown>>;
-}
-
-class CliError extends Error {
-  readonly code: string;
-  readonly exitCode: ExitCode;
-  readonly retryable: boolean;
-  readonly retryAfterSeconds?: number;
-  readonly details?: Readonly<Record<string, unknown>>;
-
-  constructor(options: {
-    readonly code: string;
-    readonly message: string;
-    readonly exitCode: ExitCode;
-    readonly retryable?: boolean;
-    readonly retryAfterSeconds?: number;
-    readonly details?: Readonly<Record<string, unknown>>;
-    readonly cause?: unknown;
-  }) {
-    super(options.message, { cause: options.cause });
-    this.name = "CliError";
-    this.code = options.code;
-    this.exitCode = options.exitCode;
-    this.retryable = options.retryable ?? false;
-    if (options.retryAfterSeconds !== undefined) this.retryAfterSeconds = options.retryAfterSeconds;
-    if (options.details) this.details = options.details;
-  }
-}
+const LIVE_VERIFY_ESTIMATE_USAGE = { inputTokens: 64, outputTokens: 256 } as const;
 
 const HELP = `Apexnova-connect CLI
 
 Usage:
-  apexnova opencode [--deployment <id>] [--key <id>] [--rotating] [-- <agent args>]
+  apexnova run <agent> [--deployment <id>] [--key <id>] [--rotating] [-- <agent args>]
   apexnova init [--hub-url <url>] [--client-id <id>] [--path-prefix <p>]
   apexnova login | logout | whoami | balance
-  apexnova models [--agent opencode] [--protocol <id>] [--compatible-only]
+  apexnova agents
+  apexnova models [--agent <id>] [--protocol <id>] [--compatible-only]
   apexnova usage [--key <id>] [--from <iso>] [--to <iso>] [--granularity hour|day|month]
-  apexnova connect opencode --deployment <id> (--dry-run | --yes)
-  apexnova switch opencode --deployment <id> (--dry-run | --yes)
-  apexnova verify opencode [--live] [--yes] | doctor [opencode]
+  apexnova connect <agent> --deployment <id> (--dry-run | --yes)
+  apexnova switch <agent> --deployment <id> (--dry-run | --yes)
+  apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
-  apexnova detect [opencode] [--config <path>]
-  apexnova inspect opencode [--config <path>]
-  apexnova run opencode [-- <agent args>]
+  apexnova detect [agent] [--config <path>]
+  apexnova inspect <agent> [--config <path>]
   apexnova --version
 
 Global options:
@@ -210,32 +119,11 @@ Global options:
 apexnova init stores the Hub endpoint so the other commands work without
 exporting APEXNOVA_HUB_BASE_URL and APEXNOVA_OAUTH_CLIENT_ID in every shell.
 
-apexnova opencode is the one-command path: it auto-configures a permanent key,
-writes the OpenCode provider config, and launches OpenCode. Use --rotating for
-short-lived credentials or --key <id> to bind an existing key for per-tool usage tracking.
+apexnova run <agent> is the one-command path: it auto-configures a permanent key,
+writes that Agent's provider configuration, and launches it. Use --rotating for
+short-lived credentials or --key <id> to bind an existing key for per-tool usage
+tracking. Run "apexnova agents" to list the Agents this build supports.
 `;
-
-function defaultIo(): CliIo {
-  return {
-    stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(text),
-    isInteractive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
-  };
-}
-
-async function defaultPick<T>(message: string, items: readonly CliPickerItem<T>[]): Promise<T> {
-  if (items.length === 0) throw new CliError({ code: "INVALID_ARGUMENT", message: "No items to pick from.", exitCode: EXIT_CODES.usage });
-  if (items.length === 1) return items[0]!.value;
-  return select({
-    message,
-    choices: items.map((item) => ({ name: item.label, value: item.value, ...(item.description ? { description: item.description } : {}) })),
-    loop: false,
-  });
-}
-
-function resolvePicker(dependencies: CliDependencies): <T>(message: string, items: readonly CliPickerItem<T>[]) => Promise<T> {
-  return dependencies.pick ?? defaultPick;
-}
 
 function valueAfter(args: readonly string[], index: number, option: string): string {
   const value = args[index + 1];
@@ -466,259 +354,6 @@ function writeJsonFailure(
   }, null, 2)}\n`);
 }
 
-function detectionOptions(parsed: ParsedArguments, dependencies: CliDependencies): OpenCodeDetectionOptions {
-  return {
-    ...(dependencies.cwd ? { cwd: dependencies.cwd } : {}),
-    ...(dependencies.platform ? { platform: dependencies.platform } : {}),
-    ...(dependencies.environment ? { environment: dependencies.environment } : {}),
-    ...(dependencies.homeDirectory ? { homeDirectory: dependencies.homeDirectory } : {}),
-    ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
-  };
-}
-
-function requireAgent(operands: readonly string[], optional: boolean): "opencode" | undefined {
-  if (operands.length > 1 || (!optional && operands.length !== 1)) {
-    throw new CliError({
-      code: "INVALID_ARGUMENT",
-      message: optional ? "detect accepts at most one agent." : "inspect requires exactly one agent.",
-      exitCode: EXIT_CODES.usage,
-    });
-  }
-  const agent = operands[0];
-  if (agent === undefined) return undefined;
-  if (agent !== "opencode") {
-    throw new CliError({
-      code: "INTEGRATION_NOT_SUPPORTED",
-      message: `Unsupported agent: ${agent}.`,
-      exitCode: EXIT_CODES.unavailable,
-      details: { supportedAgents: ["opencode"] },
-    });
-  }
-  return agent;
-}
-
-async function executeDetect(
-  parsed: ParsedArguments,
-  dependencies: CliDependencies,
-): Promise<{ readonly data: unknown; readonly warnings: readonly string[]; readonly human: string }> {
-  const requestedAgent = requireAgent(parsed.operands, true);
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(
-    detectionOptions(parsed, dependencies),
-  );
-
-  if (requestedAgent && detection.status === "not-found") {
-    throw new CliError({
-      code: "AGENT_NOT_FOUND",
-      message: "OpenCode was not found in the current environment.",
-      exitCode: EXIT_CODES.unavailable,
-      details: {
-        agentId: detection.agentId,
-        configPath: detection.configPath,
-      },
-    });
-  }
-
-  const data = requestedAgent ? detection : { agents: [detection] };
-  const version = detection.productVersion ? ` ${detection.productVersion}` : "";
-  const human = [
-    `OpenCode: ${detection.status}${version}`,
-    `Config: ${detection.configPath}${detection.configExists ? "" : " (not created)"}`,
-    ...detection.warnings.map((warning) => `Warning: ${warning}`),
-  ].join("\n");
-  return { data, warnings: detection.warnings, human };
-}
-
-async function executeInspect(
-  parsed: ParsedArguments,
-  dependencies: CliDependencies,
-): Promise<{ readonly data: unknown; readonly warnings: readonly string[]; readonly human: string }> {
-  requireAgent(parsed.operands, false);
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(
-    detectionOptions(parsed, dependencies),
-  );
-  if (detection.status === "not-found") {
-    throw new CliError({
-      code: "AGENT_NOT_FOUND",
-      message: "OpenCode was not found in the current environment.",
-      exitCode: EXIT_CODES.unavailable,
-    });
-  }
-  const inspection = await (dependencies.inspectOpenCode ?? inspectOpenCode)(detection);
-  if (inspection.status === "legacy" || inspection.status === "invalid") {
-    throw new CliError({
-      code: inspection.status === "legacy" ? "LEGACY_CONFIG" : "INVALID_CONFIG",
-      message: inspection.warnings[0] ?? "OpenCode configuration is not supported.",
-      exitCode: EXIT_CODES.conflict,
-      details: {
-        agentId: inspection.agentId,
-        configPath: inspection.configPath,
-        status: inspection.status,
-      },
-    });
-  }
-
-  const provider = inspection.provider;
-  const lines = [
-    `OpenCode configuration: ${inspection.status}`,
-    `Config: ${inspection.configPath}`,
-    `Managed by Apexnova-connect: ${inspection.managed ? "yes" : "no"}`,
-  ];
-  if (provider) {
-    lines.push(
-      `Protocol: ${provider.protocol ?? "unknown"}`,
-      `Base URL: ${provider.baseUrl ?? "not set"}`,
-      `Models: ${provider.modelIds.length > 0 ? provider.modelIds.join(", ") : "none"}`,
-    );
-  }
-  return { data: inspection, warnings: inspection.warnings, human: lines.join("\n") };
-}
-
-function noOperands(parsed: ParsedArguments): void {
-  if (parsed.operands.length !== 0) {
-    throw new CliError({
-      code: "INVALID_ARGUMENT",
-      message: `${parsed.command ?? "This command"} does not accept positional arguments.`,
-      exitCode: EXIT_CODES.usage,
-    });
-  }
-}
-
-function hubConfigContext(dependencies: CliDependencies): HubConfigContext {
-  return {
-    ...(dependencies.environment ? { environment: dependencies.environment } : {}),
-    ...(dependencies.platform ? { platform: dependencies.platform } : {}),
-    ...(dependencies.homeDirectory ? { homeDirectory: dependencies.homeDirectory } : {}),
-  };
-}
-
-function hubService(parsed: ParsedArguments, dependencies: CliDependencies): HubCommandService {
-  const base = dependencies.hubService ?? createDefaultHubCommandService({
-    ...hubConfigContext(dependencies),
-    requestTimeoutMs: parsed.timeoutSeconds * 1_000,
-  });
-  return withRetryableHub(base, dependencies.sleep ?? defaultSleep);
-}
-
-// One deadline per CLI invocation rather than per HTTP request: a command that
-// makes six sequential Hub calls must still honour --timeout as a whole.
-const operationSignals = new WeakMap<ParsedArguments, AbortSignal>();
-
-function operationSignal(parsed: ParsedArguments): AbortSignal {
-  const existing = operationSignals.get(parsed);
-  if (existing) return existing;
-  const signal = AbortSignal.timeout(parsed.timeoutSeconds * 1_000);
-  operationSignals.set(parsed, signal);
-  return signal;
-}
-
-// Compensating work (revoking a credential after a failed apply) must not inherit
-// an already-expired operation deadline, or a timeout would leak the credential.
-function compensationSignal(parsed: ParsedArguments): AbortSignal {
-  return AbortSignal.timeout(Math.min(parsed.timeoutSeconds, 30) * 1_000);
-}
-
-function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    if (signal) {
-      if (signal.aborted) { clearTimeout(timer); reject(signal.reason ?? new Error("aborted")); }
-      else signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason ?? new Error("aborted")); }, { once: true });
-    }
-  });
-}
-
-async function withRetry<T>(
-  operation: () => Promise<T>,
-  options: {
-    readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
-    readonly maxRetries?: number;
-    readonly signal?: AbortSignal;
-  },
-): Promise<T> {
-  const maxRetries = options.maxRetries ?? 3;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (attempt >= maxRetries) throw error;
-      if (!(error instanceof HubClientError) || error.code !== "RATE_LIMITED") throw error;
-      const backoffMs = Math.min(Math.max(error.retryAfterSeconds ?? 1, 1), 30) * 1000;
-      await options.sleep(backoffMs, options.signal);
-    }
-  }
-}
-
-function withRetryableHub(service: HubCommandService, sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>): HubCommandService {
-  const retry = <T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> => withRetry(operation, { sleep, ...(signal ? { signal } : {}) });
-  return {
-    login: (profileId, onVerificationRequired, signal) => service.login(profileId, onVerificationRequired, signal),
-    logout: (profileId) => service.logout(profileId),
-    whoami: (profileId, signal) => retry(() => service.whoami(profileId, signal), signal),
-    balance: (profileId, signal) => retry(() => service.balance(profileId, signal), signal),
-    catalog: (profileId, signal) => retry(() => service.catalog(profileId, signal), signal),
-    estimatePricing: (profileId, deploymentId, usage, signal) => retry(() => service.estimatePricing(profileId, deploymentId, usage, signal), signal),
-    usage: (profileId, requestId, signal) => retry(() => service.usage(profileId, requestId, signal), signal),
-    usageQuery: (profileId, query, signal) => retry(() => service.usageQuery(profileId, query, signal), signal),
-    createRuntimeCredential: (profileId, input, signal) => retry(() => service.createRuntimeCredential(profileId, input, signal), signal),
-    runtimeCredentials: (profileId, signal) => retry(() => service.runtimeCredentials(profileId, signal), signal),
-    revokeRuntimeCredential: (profileId, credentialId, signal) => retry(() => service.revokeRuntimeCredential(profileId, credentialId, signal), signal),
-    createApiKey: (profileId, input, signal) => retry(() => service.createApiKey(profileId, input, signal), signal),
-    apiKeys: (profileId, signal) => retry(() => service.apiKeys(profileId, signal), signal),
-    apiKey: (profileId, id, signal) => retry(() => service.apiKey(profileId, id, signal), signal),
-    updateApiKey: (profileId, id, input, signal) => retry(() => service.updateApiKey(profileId, id, input, signal), signal),
-    revokeApiKey: (profileId, id, signal) => retry(() => service.revokeApiKey(profileId, id, signal), signal),
-  };
-}
-
-function credentialStore(dependencies: CliDependencies): CredentialStore {
-  return dependencies.credentialStore ?? createDefaultCredentialStore({
-    ...(dependencies.platform ? { platform: dependencies.platform } : {}),
-  });
-}
-
-export function resolveOpenCodeExecutable(
-  platform: NodeJS.Platform,
-  environment: NodeJS.ProcessEnv,
-  pathExists: (path: string) => boolean = existsSync,
-): string {
-  if (platform !== "win32") return "opencode";
-
-  const pathValue = environment.PATH ?? environment.Path ?? "";
-  for (const directory of pathValue.split(";").filter(Boolean)) {
-    const standalone = win32.join(directory, "opencode.exe");
-    if (pathExists(standalone)) return standalone;
-
-    // npm's Windows shim cannot be spawned with shell=false. Resolve its fixed,
-    // argument-safe native target instead of interpolating user arguments into cmd.exe.
-    const npmBinary = win32.join(directory, "node_modules", "opencode-ai", "bin", "opencode.exe");
-    if (pathExists(npmBinary)) return npmBinary;
-  }
-
-  throw new CliError({
-    code: "AGENT_NOT_FOUND",
-    message: "OpenCode was detected, but no native opencode.exe target was found on PATH.",
-    exitCode: EXIT_CODES.unavailable,
-  });
-}
-
-function defaultLaunchOpenCode(args: readonly string[], environment: NodeJS.ProcessEnv): Promise<number> {
-  return new Promise((resolveLaunch, reject) => {
-    let executable: string;
-    try {
-      executable = resolveOpenCodeExecutable(process.platform, environment);
-    } catch (error) {
-      reject(error);
-      return;
-    }
-    const child = spawn(executable, args, { env: environment, stdio: "inherit", windowsHide: true, shell: false });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (signal) reject(new Error(`OpenCode exited after signal ${signal}.`));
-      else resolveLaunch(code ?? 1);
-    });
-  });
-}
-
 function validateHubBaseUrl(value: string, allowInsecureLoopback: boolean): string {
   let url: URL;
   try {
@@ -858,25 +493,51 @@ async function executeBalance(parsed: ParsedArguments, dependencies: CliDependen
 
 async function executeModels(parsed: ParsedArguments, dependencies: CliDependencies) {
   noOperands(parsed);
-  if (parsed.agent !== undefined && parsed.agent !== "opencode") {
-    throw new CliError({ code: "INTEGRATION_NOT_SUPPORTED", message: `Unsupported agent: ${parsed.agent}.`, exitCode: EXIT_CODES.unavailable, details: { supportedAgents: ["opencode"] } });
-  }
+  const registry = integrationRegistry(dependencies);
+  const filterIntegration = parsed.agent ? resolveIntegration(parsed.agent, dependencies) : undefined;
   const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
-  const supported = new Set(["openai-responses", "openai-chat"]);
+  const usable = filterIntegration
+    ? hubProtocolsFor(filterIntegration)
+    : new Set(registry.list().flatMap((integration) => [...hubProtocolsFor(integration)]));
   const modelsById = new Map(catalog.models.map((model) => [model.id, model]));
   const deployments = catalog.deployments
     .filter((deployment) => !parsed.protocol || deployment.protocols.some((protocol) => protocol.protocol === parsed.protocol))
-    .filter((deployment) => !parsed.agent || deployment.protocols.some((protocol) => supported.has(protocol.protocol)))
-    .filter((deployment) => !parsed.compatibleOnly || (deployment.availability.status === "available" && deployment.protocols.some((protocol) => supported.has(protocol.protocol))))
+    .filter((deployment) => !filterIntegration || deployment.protocols.some((protocol) => usable.has(protocol.protocol)))
+    .filter((deployment) => !parsed.compatibleOnly || (deployment.availability.status === "available" && deployment.protocols.some((protocol) => usable.has(protocol.protocol))))
     .map((deployment) => ({
       ...deployment,
       model: modelsById.get(deployment.modelId),
-      compatibility: parsed.agent ? (deployment.protocols.some((protocol) => supported.has(protocol.protocol)) ? "adapter-supported-unverified" : "unsupported") : "not-evaluated",
+      compatibility: filterIntegration
+        ? (deployment.protocols.some((protocol) => usable.has(protocol.protocol)) ? "adapter-supported-unverified" : "unsupported")
+        : "not-evaluated",
     }));
-  const warnings = parsed.agent ? ["Adapter protocol support is not Agent compatibility evidence; H1 deployments remain unverified until compatibility testing is available."] : [];
-  const human = deployments.length === 0 ? "No matching deployments." : deployments.map((deployment) => `${deployment.id}  ${deployment.model?.name ?? deployment.modelId}  ${deployment.availability.status}  ${deployment.protocols.map((protocol) => protocol.protocol).join(",")}`).join("\n");
+  const warnings = filterIntegration
+    ? ["Adapter protocol support is not Agent compatibility evidence; H1 deployments remain unverified until compatibility testing is available."]
+    : [];
+  const human = deployments.length === 0
+    ? "No matching deployments."
+    : deployments.map((deployment) => `${deployment.id}  ${deployment.model?.name ?? deployment.modelId}  ${deployment.availability.status}  ${deployment.protocols.map((protocol) => protocol.protocol).join(",")}`).join("\n");
   const io = dependencies.io ?? defaultIo();
+  const catalogEnvelope = {
+    schemaVersion: catalog.schemaVersion,
+    catalogVersion: catalog.catalogVersion,
+    generatedAt: catalog.generatedAt,
+    expiresAt: catalog.expiresAt,
+    deployments,
+  };
   if (io.isInteractive && !parsed.nonInteractive && !parsed.json && deployments.length > 0) {
+    // Switching needs one unambiguous target, so a multi-agent install has to
+    // say which Agent the selected model is for.
+    const registered = registry.list();
+    const target = filterIntegration ?? (registered.length === 1 ? registered[0] : undefined);
+    if (!target) {
+      throw new CliError({
+        code: "INVALID_ARGUMENT",
+        message: "Pass --agent <id> to switch a model interactively when more than one Agent is registered.",
+        exitCode: EXIT_CODES.usage,
+        details: { supportedAgents: registry.agentIds },
+      });
+    }
     const picker = resolvePicker(dependencies);
     const items: CliPickerItem<HubCatalogDeployment>[] = deployments.map((deployment) => ({
       label: `${deployment.displayName} (${deployment.inferenceAlias})`,
@@ -884,226 +545,150 @@ async function executeModels(parsed: ParsedArguments, dependencies: CliDependenc
       value: deployment,
     }));
     const selected = await picker("Select a model to switch to (Esc to cancel):", items);
-    const protocol = selected.protocols.find((item) => supported.has(item.protocol));
-    if (!protocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
-    const result = await configureOpenCode(parsed, dependencies, selected, protocol, catalog);
+    const protocol = selectProtocol(selected, target);
+    const result = await configureAgent(parsed, dependencies, target, selected, protocol, catalog);
     return {
-      data: { schemaVersion: catalog.schemaVersion, catalogVersion: catalog.catalogVersion, generatedAt: catalog.generatedAt, expiresAt: catalog.expiresAt, deployments, switchedTo: selected.id, credentialKind: result.binding.kind ?? "runtime" },
+      data: { ...catalogEnvelope, switchedTo: selected.id, agentId: target.manifest.id, credentialKind: result.binding.kind ?? "runtime" },
       warnings: [...warnings, ...result.warnings],
-      human: `Switched to ${selected.displayName} (${selected.inferenceAlias}). Run "apexnova opencode" to use it.`,
+      human: `Switched to ${selected.displayName} (${selected.inferenceAlias}). Run "apexnova run ${target.manifest.id}" to use it.`,
     };
   }
-  return { data: { schemaVersion: catalog.schemaVersion, catalogVersion: catalog.catalogVersion, generatedAt: catalog.generatedAt, expiresAt: catalog.expiresAt, deployments }, warnings, human };
+  return { data: catalogEnvelope, warnings, human };
 }
 
-function openCodeProtocol(protocol: string): "openai-responses" | "openai-chat-completions" | undefined {
-  if (protocol === "openai-responses") return "openai-responses";
-  if (protocol === "openai-chat") return "openai-chat-completions";
-  return undefined;
-}
-
-function openCodeBaseUrl(endpoint: string, protocol: string): string {
-  const url = new URL(endpoint);
-  const suffix = protocol === "openai-responses" ? "/responses" : protocol === "openai-chat" ? "/chat/completions" : "";
-  if (suffix && url.pathname.endsWith(suffix)) url.pathname = url.pathname.slice(0, -suffix.length);
-  return url.toString().replace(/\/$/, "");
-}
-
-function localStateRoot(dependencies: CliDependencies): string {
-  const environment = dependencies.environment ?? process.env;
-  const platform = dependencies.platform ?? process.platform;
-  const home = dependencies.homeDirectory ?? environment.USERPROFILE ?? environment.HOME ?? process.cwd();
-  if (platform === "win32") return resolve(environment.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Apexnova", "connect");
-  return resolve(environment.XDG_STATE_HOME ?? join(home, ".local", "state"), "apexnova-connect");
-}
-
-const RUNTIME_ROTATION_WINDOW_MS = 60 * 60 * 1_000;
-const RUNTIME_ROTATION_LOCK_STALE_MS = 5 * 60 * 1_000;
-const LIVE_VERIFY_ESTIMATE_USAGE = { inputTokens: 64, outputTokens: 256 } as const;
-
-function currentTime(dependencies: CliDependencies): number {
-  return (dependencies.now?.() ?? new Date()).getTime();
-}
-
-function filesystemCode(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
-    ? error.code
-    : undefined;
-}
-
-async function withRuntimeRotationLock<T>(
-  parsed: ParsedArguments,
-  dependencies: CliDependencies,
-  task: () => Promise<T>,
-): Promise<T> {
-  const lockRoot = join(localStateRoot(dependencies), "locks");
-  await mkdir(lockRoot, { recursive: true, mode: 0o700 });
-  const profileHash = createHash("sha256").update(parsed.profile, "utf8").digest("hex").slice(0, 32);
-  const lockPath = join(lockRoot, `runtime-${profileHash}.lock`);
-  const signal = operationSignal(parsed);
-  let handle;
-  for (;;) {
-    if (signal.aborted) {
-      throw new CliError({ code: "CREDENTIAL_ROTATION_BUSY", message: "Timed out waiting for another credential rotation to finish.", exitCode: EXIT_CODES.conflict, retryable: true });
-    }
+async function executeRestore(parsed: ParsedArguments, dependencies: CliDependencies) {
+  if (parsed.operands.length > 1) {
+    throw new CliError({ code: "INVALID_ARGUMENT", message: "restore accepts at most one transaction ID.", exitCode: EXIT_CODES.usage });
+  }
+  const registry = integrationRegistry(dependencies);
+  const context = integrationContext(parsed, dependencies);
+  const backupRoot = join(localStateRoot(dependencies), "backups");
+  const candidates = [
+    context.workingDirectory,
+    ...registry.list().flatMap((integration) => integration.configRoots(context)),
+    ...(parsed.configPath ? [dirname(resolve(parsed.configPath))] : []),
+    localStateRoot(dependencies),
+  ];
+  const allowedRoots: string[] = [];
+  for (const candidate of [...new Set(candidates)]) {
     try {
-      handle = await open(lockPath, "wx", 0o600);
-      await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }), "utf8");
-      break;
-    } catch (error) {
-      if (filesystemCode(error) !== "EEXIST") throw error;
-      try {
-        const info = await stat(lockPath);
-        if (Date.now() - info.mtimeMs > RUNTIME_ROTATION_LOCK_STALE_MS) {
-          await unlink(lockPath);
-          continue;
-        }
-      } catch (staleError) {
-        if (filesystemCode(staleError) === "ENOENT") continue;
-        throw staleError;
-      }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      await access(candidate);
+      allowedRoots.push(candidate);
+    } catch {
+      // An absent known root is not trusted merely because of its name.
     }
   }
-  try {
-    return await task();
-  } finally {
-    await handle.close().catch(() => {});
-    await unlink(lockPath).catch(() => {});
+  const executor = new FileConfigExecutor({ allowedRoots, backupRoot });
+  const transactionId = parsed.operands[0];
+  if (parsed.list || transactionId === undefined) {
+    const backups = await executor.listBackups();
+    return {
+      data: { backups },
+      warnings: [] as readonly string[],
+      human: backups.length === 0
+        ? "No restorable transactions."
+        : backups.map((item) => `${item.transactionId}  ${item.integrationId}  ${item.state}  ${item.appliedAt}`).join("\n"),
+    };
   }
-}
-
-async function runtimeCredentialForLaunch(parsed: ParsedArguments, dependencies: CliDependencies) {
-  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
-  const initial = await bindings.load(parsed.profile);
-  if (!initial) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
-  if (initial.kind === "user" || initial.expiresAt === undefined) {
-    return { binding: initial, rotated: false, warnings: [] as string[] };
+  const summary = (await executor.listBackups()).find((item) => item.transactionId === transactionId);
+  const receipt = await executor.getReceipt(transactionId);
+  if (parsed.dryRun) {
+    return {
+      data: { dryRun: true, transactionId, planId: receipt.planId },
+      warnings: ["Dry-run did not restore files."],
+      human: `Transaction ${transactionId} can be restored. No files were changed.`,
+    };
   }
-  if (Date.parse(initial.expiresAt) - currentTime(dependencies) > RUNTIME_ROTATION_WINDOW_MS) {
-    return { binding: initial, rotated: false, warnings: [] as string[] };
+  if (!parsed.yes) {
+    throw new CliError({ code: "APPROVAL_REQUIRED", message: "restore requires --yes after reviewing the transaction or --dry-run.", exitCode: EXIT_CODES.permission });
   }
 
-  return withRuntimeRotationLock(parsed, dependencies, async () => {
-    const current = await bindings.load(parsed.profile);
-    if (!current) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
-    if (current.kind === "user" || current.expiresAt === undefined) {
-      return { binding: current, rotated: false, warnings: [] as string[] };
-    }
-    if (Date.parse(current.expiresAt) - currentTime(dependencies) > RUNTIME_ROTATION_WINDOW_MS) {
-      return { binding: current, rotated: false, warnings: [] as string[] };
-    }
+  const warnings: string[] = [];
+  let runtimeCredentialRevoked: boolean | undefined;
+  let runtimeCredentialRestored = false;
+  // A backup written by an integration this build no longer loads can still be
+  // rolled back; only its credential bookkeeping is skipped.
+  const integration = summary && registry.has(summary.integrationId)
+    ? registry.resolve(summary.integrationId)
+    : undefined;
+  const agentId = integration?.manifest.id;
+  const bindings = agentId ? new RuntimeBindingStore(credentialStore(dependencies)) : undefined;
+  const binding = bindings && agentId ? await bindings.load(agentId, parsed.profile) : null;
+  if (binding?.transactionId && binding.transactionId !== transactionId) {
+    throw new CliError({ code: "RESTORE_ORDER_CONFLICT", message: `Restore ${binding.transactionId} before restoring ${transactionId}.`, exitCode: EXIT_CODES.conflict });
+  }
+
+  let replacement: typeof binding = null;
+  if (binding?.restoreTarget && integration) {
     const service = hubService(parsed, dependencies);
-    const signal = operationSignal(parsed);
-    const catalog = await service.catalog(parsed.profile, signal);
-    const deployment = catalog.deployments.find((item) => item.id === current.deploymentId);
-    const protocol = deployment?.protocols.find((item) => item.protocol === current.protocol);
+    const target = binding.restoreTarget;
+    const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
+    const deployment = catalog.deployments.find((item) => item.id === target.deploymentId);
+    const protocol = deployment?.protocols.find((item) => item.protocol === target.protocol);
     if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
-      throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential cannot be renewed because its deployment or protocol is no longer available.", exitCode: EXIT_CODES.verification });
+      throw new CliError({ code: "BINDING_MISMATCH", message: "The previous runtime target is no longer available; configuration was not restored.", exitCode: EXIT_CODES.verification });
     }
     const created = await service.createRuntimeCredential(parsed.profile, {
-      name: `OpenCode (${parsed.profile})`,
-      protocols: [current.protocol],
-      publicDeploymentIds: [current.deploymentId],
+      name: `${integration.manifest.displayName} (${parsed.profile})`,
+      protocols: [target.protocol],
+      publicDeploymentIds: [target.deploymentId],
       expiresIn: 86_400,
-    }, signal);
-    const replacement = {
-      credentialId: created.credentialId,
-      secret: created.secret,
-      expiresAt: created.expiresAt,
-      protocol: current.protocol,
-      deploymentId: current.deploymentId,
-      ...(current.transactionId ? { transactionId: current.transactionId } : {}),
-      ...(current.restoreTarget ? { restoreTarget: current.restoreTarget } : {}),
-    };
+    }, operationSignal(parsed));
     try {
-      if (Date.parse(created.expiresAt) - currentTime(dependencies) <= RUNTIME_ROTATION_WINDOW_MS) {
-        throw new CliError({ code: "INVALID_RESPONSE", message: "Hub issued a runtime credential with an insufficient lifetime.", exitCode: EXIT_CODES.runtime });
+      const active = (await service.runtimeCredentials(parsed.profile, operationSignal(parsed))).find((item) => item.credentialId === created.credentialId);
+      if (!active || !active.protocols.includes(target.protocol) || !active.publicDeploymentIds.includes(target.deploymentId)) {
+        throw new CliError({ code: "VERIFICATION_FAILED", message: "The restored runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
       }
-      const active = (await service.runtimeCredentials(parsed.profile, signal)).find((item) => item.credentialId === created.credentialId);
-      if (!active || !active.protocols.includes(current.protocol) || !active.publicDeploymentIds.includes(current.deploymentId)) {
-        throw new CliError({ code: "VERIFICATION_FAILED", message: "The renewed runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
-      }
-      await bindings.save(parsed.profile, replacement);
+      replacement = {
+        credentialId: created.credentialId,
+        secret: created.secret,
+        expiresAt: created.expiresAt,
+        protocol: target.protocol,
+        deploymentId: target.deploymentId,
+        ...(target.transactionId ? { transactionId: target.transactionId } : {}),
+        ...(target.restoreTarget ? { restoreTarget: target.restoreTarget } : {}),
+      };
     } catch (cause) {
       await service.revokeRuntimeCredential(parsed.profile, created.credentialId, compensationSignal(parsed)).catch(() => {});
       throw cause;
     }
-    const warnings: string[] = [];
-    if (current.credentialId !== created.credentialId) {
+  }
+
+  try {
+    await executor.rollback(receipt);
+  } catch (cause) {
+    if (replacement) await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, compensationSignal(parsed)).catch(() => {});
+    throw cause;
+  }
+  if (binding && bindings && agentId) {
+    if (replacement) {
       try {
-        await service.revokeRuntimeCredential(parsed.profile, current.credentialId, compensationSignal(parsed));
-      } catch {
-        warnings.push(`Previous runtime credential ${current.credentialId} could not be revoked automatically.`);
+        await bindings.save(agentId, parsed.profile, replacement);
+        runtimeCredentialRestored = true;
+      } catch (cause) {
+        await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, compensationSignal(parsed)).catch(() => {});
+        await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed)).catch(() => {});
+        await bindings.delete(agentId, parsed.profile).catch(() => {});
+        throw new CliError({ code: "RESTORE_BINDING_INCOMPLETE", message: "Configuration was restored, but the replacement runtime credential could not be saved; the profile was disconnected.", exitCode: EXIT_CODES.recovery, cause });
       }
     }
-    return { binding: replacement, rotated: true, warnings };
-  });
-}
-
-// Planning rewrites the whole config, so both entry points -- `connect` and the
-// one-command `opencode` path -- have to refuse a file too large to hold safely.
-const OPENCODE_CONFIG_LIMIT_BYTES = 2 * 1024 * 1024;
-
-async function readExistingOpenCodeConfig(
-  parsed: ParsedArguments,
-  detection: OpenCodeDetection,
-): Promise<string | null> {
-  if (!detection.configExists) return null;
-  let content: string;
-  try {
-    content = await readFile(detection.configPath, { encoding: "utf8", signal: operationSignal(parsed) });
-  } catch (cause) {
-    throw new CliError({ code: "CONFIG_READ_FAILED", message: "OpenCode configuration could not be read.", exitCode: EXIT_CODES.permission, cause });
+    try {
+      await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed));
+      runtimeCredentialRevoked = true;
+    } catch {
+      runtimeCredentialRevoked = false;
+      warnings.push(`Runtime credential ${binding.credentialId} could not be revoked from Hub; revoke the device or credential manually.`);
+    }
+    if (!replacement) await bindings.delete(agentId, parsed.profile);
   }
-  if (Buffer.byteLength(content, "utf8") > OPENCODE_CONFIG_LIMIT_BYTES) {
-    throw new CliError({
-      code: "CONFIG_TOO_LARGE",
-      message: "OpenCode configuration exceeds the 2 MiB planning limit.",
-      exitCode: EXIT_CODES.conflict,
-      details: { configPath: detection.configPath, limitBytes: OPENCODE_CONFIG_LIMIT_BYTES },
-    });
-  }
-  return content;
+  return {
+    data: { restored: true, transactionId, planId: receipt.planId, runtimeCredentialRestored, ...(runtimeCredentialRevoked === undefined ? {} : { runtimeCredentialRevoked }) },
+    warnings,
+    human: `Restored transaction ${transactionId}.${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? " Runtime credential requires manual revocation." : ""}`,
+  };
 }
 
-interface OpenCodePlanInput {
-  readonly dependencies: CliDependencies;
-  readonly configPath: string;
-  readonly existingContent: string | null;
-  readonly deployment: HubCatalogDeployment;
-  readonly protocol: HubCatalogProtocol;
-  readonly mappedProtocol: "openai-responses" | "openai-chat-completions";
-  readonly modelName?: string;
-}
-
-function buildOpenCodePlan(input: OpenCodePlanInput): ReturnType<typeof planOpenCodeV2Config> {
-  const serviceModelId = input.deployment.inferenceAlias;
-  if (!serviceModelId) {
-    throw new CliError({ code: "INVALID_RESPONSE", message: "The selected deployment has no public inference model alias.", exitCode: EXIT_CODES.runtime });
-  }
-  const limits = input.deployment.limits;
-  return planOpenCodeV2Config({
-    planId: `plan.${randomUUID()}`,
-    createdAt: new Date().toISOString(),
-    configPath: input.configPath,
-    existingContent: input.existingContent,
-    hubBaseUrl: openCodeBaseUrl(input.protocol.baseUrl, input.protocol.protocol),
-    allowInsecureLoopback: (input.dependencies.environment ?? process.env).APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
-    models: [{
-      id: serviceModelId,
-      name: input.deployment.displayName || input.modelName || serviceModelId,
-      protocol: input.mappedProtocol,
-      upstreamId: serviceModelId,
-      ...(limits?.contextWindow && limits.maxOutputTokens
-        ? { limits: { context: limits.contextWindow, output: limits.maxOutputTokens } }
-        : {}),
-    }],
-    defaultModelId: serviceModelId,
-  });
-}
-
-function safePlan(plan: ReturnType<typeof planOpenCodeV2Config>) {
+function agentPlanSummary(plan: ChangePlan) {
   return {
     id: plan.id,
     integrationId: plan.integrationId,
@@ -1122,406 +707,355 @@ function safePlan(plan: ReturnType<typeof planOpenCodeV2Config>) {
   };
 }
 
-async function createOpenCodePlan(parsed: ParsedArguments, dependencies: CliDependencies) {
-  requireAgent(parsed.operands, false);
-  if (!parsed.deployment) throw new CliError({ code: "INVALID_ARGUMENT", message: "connect requires --deployment <id>.", exitCode: EXIT_CODES.usage });
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
-  if (detection.status === "not-found") throw new CliError({ code: "AGENT_NOT_FOUND", message: "OpenCode was not found in the current environment.", exitCode: EXIT_CODES.unavailable });
-  const inspection = await (dependencies.inspectOpenCode ?? inspectOpenCode)(detection);
-  if (inspection.status === "legacy" || inspection.status === "invalid") throw new CliError({ code: inspection.status === "legacy" ? "LEGACY_CONFIG" : "INVALID_CONFIG", message: inspection.warnings[0] ?? "OpenCode configuration is unsupported.", exitCode: EXIT_CODES.conflict });
+function requireIntegration(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  command: string,
+  options: { readonly trailingArgs?: boolean } = {},
+): AgentIntegration {
+  const agentId = agentOperand(parsed, dependencies, {
+    optional: false,
+    command,
+    ...(options.trailingArgs ? { trailingArgs: true } : {}),
+  });
+  return resolveIntegration(agentId!, dependencies);
+}
+
+function rejectUnusableConfig(
+  inspection: AgentInspection,
+  integration: AgentIntegration,
+): void {
+  if (inspection.status !== "legacy" && inspection.status !== "invalid") return;
+  throw new CliError({
+    code: inspection.status === "legacy" ? "LEGACY_CONFIG" : "INVALID_CONFIG",
+    message:
+      inspection.warnings[0] ??
+      `${integration.manifest.displayName} configuration is not supported.`,
+    exitCode: EXIT_CODES.conflict,
+    details: {
+      agentId: inspection.agentId,
+      configPath: inspection.configPath,
+      status: inspection.status,
+    },
+  });
+}
+
+async function executeAgents(parsed: ParsedArguments, dependencies: CliDependencies) {
+  noOperands(parsed);
+  const registry = integrationRegistry(dependencies);
+  const agents = registry.list().map((integration) => ({
+    id: integration.manifest.id,
+    displayName: integration.manifest.displayName,
+    status: integration.manifest.status,
+    platforms: integration.manifest.compatibility.platforms,
+    protocols: integration.supportedProtocols,
+    products: integration.manifest.compatibility.products.map((product) => ({
+      name: product.name,
+      versionRange: product.versionRange,
+    })),
+  }));
+  return {
+    data: { agents },
+    warnings: [] as readonly string[],
+    human: agents
+      .map((agent) => `${agent.id}  ${agent.displayName}  ${agent.status}  ${agent.protocols.join(",")}`)
+      .join("\n"),
+  };
+}
+
+async function executeDetect(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+): Promise<{ readonly data: unknown; readonly warnings: readonly string[]; readonly human: string }> {
+  const requestedAgent = agentOperand(parsed, dependencies, { optional: true, command: "detect" });
+  const targets = requestedAgent
+    ? [resolveIntegration(requestedAgent, dependencies)]
+    : integrationRegistry(dependencies).list();
+
+  const detections = [];
+  for (const integration of targets) {
+    detections.push(await detectForCommand(parsed, dependencies, integration));
+  }
+
+  const first = detections[0];
+  if (requestedAgent && first && first.status === "not-found") {
+    throw new CliError({
+      code: "AGENT_NOT_FOUND",
+      message: `${first.displayName} was not found in the current environment.`,
+      exitCode: EXIT_CODES.unavailable,
+      details: { agentId: first.agentId, configPath: first.configPath },
+    });
+  }
+
+  const documents = detections.map(toDetectionDocument);
+  const warnings = detections.flatMap((detection) => detection.warnings);
+  const human = detections
+    .map((detection) =>
+      [
+        `${detection.displayName}: ${detection.status}${detection.productVersion ? ` ${detection.productVersion}` : ""}`,
+        `Config: ${detection.configPath}${detection.configExists ? "" : " (not created)"}`,
+        ...(detection.status === "unsupported" ? [`Unsupported: ${detection.unsupportedReason}`] : []),
+        ...detection.warnings.map((warning) => `Warning: ${warning}`),
+      ].join("\n"),
+    )
+    .join("\n\n");
+  return {
+    data: requestedAgent ? documents[0] : { agents: documents },
+    warnings,
+    human,
+  };
+}
+
+async function executeInspect(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+): Promise<{ readonly data: unknown; readonly warnings: readonly string[]; readonly human: string }> {
+  const integration = requireIntegration(parsed, dependencies, "inspect");
+  const detection = requireAvailable(
+    await detectForCommand(parsed, dependencies, integration),
+    integration,
+  );
+  const inspection = await integration.inspect(integrationContext(parsed, dependencies), detection);
+  rejectUnusableConfig(inspection, integration);
+
+  const connection = inspection.connection;
+  const lines = [
+    `${integration.manifest.displayName} configuration: ${inspection.status}`,
+    `Config: ${inspection.configPath}`,
+    `Managed by Apexnova-connect: ${inspection.managed ? "yes" : "no"}`,
+  ];
+  if (connection) {
+    lines.push(
+      `Protocol: ${connection.protocol ?? "unknown"}`,
+      `Base URL: ${connection.baseUrl ?? "not set"}`,
+      `Models: ${connection.modelIds.length > 0 ? connection.modelIds.join(", ") : "none"}`,
+    );
+  }
+  return {
+    data: toInspectionDocument(inspection),
+    warnings: inspection.warnings,
+    human: lines.join("\n"),
+  };
+}
+
+interface AgentPlanResult {
+  readonly integration: AgentIntegration;
+  readonly plan: ChangePlan;
+  readonly deployment: HubCatalogDeployment;
+  readonly protocol: string;
+  readonly catalogVersion: string;
+}
+
+async function createAgentPlan(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+): Promise<AgentPlanResult> {
+  const integration = requireIntegration(parsed, dependencies, parsed.command ?? "connect");
+  if (!parsed.deployment) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: `${parsed.command ?? "connect"} requires --deployment <id>.`,
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const context = integrationContext(parsed, dependencies);
+  const detection = requireAvailable(
+    await detectForCommand(parsed, dependencies, integration),
+    integration,
+  );
+  const inspection = await integration.inspect(context, detection);
+  rejectUnusableConfig(inspection, integration);
+
   const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
   const deployment = catalog.deployments.find((item) => item.id === parsed.deployment);
-  if (!deployment) throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "The selected deployment is not present in the visible Hub catalog.", exitCode: EXIT_CODES.unavailable });
-  if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") throw new CliError({ code: "DEPLOYMENT_UNAVAILABLE", message: `Deployment ${deployment.id} is ${deployment.availability.status}.`, exitCode: EXIT_CODES.unavailable });
-  const protocol = deployment.protocols.find((item) => item.protocol === parsed.protocol) ?? (parsed.protocol ? undefined : deployment.protocols.find((item) => openCodeProtocol(item.protocol)));
-  const mappedProtocol = protocol ? openCodeProtocol(protocol.protocol) : undefined;
-  if (!protocol || !mappedProtocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
-  const model = catalog.models.find((item) => item.id === deployment.modelId);
-  const existingContent = await readExistingOpenCodeConfig(parsed, detection);
-  const plan = buildOpenCodePlan({
-    dependencies,
-    configPath: detection.configPath,
-    existingContent,
+  if (!deployment) {
+    throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "The selected deployment is not present in the visible Hub catalog.", exitCode: EXIT_CODES.unavailable });
+  }
+  if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") {
+    throw new CliError({ code: "DEPLOYMENT_UNAVAILABLE", message: `Deployment ${deployment.id} is ${deployment.availability.status}.`, exitCode: EXIT_CODES.unavailable });
+  }
+  const protocol = selectProtocol(deployment, integration, parsed.protocol);
+  const intent = connectionIntent(parsed, dependencies, integration, deployment, protocol, catalog);
+  const plan = await integration.plan(context, detection, inspection, intent);
+
+  return {
+    integration,
+    plan,
     deployment,
-    protocol,
-    mappedProtocol,
-    ...(model?.name ? { modelName: model.name } : {}),
-  });
-  return { plan, deployment, protocol, catalogVersion: catalog.catalogVersion, detection };
+    protocol: protocol.protocol,
+    catalogVersion: catalog.catalogVersion,
+  };
 }
 
 async function executeConnect(parsed: ParsedArguments, dependencies: CliDependencies) {
-  const result = await createOpenCodePlan(parsed, dependencies);
-  const plan = safePlan(result.plan);
+  const preview = await createAgentPlan(parsed, dependencies);
+  const plan = agentPlanSummary(preview.plan);
   if (parsed.dryRun) {
-    const warnings = [...result.plan.warnings, "Dry-run performed no local writes and created no runtime credential."];
-    return { data: { dryRun: true, catalogVersion: result.catalogVersion, deploymentId: result.deployment.id, protocol: result.protocol.protocol, plan }, warnings, human: [`Plan: ${plan.id}`, `Deployment: ${result.deployment.id}`, `Protocol: ${result.protocol.protocol}`, `Operations: ${plan.operations.length}`, ...plan.operations.map((operation) => `${operation.mode} ${operation.path} (${operation.contentBytes} bytes)`), "No changes were applied."].join("\n") };
+    const warnings = [...preview.plan.warnings, "Dry-run performed no local writes and created no runtime credential."];
+    return {
+      data: { dryRun: true, agentId: preview.integration.manifest.id, catalogVersion: preview.catalogVersion, deploymentId: preview.deployment.id, protocol: preview.protocol, plan },
+      warnings,
+      human: [
+        `Plan: ${plan.id}`,
+        `Agent: ${preview.integration.manifest.displayName}`,
+        `Deployment: ${preview.deployment.id}`,
+        `Protocol: ${preview.protocol}`,
+        `Operations: ${plan.operations.length}`,
+        ...plan.operations.map((operation) => `${operation.mode} ${operation.path} (${operation.contentBytes} bytes)`),
+        "No changes were applied.",
+      ].join("\n"),
+    };
   }
   if (!parsed.yes) {
-    throw new CliError({ code: "APPROVAL_REQUIRED", message: "connect requires --yes after reviewing connect --dry-run.", exitCode: EXIT_CODES.permission, details: { plan } });
-  }
-
-  const service = hubService(parsed, dependencies);
-  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
-  const previous = await bindings.load(parsed.profile);
-  await mkdir(dirname(result.detection.configPath), { recursive: true, mode: 0o700 });
-  const created = await service.createRuntimeCredential(parsed.profile, {
-    name: `OpenCode (${parsed.profile})`,
-    protocols: [result.protocol.protocol],
-    publicDeploymentIds: [result.deployment.id],
-    expiresIn: 86_400,
-  }, operationSignal(parsed));
-  const stateRoot = localStateRoot(dependencies);
-  const backupRoot = join(stateRoot, "backups");
-  const executor = new FileConfigExecutor({ allowedRoots: [dirname(result.detection.configPath)], backupRoot });
-  let receipt: Awaited<ReturnType<FileConfigExecutor["apply"]>> | undefined;
-  try {
-    if (result.plan.operations.length > 0) receipt = await executor.apply(result.plan);
-    const updatedDetection: OpenCodeDetection = { ...result.detection, configExists: true, status: result.detection.status === "not-found" ? "config-only" : result.detection.status };
-    const inspection = await (dependencies.inspectOpenCode ?? inspectOpenCode)(updatedDetection);
-    if (inspection.status !== "configured" || !inspection.managed || !inspection.provider?.modelIds.includes(result.deployment.inferenceAlias)) {
-      throw new CliError({ code: "VERIFICATION_FAILED", message: "Applied OpenCode configuration did not pass configuration verification.", exitCode: EXIT_CODES.verification });
-    }
-    const transactionId = receipt && typeof receipt.rollbackToken === "object" && receipt.rollbackToken !== null && "transactionId" in receipt.rollbackToken && typeof receipt.rollbackToken.transactionId === "string" ? receipt.rollbackToken.transactionId : undefined;
-    await bindings.save(parsed.profile, {
-      credentialId: created.credentialId,
-      secret: created.secret,
-      expiresAt: created.expiresAt,
-      protocol: result.protocol.protocol,
-      deploymentId: result.deployment.id,
-      ...(transactionId ? { transactionId } : {}),
-      ...(previous ? { restoreTarget: {
-        protocol: previous.protocol,
-        deploymentId: previous.deploymentId,
-        ...(previous.transactionId ? { transactionId: previous.transactionId } : {}),
-        ...(previous.restoreTarget ? { restoreTarget: previous.restoreTarget } : {}),
-      } } : {}),
+    throw new CliError({
+      code: "APPROVAL_REQUIRED",
+      message: `${parsed.command ?? "connect"} requires --yes after reviewing ${parsed.command ?? "connect"} --dry-run.`,
+      exitCode: EXIT_CODES.permission,
+      details: { plan },
     });
-  } catch (cause) {
-    const failures: unknown[] = [cause];
-    if (receipt) await executor.rollback(receipt).catch((error: unknown) => failures.push(error));
-    await service.revokeRuntimeCredential(parsed.profile, created.credentialId, compensationSignal(parsed)).catch((error: unknown) => failures.push(error));
-    if (failures.length > 1) throw new CliError({ code: "CONNECT_ROLLBACK_INCOMPLETE", message: "Connection failed and cleanup did not fully complete.", exitCode: EXIT_CODES.recovery, cause: new AggregateError(failures) });
-    throw cause;
   }
 
-  const warnings = [...result.plan.warnings];
-  if (previous && previous.credentialId !== created.credentialId) {
-    try {
-      await service.revokeRuntimeCredential(parsed.profile, previous.credentialId, compensationSignal(parsed));
-    } catch {
-      warnings.push(`Previous runtime credential ${previous.credentialId} could not be revoked automatically.`);
-    }
-  }
-  const transactionId = receipt && typeof receipt.rollbackToken === "object" && receipt.rollbackToken !== null && "transactionId" in receipt.rollbackToken && typeof receipt.rollbackToken.transactionId === "string" ? receipt.rollbackToken.transactionId : undefined;
+  const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
+  const deployment = catalog.deployments.find((item) => item.id === preview.deployment.id) ?? preview.deployment;
+  const protocol = selectProtocol(deployment, preview.integration, parsed.protocol);
+  const result = await configureAgent(
+    parsed,
+    dependencies,
+    preview.integration,
+    deployment,
+    protocol,
+    catalog,
+    "runtime",
+  );
+  const applied = agentPlanSummary(result.plan);
   return {
-    data: { connected: true, profile: parsed.profile, deploymentId: result.deployment.id, protocol: result.protocol.protocol, credentialId: created.credentialId, credentialExpiresAt: created.expiresAt, transactionId, plan },
-    warnings,
-    human: [`Connected OpenCode to ${result.deployment.displayName}.`, `Runtime credential expires: ${created.expiresAt}`, ...(transactionId ? [`Restore transaction: ${transactionId}`] : []), "Launch with: apexnova run opencode"].join("\n"),
+    data: {
+      connected: true,
+      agentId: preview.integration.manifest.id,
+      profile: parsed.profile,
+      deploymentId: deployment.id,
+      protocol: protocol.protocol,
+      credentialId: result.binding.credentialId,
+      credentialExpiresAt: result.binding.expiresAt,
+      transactionId: result.transactionId,
+      plan: applied,
+    },
+    warnings: result.warnings,
+    human: [
+      `Connected ${preview.integration.manifest.displayName} to ${deployment.displayName}.`,
+      `Runtime credential expires: ${result.binding.expiresAt}`,
+      ...(result.transactionId ? [`Restore transaction: ${result.transactionId}`] : []),
+      `Launch with: apexnova run ${preview.integration.manifest.id}`,
+    ].join("\n"),
   };
-}
-
-interface OpenCodeLaunchOutcome {
-  readonly binding: RuntimeCredentialBinding;
-  readonly rotated: boolean;
-  readonly warnings: readonly string[];
 }
 
 /**
- * Injects the bound secret into the child environment only, then waits for
- * OpenCode to exit. The secret never reaches argv, the config file, or a log.
+ * `apexnova run <agent>` configures on first use and then launches. Existing
+ * connections skip planning entirely and go straight to the launcher.
  */
-async function launchOpenCodeWithBinding(
-  parsed: ParsedArguments,
-  dependencies: CliDependencies,
-  binding: RuntimeCredentialBinding,
-  agentArgs: readonly string[],
-): Promise<void> {
-  const environment: NodeJS.ProcessEnv = {
-    ...(dependencies.environment ?? process.env),
-    APEXNOVA_API_KEY: binding.secret.reveal(),
-  };
-  const exitCode = await (dependencies.launchOpenCode ?? defaultLaunchOpenCode)(agentArgs, environment);
-  if (exitCode !== 0) {
-    throw new CliError({
-      code: "AGENT_EXITED",
-      message: `OpenCode exited with code ${exitCode}.`,
-      exitCode: EXIT_CODES.runtime,
-      details: { agentExitCode: exitCode },
-    });
-  }
-}
-
 async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies) {
-  const [agent, ...agentArgs] = parsed.operands;
-  if (agent !== "opencode") throw new CliError({ code: "INVALID_ARGUMENT", message: "run requires opencode as its first argument.", exitCode: EXIT_CODES.usage });
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
-  if (detection.status !== "installed") {
-    throw new CliError({ code: "AGENT_NOT_FOUND", message: "OpenCode executable was not found; install OpenCode before using the launcher.", exitCode: EXIT_CODES.unavailable });
-  }
-  const runtime = await runtimeCredentialForLaunch(parsed, dependencies);
-  const binding = runtime.binding;
-  await launchOpenCodeWithBinding(parsed, dependencies, binding, agentArgs);
-  return {
-    data: { agentId: "opencode", profile: parsed.profile, deploymentId: binding.deploymentId, credentialExpiresAt: binding.expiresAt, credentialRotated: runtime.rotated, exited: true, agentExitCode: 0 },
-    warnings: runtime.warnings,
-    human: `${runtime.rotated ? "Runtime credential renewed.\n" : ""}OpenCode exited successfully.`,
-  };
-}
+  const integration = requireIntegration(parsed, dependencies, "run", { trailingArgs: true });
+  const agentArgs = parsed.operands.slice(1);
+  const io = dependencies.io ?? defaultIo();
+  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
+  const agentId = integration.manifest.id;
 
-async function resolveDeploymentForOpenCode(
-  parsed: ParsedArguments,
-  dependencies: CliDependencies,
-  catalog: HubCatalogSnapshot,
-  existingDeploymentId?: string,
-): Promise<HubCatalogDeployment> {
-  const supported = new Set(["openai-responses", "openai-chat"]);
-  const compatible = catalog.deployments.filter((deployment) =>
-    deployment.availability.status === "available" &&
-    deployment.protocols.some((protocol) => supported.has(protocol.protocol)),
+  const detection = requireAvailable(
+    await detectForCommand(parsed, dependencies, integration),
+    integration,
   );
-  if (parsed.deployment) {
-    const deployment = catalog.deployments.find((item) => item.id === parsed.deployment);
-    if (!deployment) throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "The selected deployment is not present in the visible Hub catalog.", exitCode: EXIT_CODES.unavailable });
-    if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") throw new CliError({ code: "DEPLOYMENT_UNAVAILABLE", message: `Deployment ${deployment.id} is ${deployment.availability.status}.`, exitCode: EXIT_CODES.unavailable });
-    return deployment;
-  }
-  if (existingDeploymentId) {
-    const existing = catalog.deployments.find((item) => item.id === existingDeploymentId);
-    if (existing && (existing.availability.status === "available" || existing.availability.status === "degraded")) return existing;
-  }
-  if (compatible.length === 0) throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "No compatible deployments are available.", exitCode: EXIT_CODES.unavailable });
-  const io = dependencies.io ?? defaultIo();
-  if (io.isInteractive && !parsed.nonInteractive && !parsed.json) {
-    const picker = resolvePicker(dependencies);
-    const modelsById = new Map(catalog.models.map((model) => [model.id, model]));
-    const items: CliPickerItem<HubCatalogDeployment>[] = compatible.map((deployment) => ({
-      label: `${deployment.displayName} (${deployment.inferenceAlias})`,
-      description: `${modelsById.get(deployment.modelId)?.name ?? deployment.modelId} · ${deployment.availability.status}`,
-      value: deployment,
-    }));
-    return picker("Select a model:", items);
-  }
-  throw new CliError({
-    code: "DEPLOYMENT_REQUIRED",
-    message: "No deployment is bound yet and the terminal is not interactive; pass --deployment <id>. Run `apexnova models --json` to list them.",
-    exitCode: EXIT_CODES.usage,
-    details: { compatibleDeploymentIds: compatible.map((deployment) => deployment.id) },
-  });
-}
-
-async function ensureCredentialForOpenCode(
-  parsed: ParsedArguments,
-  dependencies: CliDependencies,
-  deployment: HubCatalogDeployment,
-  protocol: HubCatalogProtocol,
-): Promise<RuntimeCredentialBinding> {
-  const service = hubService(parsed, dependencies);
-  const signal = operationSignal(parsed);
-  if (parsed.apiKeyId) {
-    const keyInfo = await service.apiKey(parsed.profile, parsed.apiKeyId, signal);
-    const bindings = new RuntimeBindingStore(credentialStore(dependencies));
-    const existing = await bindings.load(parsed.profile);
-    if (existing && existing.credentialId === parsed.apiKeyId) {
-      return existing;
-    }
-    const io = dependencies.io ?? defaultIo();
-    let secret: string;
-    if (io.isInteractive && !parsed.nonInteractive) {
-      secret = await password({ message: `Paste the secret for key ${keyInfo.prefix}:`, mask: "*" });
-    } else {
-      const envKey = (dependencies.environment ?? process.env).APEXNOVA_API_KEY;
-      if (!envKey) throw new CliError({ code: "APPROVAL_REQUIRED", message: `--key ${parsed.apiKeyId} requires the key secret; set APEXNOVA_API_KEY env var or run in interactive mode.`, exitCode: EXIT_CODES.permission });
-      secret = envKey;
-    }
-    if (!secret) throw new CliError({ code: "INVALID_ARGUMENT", message: "An empty key secret was provided.", exitCode: EXIT_CODES.usage });
-    return {
-      credentialId: keyInfo.id,
-      secret: SecretValue.from(secret),
-      protocol: protocol.protocol,
-      deploymentId: deployment.id,
-      kind: "user",
-    };
-  }
-  if (parsed.rotating) {
-    const created = await service.createRuntimeCredential(parsed.profile, {
-      name: `OpenCode (${parsed.profile})`,
-      protocols: [protocol.protocol],
-      publicDeploymentIds: [deployment.id],
-      expiresIn: 86_400,
-    }, signal);
-    return {
-      credentialId: created.credentialId,
-      secret: created.secret,
-      expiresAt: created.expiresAt,
-      protocol: protocol.protocol,
-      deploymentId: deployment.id,
-      kind: "runtime",
-    };
-  }
-  const created = await service.createApiKey(parsed.profile, {
-    name: `OpenCode (${parsed.profile})`,
-    protocols: [protocol.protocol],
-    publicDeploymentIds: [deployment.id],
-    expiresIn: null,
-  }, signal);
-  return {
-    credentialId: created.id,
-    secret: created.secret,
-    protocol: protocol.protocol,
-    deploymentId: deployment.id,
-    kind: "user",
-  };
-}
-
-async function configureOpenCode(
-  parsed: ParsedArguments,
-  dependencies: CliDependencies,
-  deployment: HubCatalogDeployment,
-  protocol: HubCatalogProtocol,
-  catalog: HubCatalogSnapshot,
-): Promise<{ readonly binding: RuntimeCredentialBinding; readonly transactionId?: string; readonly warnings: readonly string[] }> {
-  const service = hubService(parsed, dependencies);
-  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
-  const previous = await bindings.load(parsed.profile);
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
-  if (detection.status === "not-found") throw new CliError({ code: "AGENT_NOT_FOUND", message: "OpenCode was not found in the current environment.", exitCode: EXIT_CODES.unavailable });
-  const model = catalog.models.find((item) => item.id === deployment.modelId);
-  const mappedProtocol = openCodeProtocol(protocol.protocol);
-  if (!mappedProtocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
-  const existingContent = await readExistingOpenCodeConfig(parsed, detection);
-  const plan = buildOpenCodePlan({
-    dependencies,
-    configPath: detection.configPath,
-    existingContent,
-    deployment,
-    protocol,
-    mappedProtocol,
-    ...(model?.name ? { modelName: model.name } : {}),
-  });
-  await mkdir(dirname(detection.configPath), { recursive: true, mode: 0o700 });
-  const binding = await ensureCredentialForOpenCode(parsed, dependencies, deployment, protocol);
-  const stateRoot = localStateRoot(dependencies);
-  const backupRoot = join(stateRoot, "backups");
-  const executor = new FileConfigExecutor({ allowedRoots: [dirname(detection.configPath)], backupRoot });
-  let receipt: Awaited<ReturnType<FileConfigExecutor["apply"]>> | undefined;
-  const warnings: string[] = [...plan.warnings];
-  try {
-    if (plan.operations.length > 0) receipt = await executor.apply(plan);
-    await bindings.save(parsed.profile, {
-      ...binding,
-      ...(receipt && typeof receipt.rollbackToken === "object" && receipt.rollbackToken !== null && "transactionId" in receipt.rollbackToken && typeof receipt.rollbackToken.transactionId === "string" ? { transactionId: receipt.rollbackToken.transactionId } : {}),
-      ...(previous ? { restoreTarget: {
-        protocol: previous.protocol,
-        deploymentId: previous.deploymentId,
-        ...(previous.transactionId ? { transactionId: previous.transactionId } : {}),
-        ...(previous.restoreTarget ? { restoreTarget: previous.restoreTarget } : {}),
-      } } : {}),
+  if (detection.status !== "installed") {
+    throw new CliError({
+      code: "AGENT_NOT_FOUND",
+      message: `${integration.manifest.displayName} executable was not found; install it before using the launcher.`,
+      exitCode: EXIT_CODES.unavailable,
+      details: { agentId: detection.agentId, configPath: detection.configPath },
     });
-  } catch (cause) {
-    const failures: unknown[] = [cause];
-    if (receipt) await executor.rollback(receipt).catch((error: unknown) => failures.push(error));
-    if (binding.kind === "runtime") await service.revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed)).catch((error: unknown) => failures.push(error));
-    else await service.revokeApiKey(parsed.profile, binding.credentialId, compensationSignal(parsed)).catch((error: unknown) => failures.push(error));
-    if (failures.length > 1) throw new CliError({ code: "CONNECT_ROLLBACK_INCOMPLETE", message: "Connection failed and cleanup did not fully complete.", exitCode: EXIT_CODES.recovery, cause: new AggregateError(failures) });
-    throw cause;
   }
-  if (previous && previous.credentialId !== binding.credentialId) {
-    try {
-      if (previous.kind === "runtime") await service.revokeRuntimeCredential(parsed.profile, previous.credentialId, compensationSignal(parsed));
-      else await service.revokeApiKey(parsed.profile, previous.credentialId, compensationSignal(parsed));
-    } catch {
-      warnings.push(`Previous credential ${previous.credentialId} could not be revoked automatically.`);
-    }
-  }
-  const transactionId = receipt && typeof receipt.rollbackToken === "object" && receipt.rollbackToken !== null && "transactionId" in receipt.rollbackToken && typeof receipt.rollbackToken.transactionId === "string" ? receipt.rollbackToken.transactionId : undefined;
-  return { binding, ...(transactionId ? { transactionId } : {}), warnings };
-}
 
-async function executeOpenCode(parsed: ParsedArguments, dependencies: CliDependencies) {
-  const io = dependencies.io ?? defaultIo();
-  const service = hubService(parsed, dependencies);
-  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
-  if (detection.status !== "installed" && detection.status !== "config-only") {
-    throw new CliError({ code: "AGENT_NOT_FOUND", message: "OpenCode was not found; install OpenCode first.", exitCode: EXIT_CODES.unavailable });
-  }
-  const existing = await bindings.load(parsed.profile);
+  const existing = await bindings.load(agentId, parsed.profile);
   const needConfig = !existing || parsed.deployment !== undefined;
   let binding = existing;
   const configureWarnings: string[] = [];
   if (needConfig) {
-    const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
-    const deployment = await resolveDeploymentForOpenCode(parsed, dependencies, catalog, existing?.deploymentId);
-    const supported = new Set(["openai-responses", "openai-chat"]);
-    const protocol = deployment.protocols.find((item) => supported.has(item.protocol));
-    if (!protocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
-    const result = await configureOpenCode(parsed, dependencies, deployment, protocol, catalog);
+    const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
+    const deployment = await resolveDeployment(parsed, dependencies, integration, catalog, existing?.deploymentId);
+    const protocol = selectProtocol(deployment, integration);
+    const result = await configureAgent(parsed, dependencies, integration, deployment, protocol, catalog);
     binding = result.binding;
     configureWarnings.push(...result.warnings);
-    if (!parsed.json) io.stderr(`Configured OpenCode with ${deployment.displayName} (${deployment.inferenceAlias}).\n`);
+    if (!parsed.json) {
+      io.stderr(`Configured ${integration.manifest.displayName} with ${deployment.displayName} (${deployment.inferenceAlias}).\n`);
+    }
   }
-  if (!binding) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No credential is stored for this profile.", exitCode: EXIT_CODES.authentication });
+  if (!binding) {
+    throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No credential is stored for this profile.", exitCode: EXIT_CODES.authentication });
+  }
   // A credential we just minted cannot be near expiry, so skip the rotation
   // check and its extra credential-store round trip on the configure path.
-  const runtime: OpenCodeLaunchOutcome = needConfig
-    ? { binding, rotated: false, warnings: [] }
-    : await runtimeCredentialForLaunch(parsed, dependencies);
+  const runtime = needConfig
+    ? { binding, rotated: false, warnings: [] as readonly string[] }
+    : await runtimeCredentialForLaunch(parsed, dependencies, integration);
   binding = runtime.binding;
-  await launchOpenCodeWithBinding(parsed, dependencies, binding, parsed.operands);
+  await launchAgent(parsed, dependencies, integration, binding, agentArgs);
   return {
-    data: { agentId: "opencode", profile: parsed.profile, deploymentId: binding.deploymentId, credentialKind: binding.kind ?? "runtime", credentialExpiresAt: binding.expiresAt, credentialRotated: runtime.rotated, exited: true, agentExitCode: 0 },
+    data: {
+      agentId,
+      profile: parsed.profile,
+      deploymentId: binding.deploymentId,
+      credentialKind: binding.kind ?? "runtime",
+      credentialExpiresAt: binding.expiresAt,
+      credentialRotated: runtime.rotated,
+      exited: true,
+      agentExitCode: 0,
+    },
     warnings: [...configureWarnings, ...runtime.warnings],
-    human: `${runtime.rotated ? "Credential renewed.\n" : ""}OpenCode exited successfully.`,
-  };
-}
-
-async function executeUsage(parsed: ParsedArguments, dependencies: CliDependencies) {
-  noOperands(parsed);
-  const service = hubService(parsed, dependencies);
-  const query: UsageQuery = {
-    ...(parsed.apiKeyId ? { apiKeyId: parsed.apiKeyId } : {}),
-    ...(parsed.from ? { from: parsed.from } : {}),
-    ...(parsed.to ? { to: parsed.to } : {}),
-    ...(parsed.granularity ? { granularity: parsed.granularity } : {}),
-  };
-  const result = await service.usageQuery(parsed.profile, query, operationSignal(parsed));
-  if ("granularity" in result) {
-    const rows = result.items.map((item) =>
-      `${item.bucketStart}  ${item.apiKeyName ?? item.apiKeyId ?? "-"}  ${item.resolvedModel ?? "-"}  ${item.requestCount} req  ${item.normalCost} ${item.currency}`,
-    );
-    return {
-      data: result,
-      warnings: [] as readonly string[],
-      human: rows.length === 0 ? "No usage records in the selected range." : [`Granularity: ${result.granularity}`, ...rows].join("\n"),
-    };
-  }
-  const rows = result.items.map((item) =>
-    `${item.at}  ${item.apiKeyId ?? "-"}  ${item.resolvedModel}  ${item.amount} ${item.currency}`,
-  );
-  return {
-    data: result,
-    warnings: [] as readonly string[],
-    human: rows.length === 0 ? "No usage records." : rows.join("\n"),
+    human: `${runtime.rotated ? "Credential renewed.\n" : ""}${integration.manifest.displayName} exited successfully.`,
   };
 }
 
 async function executeVerify(parsed: ParsedArguments, dependencies: CliDependencies) {
-  requireAgent(parsed.operands, false);
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
-  if (detection.status === "not-found") throw new CliError({ code: "AGENT_NOT_FOUND", message: "OpenCode was not found in the current environment.", exitCode: EXIT_CODES.unavailable });
-  const inspection = await (dependencies.inspectOpenCode ?? inspectOpenCode)(detection);
-  const valid = inspection.status === "configured" && inspection.managed && inspection.provider?.modelIds.length;
-  if (!valid) throw new CliError({ code: "VERIFICATION_FAILED", message: inspection.warnings[0] ?? "OpenCode is not configured with a usable Apexnova provider.", exitCode: EXIT_CODES.verification, details: { status: inspection.status, managed: inspection.managed } });
-  const configuration = { agentId: "opencode", configPath: inspection.configPath, protocol: inspection.provider?.protocol, models: inspection.provider?.modelIds };
+  const integration = requireIntegration(parsed, dependencies, "verify");
+  const agentId = integration.manifest.id;
+  const detection = requireAvailable(
+    await detectForCommand(parsed, dependencies, integration),
+    integration,
+  );
+  const inspection = await integration.inspect(integrationContext(parsed, dependencies), detection);
+  const valid =
+    inspection.status === "configured" &&
+    inspection.managed &&
+    (inspection.connection?.modelIds.length ?? 0) > 0;
+  if (!valid) {
+    throw new CliError({
+      code: "VERIFICATION_FAILED",
+      message: inspection.warnings[0] ?? `${integration.manifest.displayName} is not configured with a usable Apexnova provider.`,
+      exitCode: EXIT_CODES.verification,
+      details: { status: inspection.status, managed: inspection.managed },
+    });
+  }
+  const configuration = {
+    agentId,
+    configPath: inspection.configPath,
+    protocol: inspection.connection?.protocol,
+    models: inspection.connection?.modelIds,
+  };
   if (!parsed.live) {
-    const warnings = ["Configuration verification passed; use --live to perform a minimal inference check."];
-    return { data: { valid: true, level: "configuration", ...configuration }, warnings, human: `OpenCode configuration is valid for ${inspection.provider?.modelIds.join(", ")}. Live inference was not tested.` };
+    return {
+      data: { valid: true, level: "configuration", ...configuration },
+      warnings: ["Configuration verification passed; use --live to perform a minimal inference check."],
+      human: `${integration.manifest.displayName} configuration is valid for ${inspection.connection?.modelIds.join(", ")}. Live inference was not tested.`,
+    };
   }
 
-  const binding = await new RuntimeBindingStore(credentialStore(dependencies)).load(parsed.profile);
-  if (!binding) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
-  if (binding.expiresAt !== undefined && Date.parse(binding.expiresAt) <= Date.now()) throw new CliError({ code: "RUNTIME_CREDENTIAL_EXPIRED", message: "The stored runtime credential has expired; reconnect before live verification.", exitCode: EXIT_CODES.authentication });
+  const binding = await new RuntimeBindingStore(credentialStore(dependencies)).load(agentId, parsed.profile);
+  if (!binding) {
+    throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
+  }
+  if (binding.expiresAt !== undefined && Date.parse(binding.expiresAt) <= Date.now()) {
+    throw new CliError({ code: "RUNTIME_CREDENTIAL_EXPIRED", message: "The stored runtime credential has expired; reconnect before live verification.", exitCode: EXIT_CODES.authentication });
+  }
   if (binding.protocol !== "openai-responses" && binding.protocol !== "openai-chat") {
     throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: `Live verification does not support ${binding.protocol}.`, exitCode: EXIT_CODES.unavailable });
   }
@@ -1530,8 +1064,8 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
   const deployment = catalog.deployments.find((item) => item.id === binding.deploymentId);
   const protocol = deployment?.protocols.find((item) => item.protocol === binding.protocol);
-  if (!deployment || !protocol || !inspection.provider?.modelIds.includes(deployment.inferenceAlias)) {
-    throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential no longer matches the visible catalog and OpenCode configuration.", exitCode: EXIT_CODES.verification });
+  if (!deployment || !protocol || !inspection.connection?.modelIds.includes(deployment.inferenceAlias)) {
+    throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential no longer matches the visible catalog and the Agent configuration.", exitCode: EXIT_CODES.verification });
   }
   const estimate = await service.estimatePricing(parsed.profile, deployment.id, LIVE_VERIFY_ESTIMATE_USAGE, operationSignal(parsed));
   if (!parsed.yes) {
@@ -1568,172 +1102,125 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   return {
     data: { valid: true, level: "live", ...configuration, estimate, estimateAssumptions: LIVE_VERIFY_ESTIMATE_USAGE, inference, ...(usage ? { usage } : {}) },
     warnings: usageWarning ? [usageWarning] : [] as readonly string[],
-    human: [`OpenCode live verification passed for ${inference.requestedModel}.`, `Deployment: ${inference.deploymentId}`, `Resolved model: ${inference.resolvedModel}`, `Request: ${inference.requestId}`, billedLine, `Non-binding estimate: ${estimate.amount} ${estimate.currency} (${LIVE_VERIFY_ESTIMATE_USAGE.inputTokens} input + ${LIVE_VERIFY_ESTIMATE_USAGE.outputTokens} output tokens assumed)`].join("\n"),
+    human: [
+      `${integration.manifest.displayName} live verification passed for ${inference.requestedModel}.`,
+      `Deployment: ${inference.deploymentId}`,
+      `Resolved model: ${inference.resolvedModel}`,
+      `Request: ${inference.requestId}`,
+      billedLine,
+      `Non-binding estimate: ${estimate.amount} ${estimate.currency} (${LIVE_VERIFY_ESTIMATE_USAGE.inputTokens} input + ${LIVE_VERIFY_ESTIMATE_USAGE.outputTokens} output tokens assumed)`,
+    ].join("\n"),
   };
 }
 
 async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependencies) {
-  requireAgent(parsed.operands, true);
-  const checks: Array<{ name: string; status: "pass" | "warn" | "fail"; message: string }> = [];
-  const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
-  checks.push({ name: "opencode-discovery", status: detection.status === "not-found" ? "fail" : "pass", message: detection.status });
-  if (detection.status !== "not-found") {
-    try {
-      const inspection = await (dependencies.inspectOpenCode ?? inspectOpenCode)(detection);
-      checks.push({ name: "opencode-config", status: inspection.status === "invalid" || inspection.status === "legacy" ? "fail" : inspection.managed ? "pass" : "warn", message: inspection.status });
-    } catch {
-      checks.push({ name: "opencode-config", status: "fail", message: "unreadable" });
-    }
+  const requestedAgent = agentOperand(parsed, dependencies, { optional: true, command: "doctor" });
+  const targets = requestedAgent
+    ? [resolveIntegration(requestedAgent, dependencies)]
+    : integrationRegistry(dependencies).list();
+  const context = integrationContext(parsed, dependencies);
+  const checks: DiagnosticCheck[] = [];
+
+  for (const integration of targets) {
+    checks.push(...(await integration.diagnose(context)));
   }
+
   const platform = dependencies.platform ?? process.platform;
-  checks.push({ name: "credential-backend", status: platform === "win32" || platform === "linux" ? "pass" : "fail", message: platform === "win32" ? "Windows Credential Manager" : platform === "linux" ? "Secret Service" : `unsupported on ${platform}` });
-  checks.push({ name: "state-root", status: "pass", message: localStateRoot(dependencies) });
+  const backendSupported = platform === "win32" || platform === "linux" || platform === "darwin";
+  checks.push({
+    id: "credential-backend",
+    status: backendSupported ? "pass" : "fail",
+    code: `credential-backend.${platform}`,
+    severity: backendSupported ? "info" : "error",
+    message: platform === "win32"
+      ? "Windows Credential Manager"
+      : platform === "linux"
+        ? "Secret Service"
+        : platform === "darwin"
+          ? "macOS Keychain"
+          : `unsupported on ${platform}`,
+  });
+  checks.push({
+    id: "state-root",
+    status: "pass",
+    code: "state-root.resolved",
+    severity: "info",
+    message: localStateRoot(dependencies),
+  });
   const hubConfig = resolveHubConfig(hubConfigContext(dependencies));
   checks.push({
-    name: "hub-endpoint",
+    id: "hub-endpoint",
     status: hubConfig ? "pass" : "fail",
+    code: hubConfig ? "hub-endpoint.resolved" : "hub-endpoint.missing",
+    severity: hubConfig ? "info" : "error",
     message: hubConfig ? `${hubConfig.baseUrl} (${hubConfig.source})` : "not configured; run `apexnova init`",
   });
   try {
     const account = await hubService(parsed, dependencies).whoami(parsed.profile, operationSignal(parsed));
-    checks.push({ name: "hub-session", status: "pass", message: account.accountId ?? account.userId });
+    checks.push({ id: "hub-session", status: "pass", code: "hub-session.active", severity: "info", message: account.accountId ?? account.userId });
   } catch (error) {
     const normalized = normalizeError(error);
-    checks.push({ name: "hub-session", status: "warn", message: normalized.code });
+    checks.push({ id: "hub-session", status: "warning", code: `hub-session.${normalized.code}`, severity: "warning", message: normalized.code });
   }
+
   const failed = checks.some((check) => check.status === "fail");
-  const warnings = checks.filter((check) => check.status !== "pass").map((check) => `${check.name}: ${check.message}`);
-  return { data: { healthy: !failed, checks }, warnings, human: checks.map((check) => `${check.status.toUpperCase()} ${check.name}: ${check.message}`).join("\n") };
+  const warnings = checks.filter((check) => check.status !== "pass").map((check) => `${check.id}: ${check.message}`);
+  return {
+    data: { healthy: !failed, checks },
+    warnings,
+    human: checks.map((check) => `${check.status.toUpperCase()} ${check.id}: ${check.message}`).join("\n"),
+  };
 }
 
-async function executeRestore(parsed: ParsedArguments, dependencies: CliDependencies) {
-  if (parsed.operands.length > 1) throw new CliError({ code: "INVALID_ARGUMENT", message: "restore accepts at most one transaction ID.", exitCode: EXIT_CODES.usage });
-  const backupRoot = join(localStateRoot(dependencies), "backups");
-  const environment = dependencies.environment ?? process.env;
-  const home = dependencies.homeDirectory ?? environment.USERPROFILE ?? environment.HOME ?? process.cwd();
-  const candidates = [
-    resolve(dependencies.cwd ?? process.cwd()),
-    join(home, ".config", "opencode"),
-    ...(environment.XDG_CONFIG_HOME ? [join(environment.XDG_CONFIG_HOME, "opencode")] : []),
-    ...(environment.APPDATA ? [join(environment.APPDATA, "opencode")] : []),
-    ...(parsed.configPath ? [dirname(resolve(parsed.configPath))] : []),
-    localStateRoot(dependencies),
-  ];
-  const allowedRoots: string[] = [];
-  for (const candidate of [...new Set(candidates)]) {
-    try {
-      await access(candidate);
-      allowedRoots.push(candidate);
-    } catch {
-      // An absent known root is not trusted merely because of its name.
-    }
+async function executeUsage(parsed: ParsedArguments, dependencies: CliDependencies) {
+  noOperands(parsed);
+  const service = hubService(parsed, dependencies);
+  const query: UsageQuery = {
+    ...(parsed.apiKeyId ? { apiKeyId: parsed.apiKeyId } : {}),
+    ...(parsed.from ? { from: parsed.from } : {}),
+    ...(parsed.to ? { to: parsed.to } : {}),
+    ...(parsed.granularity ? { granularity: parsed.granularity } : {}),
+  };
+  const result = await service.usageQuery(parsed.profile, query, operationSignal(parsed));
+  if ("granularity" in result) {
+    const rows = result.items.map((item) =>
+      `${item.bucketStart}  ${item.apiKeyName ?? item.apiKeyId ?? "-"}  ${item.resolvedModel ?? "-"}  ${item.requestCount} req  ${item.normalCost} ${item.currency}`,
+    );
+    return {
+      data: result,
+      warnings: [] as readonly string[],
+      human: rows.length === 0 ? "No usage records in the selected range." : [`Granularity: ${result.granularity}`, ...rows].join("\n"),
+    };
   }
-  const executor = new FileConfigExecutor({ allowedRoots, backupRoot });
-  const transactionId = parsed.operands[0];
-  if (parsed.list || transactionId === undefined) {
-    const backups = await executor.listBackups();
-    return { data: { backups }, warnings: [] as readonly string[], human: backups.length === 0 ? "No restorable transactions." : backups.map((item) => `${item.transactionId}  ${item.integrationId}  ${item.state}  ${item.appliedAt}`).join("\n") };
-  }
-  const summary = (await executor.listBackups()).find((item) => item.transactionId === transactionId);
-  const receipt = await executor.getReceipt(transactionId);
-  if (parsed.dryRun) return { data: { dryRun: true, transactionId, planId: receipt.planId }, warnings: ["Dry-run did not restore files."], human: `Transaction ${transactionId} can be restored. No files were changed.` };
-  if (!parsed.yes) throw new CliError({ code: "APPROVAL_REQUIRED", message: "restore requires --yes after reviewing the transaction or --dry-run.", exitCode: EXIT_CODES.permission });
-  const warnings: string[] = [];
-  let runtimeCredentialRevoked: boolean | undefined;
-  let runtimeCredentialRestored = false;
-  const bindings = summary?.integrationId === "opencode" ? new RuntimeBindingStore(credentialStore(dependencies)) : undefined;
-  const binding = bindings ? await bindings.load(parsed.profile) : null;
-  if (binding?.transactionId && binding.transactionId !== transactionId) {
-    throw new CliError({ code: "RESTORE_ORDER_CONFLICT", message: `Restore ${binding.transactionId} before restoring ${transactionId}.`, exitCode: EXIT_CODES.conflict });
-  }
-
-  let replacement: typeof binding = null;
-  if (binding?.restoreTarget) {
-    const service = hubService(parsed, dependencies);
-    const target = binding.restoreTarget;
-    const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
-    const deployment = catalog.deployments.find((item) => item.id === target.deploymentId);
-    const protocol = deployment?.protocols.find((item) => item.protocol === target.protocol);
-    if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
-      throw new CliError({ code: "BINDING_MISMATCH", message: "The previous runtime target is no longer available; configuration was not restored.", exitCode: EXIT_CODES.verification });
-    }
-    const created = await service.createRuntimeCredential(parsed.profile, {
-      name: `OpenCode (${parsed.profile})`,
-      protocols: [target.protocol],
-      publicDeploymentIds: [target.deploymentId],
-      expiresIn: 86_400,
-    }, operationSignal(parsed));
-    try {
-      const active = (await service.runtimeCredentials(parsed.profile, operationSignal(parsed))).find((item) => item.credentialId === created.credentialId);
-      if (!active || !active.protocols.includes(target.protocol) || !active.publicDeploymentIds.includes(target.deploymentId)) {
-        throw new CliError({ code: "VERIFICATION_FAILED", message: "The restored runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
-      }
-      replacement = {
-        credentialId: created.credentialId,
-        secret: created.secret,
-        expiresAt: created.expiresAt,
-        protocol: target.protocol,
-        deploymentId: target.deploymentId,
-        ...(target.transactionId ? { transactionId: target.transactionId } : {}),
-        ...(target.restoreTarget ? { restoreTarget: target.restoreTarget } : {}),
-      };
-    } catch (cause) {
-      await service.revokeRuntimeCredential(parsed.profile, created.credentialId, compensationSignal(parsed)).catch(() => {});
-      throw cause;
-    }
-  }
-
-  try {
-    await executor.rollback(receipt);
-  } catch (cause) {
-    if (replacement) await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, compensationSignal(parsed)).catch(() => {});
-    throw cause;
-  }
-  if (summary?.integrationId === "opencode") {
-    if (binding) {
-      if (replacement && bindings) {
-        try {
-          await bindings.save(parsed.profile, replacement);
-          runtimeCredentialRestored = true;
-        } catch (cause) {
-          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, compensationSignal(parsed)).catch(() => {});
-          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed)).catch(() => {});
-          await bindings.delete(parsed.profile).catch(() => {});
-          throw new CliError({ code: "RESTORE_BINDING_INCOMPLETE", message: "Configuration was restored, but the replacement runtime credential could not be saved; the profile was disconnected.", exitCode: EXIT_CODES.recovery, cause });
-        }
-      }
-      try {
-        await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed));
-        runtimeCredentialRevoked = true;
-      } catch {
-        runtimeCredentialRevoked = false;
-        warnings.push(`Runtime credential ${binding.credentialId} could not be revoked from Hub; revoke the device or credential manually.`);
-      }
-      if (!replacement) await bindings?.delete(parsed.profile);
-    }
-  }
+  const rows = result.items.map((item) =>
+    `${item.at}  ${item.apiKeyId ?? "-"}  ${item.resolvedModel}  ${item.amount} ${item.currency}`,
+  );
   return {
-    data: { restored: true, transactionId, planId: receipt.planId, runtimeCredentialRestored, ...(runtimeCredentialRevoked === undefined ? {} : { runtimeCredentialRevoked }) },
-    warnings,
-    human: `Restored transaction ${transactionId}.${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? " Runtime credential requires manual revocation." : ""}`,
+    data: result,
+    warnings: [] as readonly string[],
+    human: rows.length === 0 ? "No usage records." : rows.join("\n"),
   };
 }
 
 function normalizeError(error: unknown): CliError {
   if (error instanceof CliError) return error;
-  if (error instanceof OpenCodeInspectionError) {
-    return new CliError({
-      code: error.code,
-      message: error.message,
-      exitCode: EXIT_CODES.conflict,
-      cause: error,
-    });
+  // A change that failed inside the shared lifecycle reports the integration's
+  // own error, not the orchestration wrapper.
+  if (error instanceof IntegrationChangeError && error.cause !== undefined) {
+    return normalizeError(error.cause);
   }
-  if (error instanceof OpenCodeConfigError) {
+  if (error instanceof AgentIntegrationError) {
+    const exitCode =
+      error.code === "INVALID_INPUT" || error.code === "MIXED_PROTOCOLS"
+        ? EXIT_CODES.usage
+        : error.code === "AGENT_NOT_FOUND" || error.code === "PROTOCOL_NOT_SUPPORTED"
+          ? EXIT_CODES.unavailable
+          : EXIT_CODES.conflict;
     return new CliError({
       code: error.code,
       message: error.message,
-      exitCode: error.code === "INVALID_CONFIG" || error.code === "LEGACY_CONFIG" ? EXIT_CODES.conflict : EXIT_CODES.usage,
+      exitCode,
+      ...(Object.keys(error.details).length > 0 ? { details: error.details } : {}),
       cause: error,
     });
   }
@@ -1814,8 +1301,8 @@ export async function runCli(
       case "models":
         result = await executeModels(parsed, dependencies);
         break;
-      case "opencode":
-        result = await executeOpenCode(parsed, dependencies);
+      case "agents":
+        result = await executeAgents(parsed, dependencies);
         break;
       case "usage":
         result = await executeUsage(parsed, dependencies);
@@ -1837,6 +1324,14 @@ export async function runCli(
         break;
       case "run":
         result = await executeRun(parsed, dependencies);
+        break;
+      // v0.1 shipped `apexnova opencode` as the one-command path. Keep it as an
+      // alias so installed launchers and the published docs keep working.
+      case "opencode":
+        result = await executeRun(
+          { ...parsed, command: "run", operands: ["opencode", ...parsed.operands] },
+          dependencies,
+        );
         break;
       default:
         throw new CliError({

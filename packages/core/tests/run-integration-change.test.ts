@@ -22,7 +22,27 @@ interface TestSnapshot {
 const context: IntegrationContext = {
   platform: "linux",
   workingDirectory: "/workspace",
+  homeDirectory: "/home/tester",
+  environment: {},
 };
+
+const availableDetection = {
+  agentId: "test-agent",
+  displayName: "Test Agent",
+  status: "installed",
+  productVersion: "1.0.0",
+  configPath: "/workspace/config.json",
+  configExists: true,
+  configScope: "project",
+  evidence: [],
+  warnings: [],
+} as const;
+
+const missingDetection = {
+  ...availableDetection,
+  status: "not-found",
+  configExists: false,
+} as const;
 
 const manifest = {
   schemaVersion: "1",
@@ -70,8 +90,8 @@ const receipt: ApplyReceipt = {
 function createAdapter(): IntegrationAdapter<TestIntent, TestSnapshot> {
   return {
     manifest,
-    detect: vi.fn(async () => ({ status: "available" }) as const),
-    inspect: vi.fn(async () => ({ snapshot: { enabled: false }, warnings: [] })),
+    detect: vi.fn(async () => availableDetection),
+    inspect: vi.fn(async () => ({ enabled: false })),
     plan: vi.fn(async () => plan),
     verify: vi.fn(async () => ({ valid: true }) as const),
   };
@@ -107,13 +127,7 @@ describe("runIntegrationChange", () => {
 
   it("stops before inspection when the product is unavailable", async () => {
     const adapter = createAdapter();
-    adapter.detect = vi.fn(
-      async () =>
-        ({
-          status: "not-installed",
-          reason: "Test Agent was not found.",
-        }) as const,
-    );
+    adapter.detect = vi.fn(async () => missingDetection);
     const executor = createExecutor();
 
     const result = await runIntegrationChange({
