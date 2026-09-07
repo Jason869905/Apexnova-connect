@@ -53,6 +53,10 @@ importers:
       jsonc-parser:
         specifier: 3.3.1
         version: 3.3.1
+    devDependencies:
+      '@apexnova-connect/integration-testing':
+        specifier: workspace:*
+        version: link:../../../packages/integration-testing
 
   packages/config-engine:
     dependencies:
@@ -73,6 +77,18 @@ importers:
       '@apexnova-connect/credential-store':
         specifier: workspace:*
         version: link:../credential-store
+
+  packages/integration-testing:
+    dependencies:
+      '@apexnova-connect/config-engine':
+        specifier: workspace:*
+        version: link:../config-engine
+      '@apexnova-connect/core':
+        specifier: workspace:*
+        version: link:../core
+      '@apexnova-connect/integration-sdk':
+        specifier: workspace:*
+        version: link:../../sdks/typescript
 
   schemas: {}
 

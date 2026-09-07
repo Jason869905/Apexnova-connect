@@ -137,6 +137,41 @@ describe("CLI", () => {
     expect(capture.stderr()).toBe("");
   });
 
+  it("refuses an unknown agent and names the ones it supports", async () => {
+    const capture = captureIo();
+    const result = await runCli(["detect", "hermes", "--json"], {
+      io: capture.io,
+      registry: registryWith(),
+      createRequestId: () => "local_unknown_agent",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.unavailable);
+    expect(JSON.parse(capture.stdout())).toMatchObject({
+      ok: false,
+      error: {
+        code: "INTEGRATION_NOT_SUPPORTED",
+        details: { agentId: "hermes", supportedAgents: ["opencode"] },
+      },
+    });
+  });
+
+  it("refuses to plan against a product version the manifest does not cover", async () => {
+    const capture = captureIo();
+    const result = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--dry-run", "--json"], {
+      io: capture.io,
+      hubService: mockHub(),
+      registry: registryWith({
+        detect: async () => ({ ...installed, productVersion: "3.0.0" }),
+      }),
+      createRequestId: () => "local_drift",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.conflict);
+    const output = JSON.parse(capture.stdout());
+    expect(output.error.code).toBe("PRODUCT_VERSION_UNSUPPORTED");
+    expect(output.error.message).toContain("3.0.0");
+  });
+
   it("maps a missing requested agent to exit code 5", async () => {
     const capture = captureIo();
     const result = await runCli(["detect", "opencode", "--json"], {

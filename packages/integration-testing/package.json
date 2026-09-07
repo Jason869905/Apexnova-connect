@@ -1,8 +1,8 @@
 {
-  "name": "@apexnova-connect/integration-opencode",
+  "name": "@apexnova-connect/integration-testing",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenCode integration for Apexnova-connect.",
+  "description": "Shared contract test suite every Apexnova-connect integration must pass.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,16 +13,13 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "manifest.json"],
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@apexnova-connect/integration-sdk": "workspace:*",
-    "jsonc-parser": "3.3.1"
-  },
-  "devDependencies": {
-    "@apexnova-connect/integration-testing": "workspace:*"
+    "@apexnova-connect/config-engine": "workspace:*",
+    "@apexnova-connect/core": "workspace:*",
+    "@apexnova-connect/integration-sdk": "workspace:*"
   }
 }
-
