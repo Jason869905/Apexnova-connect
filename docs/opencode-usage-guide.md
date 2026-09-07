@@ -62,10 +62,22 @@ echo -n "" | gnome-keyring-daemon --unlock
 
 ## 配置 Hub 地址
 
+发布产物（`install.sh` / `install.ps1` 安装的版本）已内置生产 Hub 地址，可以跳过本节直接 `apexnova login`。
+
+要指向其他环境，用 `apexnova init` 持久化到配置文件（推荐，只需一次）：
+
+```bash
+apexnova init --hub-url https://api.apexnova-consulting.com --client-id apexnova-connect
+```
+
+或用环境变量临时覆盖（优先级高于配置文件）：
+
 ```bash
 export APEXNOVA_HUB_BASE_URL=https://api.apexnova-consulting.com
 export APEXNOVA_OAUTH_CLIENT_ID=apexnova-connect
 ```
+
+从源码构建的 CLI 不含内置默认值，必须先 `init` 或设置环境变量。
 
 ## 快速开始
 
@@ -208,10 +220,12 @@ apexnova doctor
 
 ## 环境变量参考
 
+Hub 地址解析顺序：环境变量 > `apexnova init` 写入的配置文件 > 发布产物内置默认值。
+
 | 变量 | 必需 | 说明 |
 |---|---|---|
-| `APEXNOVA_HUB_BASE_URL` | 是 | Hub API 地址，如 `https://api.apexnova-consulting.com` |
-| `APEXNOVA_OAUTH_CLIENT_ID` | 是 | OAuth client ID，固定为 `apexnova-connect` |
+| `APEXNOVA_HUB_BASE_URL` | 否 | Hub API 地址，如 `https://api.apexnova-consulting.com`；覆盖配置文件与内置默认值 |
+| `APEXNOVA_OAUTH_CLIENT_ID` | 否 | OAuth client ID，固定为 `apexnova-connect`；覆盖配置文件与内置默认值 |
 | `APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK` | 否 | 设为 `1` 时允许 localhost HTTP（仅开发用） |
 | `APEXNOVA_HUB_PATH_PREFIX` | 否 | API 路径前缀，如 dev 环境设为 `/api`（仅开发用） |
 | `APEXNOVA_ACCESS_TOKEN` | 否 | 直接传入 access token，跳过 credential store（仅测试用） |
@@ -230,9 +244,8 @@ apexnova doctor
 ## 完整流程示例
 
 ```bash
-# 1. 配置 Hub
-export APEXNOVA_HUB_BASE_URL=https://api.apexnova-consulting.com
-export APEXNOVA_OAUTH_CLIENT_ID=apexnova-connect
+# 1. 配置 Hub（发布产物已内置生产地址，可跳过）
+apexnova init --hub-url https://api.apexnova-consulting.com --client-id apexnova-connect
 
 # 2. 登录（一次性）
 apexnova login
@@ -255,10 +268,8 @@ apexnova logout
 连接本机 dev Hub（Next.js dev server + nginx）：
 
 ```bash
-export APEXNOVA_HUB_BASE_URL=http://localhost:3000
-export APEXNOVA_OAUTH_CLIENT_ID=apexnova-connect
 export APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK=1
-export APEXNOVA_HUB_PATH_PREFIX=/api
+apexnova init --hub-url http://localhost:3000 --client-id apexnova-connect --path-prefix /api --force
 
 apexnova login      # 浏览器打开 http://console.localhost/device 授权
 apexnova opencode   # 永久 key 路径

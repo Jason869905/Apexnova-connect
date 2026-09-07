@@ -636,15 +636,118 @@ describe("CLI", () => {
   });
 
   it("does not fall back to an implicit production Hub", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-nohub-"));
     const capture = captureIo();
     const result = await runCli(["balance", "--json"], {
       io: capture.io,
       environment: {},
       platform: "win32",
+      homeDirectory: home,
       createRequestId: () => "local_no_hub",
     });
-    expect(result.exitCode).toBe(EXIT_CODES.runtime);
-    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "INVALID_CONFIG" } });
+    expect(result.exitCode).toBe(EXIT_CODES.usage);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "HUB_NOT_CONFIGURED" } });
+  });
+
+  it("init stores a Hub endpoint that later commands resolve from the config file", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-init-"));
+    const context = { environment: {}, platform: "linux" as const, homeDirectory: home };
+
+    const initCapture = captureIo();
+    const init = await runCli(
+      ["init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect", "--json"],
+      { ...context, io: initCapture.io, createRequestId: () => "local_init" },
+    );
+    expect(init.exitCode).toBe(EXIT_CODES.success);
+
+    const configPath = join(home, ".config", "apexnova-connect", "config.json");
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toMatchObject({
+      version: 1,
+      hubBaseUrl: "https://hub.example.test",
+      oauthClientId: "apexnova-connect",
+    });
+
+    const doctorCapture = captureIo();
+    const doctor = await runCli(["doctor", "--json"], {
+      ...context,
+      io: doctorCapture.io,
+      hubService: mockHub(),
+      credentialStore: memoryCredentials(),
+      detectOpenCode: async () => installed,
+      createRequestId: () => "local_doctor",
+    });
+    expect(doctor.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(doctorCapture.stdout()).data.checks).toContainEqual({
+      name: "hub-endpoint",
+      status: "pass",
+      message: "https://hub.example.test (config-file)",
+    });
+  });
+
+  it("init refuses to clobber an existing config without --force", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-init-force-"));
+    const context = { environment: {}, platform: "linux" as const, homeDirectory: home };
+    const args = ["init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect", "--json"];
+
+    const first = await runCli(args, { ...context, io: captureIo().io, createRequestId: () => "local_a" });
+    expect(first.exitCode).toBe(EXIT_CODES.success);
+
+    const capture = captureIo();
+    const second = await runCli(["init", "--json", "--non-interactive"], {
+      ...context,
+      io: capture.io,
+      createRequestId: () => "local_b",
+    });
+    expect(second.exitCode).toBe(EXIT_CODES.conflict);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "CONFIG_EXISTS" } });
+  });
+
+  it("keeps environment variables ahead of the stored config file", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-precedence-"));
+    await runCli(["init", "--hub-url", "https://stored.example.test", "--client-id", "stored", "--json"], {
+      io: captureIo().io,
+      environment: {},
+      platform: "linux",
+      homeDirectory: home,
+      createRequestId: () => "local_store",
+    });
+
+    const capture = captureIo();
+    await runCli(["doctor", "--json"], {
+      io: capture.io,
+      environment: {
+        APEXNOVA_HUB_BASE_URL: "https://env.example.test",
+        APEXNOVA_OAUTH_CLIENT_ID: "from-env",
+      },
+      platform: "linux",
+      homeDirectory: home,
+      hubService: mockHub(),
+      credentialStore: memoryCredentials(),
+      detectOpenCode: async () => installed,
+      createRequestId: () => "local_env",
+    });
+    expect(JSON.parse(capture.stdout()).data.checks).toContainEqual({
+      name: "hub-endpoint",
+      status: "pass",
+      message: "https://env.example.test (environment)",
+    });
+  });
+
+  it("refuses to guess a deployment on a non-interactive first run", async () => {
+    const capture = captureIo();
+    const result = await runCli(["opencode", "--json"], {
+      io: capture.io,
+      environment: {},
+      platform: "linux",
+      homeDirectory: "/nonexistent-apexnova-home",
+      hubService: mockHub(),
+      credentialStore: memoryCredentials(),
+      detectOpenCode: async () => installed,
+      launchOpenCode: async () => 0,
+      createRequestId: () => "local_pick",
+    });
+    expect(result.exitCode).toBe(EXIT_CODES.usage);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "DEPLOYMENT_REQUIRED" } });
   });
 
   it("retries a rate-limited control-plane call using Retry-After and succeeds", async () => {

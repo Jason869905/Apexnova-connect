@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { access, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { dirname, join, resolve, win32 } from "node:path";
 import { spawn } from "node:child_process";
-import { select, password } from "@inquirer/prompts";
+import { input, select, password } from "@inquirer/prompts";
 
 import {
   detectOpenCode,
@@ -38,6 +38,15 @@ import {
   type HubCommandService,
 } from "./hub-command-service.js";
 import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-binding-store.js";
+import {
+  hubConfigDefaults,
+  hubConfigPath,
+  readHubConfigFile,
+  resolveHubConfig,
+  writeHubConfigFile,
+  type HubConfigContext,
+} from "./hub-config.js";
+import { CLI_VERSION } from "./version.js";
 
 export const EXIT_CODES = {
   success: 0,
@@ -114,6 +123,10 @@ interface ParsedArguments {
   readonly from?: string;
   readonly to?: string;
   readonly granularity?: "hour" | "day" | "month";
+  readonly hubUrl?: string;
+  readonly clientId?: string;
+  readonly pathPrefix?: string;
+  readonly force: boolean;
 }
 
 interface CliErrorShape {
@@ -154,11 +167,12 @@ const HELP = `Apexnova-connect CLI
 
 Usage:
   apexnova opencode [--deployment <id>] [--key <id>] [--rotating] [-- <agent args>]
+  apexnova init [--hub-url <url>] [--client-id <id>] [--path-prefix <p>]
   apexnova login | logout | whoami | balance
   apexnova models [--agent opencode] [--protocol <id>] [--compatible-only]
   apexnova usage [--key <id>] [--from <iso>] [--to <iso>] [--granularity hour|day|month]
-  apexnova connect opencode --deployment <id> --dry-run
-  apexnova switch opencode --deployment <id> [--dry-run] [--yes]
+  apexnova connect opencode --deployment <id> (--dry-run | --yes)
+  apexnova switch opencode --deployment <id> (--dry-run | --yes)
   apexnova verify opencode [--live] [--yes] | doctor [opencode]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
   apexnova detect [opencode] [--config <path>]
@@ -171,7 +185,7 @@ Global options:
   --json                 Emit a versioned JSON envelope
   --non-interactive      Disable prompts
   --yes                  Approve an already generated plan
-  --timeout <seconds>    Operation timeout (default: 30)
+  --timeout <seconds>    Whole-operation timeout (default: 120)
   --verbose              Emit sanitized diagnostics
   --agent <id>           Filter a catalog for an Agent
   --protocol <id>        Select or filter a protocol
@@ -182,12 +196,19 @@ Global options:
   --from <iso>           Usage query start time (RFC 3339)
   --to <iso>             Usage query end time (RFC 3339)
   --granularity <g>      Usage aggregation: hour, day, or month
+  --hub-url <url>        Apexnova AI Hub base URL (init)
+  --client-id <id>       OAuth client ID (init)
+  --path-prefix <p>      Hub API path prefix (init)
+  --force                Overwrite an existing stored value (init)
   --dry-run              Plan without changing local or remote state
   --list                 List restorable transactions
   --live                 Perform a minimal, potentially billable inference check
   --no-color             Disable colors
   --help                 Show help
   --version              Show version
+
+apexnova init stores the Hub endpoint so the other commands work without
+exporting APEXNOVA_HUB_BASE_URL and APEXNOVA_OAUTH_CLIENT_ID in every shell.
 
 apexnova opencode is the one-command path: it auto-configures a permanent key,
 writes the OpenCode provider config, and launches OpenCode. Use --rotating for
@@ -235,7 +256,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let version = false;
   let profile = "default";
   let configPath: string | undefined;
-  let timeoutSeconds = 30;
+  let timeoutSeconds = 120;
   let verbose = false;
   let nonInteractive = false;
   let yes = false;
@@ -251,6 +272,10 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let from: string | undefined;
   let to: string | undefined;
   let granularity: "hour" | "day" | "month" | undefined;
+  let hubUrl: string | undefined;
+  let clientId: string | undefined;
+  let pathPrefix: string | undefined;
+  let force = false;
   let optionsEnded = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -298,6 +323,21 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         break;
       case "--rotating":
         rotating = true;
+        break;
+      case "--force":
+        force = true;
+        break;
+      case "--hub-url":
+        hubUrl = valueAfter(args, index, arg);
+        index += 1;
+        break;
+      case "--client-id":
+        clientId = valueAfter(args, index, arg);
+        index += 1;
+        break;
+      case "--path-prefix":
+        pathPrefix = valueAfter(args, index, arg);
+        index += 1;
         break;
       case "--key":
         apiKeyId = valueAfter(args, index, arg);
@@ -387,6 +427,10 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     ...(granularity ? { granularity } : {}),
+    ...(hubUrl ? { hubUrl } : {}),
+    ...(clientId ? { clientId } : {}),
+    ...(pathPrefix ? { pathPrefix } : {}),
+    force,
   };
 }
 
@@ -539,17 +583,38 @@ function noOperands(parsed: ParsedArguments): void {
   }
 }
 
-function hubService(parsed: ParsedArguments, dependencies: CliDependencies): HubCommandService {
-  const base = dependencies.hubService ?? createDefaultHubCommandService({
+function hubConfigContext(dependencies: CliDependencies): HubConfigContext {
+  return {
     ...(dependencies.environment ? { environment: dependencies.environment } : {}),
     ...(dependencies.platform ? { platform: dependencies.platform } : {}),
+    ...(dependencies.homeDirectory ? { homeDirectory: dependencies.homeDirectory } : {}),
+  };
+}
+
+function hubService(parsed: ParsedArguments, dependencies: CliDependencies): HubCommandService {
+  const base = dependencies.hubService ?? createDefaultHubCommandService({
+    ...hubConfigContext(dependencies),
     requestTimeoutMs: parsed.timeoutSeconds * 1_000,
   });
   return withRetryableHub(base, dependencies.sleep ?? defaultSleep);
 }
 
+// One deadline per CLI invocation rather than per HTTP request: a command that
+// makes six sequential Hub calls must still honour --timeout as a whole.
+const operationSignals = new WeakMap<ParsedArguments, AbortSignal>();
+
 function operationSignal(parsed: ParsedArguments): AbortSignal {
-  return AbortSignal.timeout(parsed.timeoutSeconds * 1_000);
+  const existing = operationSignals.get(parsed);
+  if (existing) return existing;
+  const signal = AbortSignal.timeout(parsed.timeoutSeconds * 1_000);
+  operationSignals.set(parsed, signal);
+  return signal;
+}
+
+// Compensating work (revoking a credential after a failed apply) must not inherit
+// an already-expired operation deadline, or a timeout would leak the credential.
+function compensationSignal(parsed: ParsedArguments): AbortSignal {
+  return AbortSignal.timeout(Math.min(parsed.timeoutSeconds, 30) * 1_000);
 }
 
 function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -586,8 +651,8 @@ async function withRetry<T>(
 function withRetryableHub(service: HubCommandService, sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>): HubCommandService {
   const retry = <T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> => withRetry(operation, { sleep, ...(signal ? { signal } : {}) });
   return {
-    login: service.login,
-    logout: service.logout,
+    login: (profileId, onVerificationRequired, signal) => service.login(profileId, onVerificationRequired, signal),
+    logout: (profileId) => service.logout(profileId),
     whoami: (profileId, signal) => retry(() => service.whoami(profileId, signal), signal),
     balance: (profileId, signal) => retry(() => service.balance(profileId, signal), signal),
     catalog: (profileId, signal) => retry(() => service.catalog(profileId, signal), signal),
@@ -652,6 +717,101 @@ function defaultLaunchOpenCode(args: readonly string[], environment: NodeJS.Proc
       else resolveLaunch(code ?? 1);
     });
   });
+}
+
+function validateHubBaseUrl(value: string, allowInsecureLoopback: boolean): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new CliError({ code: "INVALID_ARGUMENT", message: `${value} is not a valid URL.`, exitCode: EXIT_CODES.usage });
+  }
+  const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname === "::1";
+  if (url.protocol === "http:" && !(loopback && allowInsecureLoopback)) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "The Hub base URL must use https, or be a loopback address with APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK=1.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new CliError({ code: "INVALID_ARGUMENT", message: `Unsupported Hub URL scheme: ${url.protocol}`, exitCode: EXIT_CODES.usage });
+  }
+  return url.origin + (url.pathname === "/" ? "" : url.pathname.replace(/\/$/, ""));
+}
+
+function validatePathPrefix(value: string): string {
+  if (!value.startsWith("/") || value.endsWith("/")) {
+    throw new CliError({ code: "INVALID_ARGUMENT", message: "--path-prefix must start with / and must not end with /.", exitCode: EXIT_CODES.usage });
+  }
+  return value;
+}
+
+async function executeInit(parsed: ParsedArguments, dependencies: CliDependencies) {
+  noOperands(parsed);
+  const io = dependencies.io ?? defaultIo();
+  const context = hubConfigContext(dependencies);
+  const configPath = hubConfigPath(context);
+  const stored = readHubConfigFile(context);
+  const defaults = hubConfigDefaults();
+  const overriding = parsed.hubUrl !== undefined || parsed.clientId !== undefined || parsed.pathPrefix !== undefined;
+  const interactive = io.isInteractive && !parsed.nonInteractive && !parsed.json;
+
+  if (stored && !parsed.force && !overriding && !interactive) {
+    throw new CliError({
+      code: "CONFIG_EXISTS",
+      message: `${configPath} already configures a Hub endpoint. Pass --force to overwrite, or --hub-url/--client-id to change a single value.`,
+      exitCode: EXIT_CODES.conflict,
+      details: { configPath },
+    });
+  }
+
+  const ask = async (message: string, fallback: string | undefined, flag: string): Promise<string> => {
+    if (!interactive) {
+      if (!fallback) {
+        throw new CliError({
+          code: "INVALID_ARGUMENT",
+          message: `${flag} is required because this build has no default and the terminal is not interactive.`,
+          exitCode: EXIT_CODES.usage,
+        });
+      }
+      return fallback;
+    }
+    const answer = await input({ message, ...(fallback ? { default: fallback } : {}), required: true });
+    return answer.trim();
+  };
+
+  const environment = dependencies.environment ?? process.env;
+  const allowInsecureLoopback = environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1";
+  const hubBaseUrl = validateHubBaseUrl(
+    parsed.hubUrl ?? await ask("Apexnova AI Hub base URL:", stored?.hubBaseUrl ?? defaults.baseUrl, "--hub-url"),
+    allowInsecureLoopback,
+  );
+  const oauthClientId = parsed.clientId ?? await ask("OAuth client ID:", stored?.oauthClientId ?? defaults.clientId, "--client-id");
+  const rawPathPrefix = parsed.pathPrefix ?? stored?.pathPrefix;
+  const pathPrefix = rawPathPrefix ? validatePathPrefix(rawPathPrefix) : undefined;
+
+  writeHubConfigFile(context, {
+    hubBaseUrl,
+    oauthClientId,
+    ...(pathPrefix ? { pathPrefix } : {}),
+  });
+
+  const warnings: string[] = [];
+  if (environment.APEXNOVA_HUB_BASE_URL || environment.APEXNOVA_OAUTH_CLIENT_ID) {
+    warnings.push("APEXNOVA_HUB_BASE_URL / APEXNOVA_OAUTH_CLIENT_ID are set in this environment and take precedence over the stored file.");
+  }
+  return {
+    data: { configPath, hubBaseUrl, oauthClientId, ...(pathPrefix ? { pathPrefix } : {}) },
+    warnings: warnings as readonly string[],
+    human: [
+      `Wrote ${configPath}`,
+      `Hub: ${hubBaseUrl}`,
+      `Client: ${oauthClientId}`,
+      ...(pathPrefix ? [`Path prefix: ${pathPrefix}`] : []),
+      'Next: run "apexnova login".',
+    ].join("\n"),
+  };
 }
 
 async function executeLogin(parsed: ParsedArguments, dependencies: CliDependencies) {
@@ -866,18 +1026,54 @@ async function runtimeCredentialForLaunch(parsed: ParsedArguments, dependencies:
       }
       await bindings.save(parsed.profile, replacement);
     } catch (cause) {
-      await service.revokeRuntimeCredential(parsed.profile, created.credentialId, operationSignal(parsed)).catch(() => {});
+      await service.revokeRuntimeCredential(parsed.profile, created.credentialId, compensationSignal(parsed)).catch(() => {});
       throw cause;
     }
     const warnings: string[] = [];
     if (current.credentialId !== created.credentialId) {
       try {
-        await service.revokeRuntimeCredential(parsed.profile, current.credentialId, operationSignal(parsed));
+        await service.revokeRuntimeCredential(parsed.profile, current.credentialId, compensationSignal(parsed));
       } catch {
         warnings.push(`Previous runtime credential ${current.credentialId} could not be revoked automatically.`);
       }
     }
     return { binding: replacement, rotated: true, warnings };
+  });
+}
+
+interface OpenCodePlanInput {
+  readonly dependencies: CliDependencies;
+  readonly configPath: string;
+  readonly existingContent: string | null;
+  readonly deployment: HubCatalogDeployment;
+  readonly protocol: HubCatalogProtocol;
+  readonly mappedProtocol: "openai-responses" | "openai-chat-completions";
+  readonly modelName?: string;
+}
+
+function buildOpenCodePlan(input: OpenCodePlanInput): ReturnType<typeof planOpenCodeV2Config> {
+  const serviceModelId = input.deployment.inferenceAlias;
+  if (!serviceModelId) {
+    throw new CliError({ code: "INVALID_RESPONSE", message: "The selected deployment has no public inference model alias.", exitCode: EXIT_CODES.runtime });
+  }
+  const limits = input.deployment.limits;
+  return planOpenCodeV2Config({
+    planId: `plan.${randomUUID()}`,
+    createdAt: new Date().toISOString(),
+    configPath: input.configPath,
+    existingContent: input.existingContent,
+    hubBaseUrl: openCodeBaseUrl(input.protocol.baseUrl, input.protocol.protocol),
+    allowInsecureLoopback: (input.dependencies.environment ?? process.env).APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
+    models: [{
+      id: serviceModelId,
+      name: input.deployment.displayName || input.modelName || serviceModelId,
+      protocol: input.mappedProtocol,
+      upstreamId: serviceModelId,
+      ...(limits?.contextWindow && limits.maxOutputTokens
+        ? { limits: { context: limits.contextWindow, output: limits.maxOutputTokens } }
+        : {}),
+    }],
+    defaultModelId: serviceModelId,
   });
 }
 
@@ -915,8 +1111,6 @@ async function createOpenCodePlan(parsed: ParsedArguments, dependencies: CliDepe
   const mappedProtocol = protocol ? openCodeProtocol(protocol.protocol) : undefined;
   if (!protocol || !mappedProtocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
   const model = catalog.models.find((item) => item.id === deployment.modelId);
-  const serviceModelId = deployment.inferenceAlias;
-  if (!serviceModelId) throw new CliError({ code: "INVALID_RESPONSE", message: "The selected deployment has no public inference model alias.", exitCode: EXIT_CODES.runtime });
   let existingContent: string | null = null;
   if (detection.configExists) {
     try {
@@ -926,16 +1120,14 @@ async function createOpenCodePlan(parsed: ParsedArguments, dependencies: CliDepe
     }
     if (Buffer.byteLength(existingContent, "utf8") > 2 * 1024 * 1024) throw new CliError({ code: "CONFIG_TOO_LARGE", message: "OpenCode configuration exceeds the 2 MiB planning limit.", exitCode: EXIT_CODES.conflict });
   }
-  const now = new Date().toISOString();
-  const plan = planOpenCodeV2Config({
-    planId: `plan.${randomUUID()}`,
-    createdAt: now,
+  const plan = buildOpenCodePlan({
+    dependencies,
     configPath: detection.configPath,
     existingContent,
-    hubBaseUrl: openCodeBaseUrl(protocol.baseUrl, protocol.protocol),
-    allowInsecureLoopback: (dependencies.environment ?? process.env).APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
-    models: [{ id: serviceModelId, name: deployment.displayName || model?.name || serviceModelId, protocol: mappedProtocol, upstreamId: serviceModelId, ...(deployment.limits?.contextWindow && deployment.limits.maxOutputTokens ? { limits: { context: deployment.limits.contextWindow, output: deployment.limits.maxOutputTokens } } : {}) }],
-    defaultModelId: serviceModelId,
+    deployment,
+    protocol,
+    mappedProtocol,
+    ...(model?.name ? { modelName: model.name } : {}),
   });
   return { plan, deployment, protocol, catalogVersion: catalog.catalogVersion, detection };
 }
@@ -990,7 +1182,7 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
   } catch (cause) {
     const failures: unknown[] = [cause];
     if (receipt) await executor.rollback(receipt).catch((error: unknown) => failures.push(error));
-    await service.revokeRuntimeCredential(parsed.profile, created.credentialId, operationSignal(parsed)).catch((error: unknown) => failures.push(error));
+    await service.revokeRuntimeCredential(parsed.profile, created.credentialId, compensationSignal(parsed)).catch((error: unknown) => failures.push(error));
     if (failures.length > 1) throw new CliError({ code: "CONNECT_ROLLBACK_INCOMPLETE", message: "Connection failed and cleanup did not fully complete.", exitCode: EXIT_CODES.recovery, cause: new AggregateError(failures) });
     throw cause;
   }
@@ -998,7 +1190,7 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
   const warnings = [...result.plan.warnings];
   if (previous && previous.credentialId !== created.credentialId) {
     try {
-      await service.revokeRuntimeCredential(parsed.profile, previous.credentialId, operationSignal(parsed));
+      await service.revokeRuntimeCredential(parsed.profile, previous.credentialId, compensationSignal(parsed));
     } catch {
       warnings.push(`Previous runtime credential ${previous.credentialId} could not be revoked automatically.`);
     }
@@ -1011,6 +1203,37 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
   };
 }
 
+interface OpenCodeLaunchOutcome {
+  readonly binding: RuntimeCredentialBinding;
+  readonly rotated: boolean;
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Injects the bound secret into the child environment only, then waits for
+ * OpenCode to exit. The secret never reaches argv, the config file, or a log.
+ */
+async function launchOpenCodeWithBinding(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  binding: RuntimeCredentialBinding,
+  agentArgs: readonly string[],
+): Promise<void> {
+  const environment: NodeJS.ProcessEnv = {
+    ...(dependencies.environment ?? process.env),
+    APEXNOVA_API_KEY: binding.secret.reveal(),
+  };
+  const exitCode = await (dependencies.launchOpenCode ?? defaultLaunchOpenCode)(agentArgs, environment);
+  if (exitCode !== 0) {
+    throw new CliError({
+      code: "AGENT_EXITED",
+      message: `OpenCode exited with code ${exitCode}.`,
+      exitCode: EXIT_CODES.runtime,
+      details: { agentExitCode: exitCode },
+    });
+  }
+}
+
 async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies) {
   const [agent, ...agentArgs] = parsed.operands;
   if (agent !== "opencode") throw new CliError({ code: "INVALID_ARGUMENT", message: "run requires opencode as its first argument.", exitCode: EXIT_CODES.usage });
@@ -1020,9 +1243,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   }
   const runtime = await runtimeCredentialForLaunch(parsed, dependencies);
   const binding = runtime.binding;
-  const environment: NodeJS.ProcessEnv = { ...(dependencies.environment ?? process.env), APEXNOVA_API_KEY: binding.secret.reveal() };
-  const exitCode = await (dependencies.launchOpenCode ?? defaultLaunchOpenCode)(agentArgs, environment);
-  if (exitCode !== 0) throw new CliError({ code: "AGENT_EXITED", message: `OpenCode exited with code ${exitCode}.`, exitCode: EXIT_CODES.runtime, details: { agentExitCode: exitCode } });
+  await launchOpenCodeWithBinding(parsed, dependencies, binding, agentArgs);
   return {
     data: { agentId: "opencode", profile: parsed.profile, deploymentId: binding.deploymentId, credentialExpiresAt: binding.expiresAt, credentialRotated: runtime.rotated, exited: true, agentExitCode: 0 },
     warnings: runtime.warnings,
@@ -1063,7 +1284,12 @@ async function resolveDeploymentForOpenCode(
     }));
     return picker("Select a model:", items);
   }
-  return compatible[0]!;
+  throw new CliError({
+    code: "DEPLOYMENT_REQUIRED",
+    message: "No deployment is bound yet and the terminal is not interactive; pass --deployment <id>. Run `apexnova models --json` to list them.",
+    exitCode: EXIT_CODES.usage,
+    details: { compatibleDeploymentIds: compatible.map((deployment) => deployment.id) },
+  });
 }
 
 async function ensureCredentialForOpenCode(
@@ -1143,7 +1369,6 @@ async function configureOpenCode(
   const detection = await (dependencies.detectOpenCode ?? detectOpenCode)(detectionOptions(parsed, dependencies));
   if (detection.status === "not-found") throw new CliError({ code: "AGENT_NOT_FOUND", message: "OpenCode was not found in the current environment.", exitCode: EXIT_CODES.unavailable });
   const model = catalog.models.find((item) => item.id === deployment.modelId);
-  const serviceModelId = deployment.inferenceAlias;
   const mappedProtocol = openCodeProtocol(protocol.protocol);
   if (!mappedProtocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
   let existingContent: string | null = null;
@@ -1154,16 +1379,14 @@ async function configureOpenCode(
       throw new CliError({ code: "CONFIG_READ_FAILED", message: "OpenCode configuration could not be read.", exitCode: EXIT_CODES.permission, cause });
     }
   }
-  const now = new Date().toISOString();
-  const plan = planOpenCodeV2Config({
-    planId: `plan.${randomUUID()}`,
-    createdAt: now,
+  const plan = buildOpenCodePlan({
+    dependencies,
     configPath: detection.configPath,
     existingContent,
-    hubBaseUrl: openCodeBaseUrl(protocol.baseUrl, protocol.protocol),
-    allowInsecureLoopback: (dependencies.environment ?? process.env).APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
-    models: [{ id: serviceModelId, name: deployment.displayName || model?.name || serviceModelId, protocol: mappedProtocol, upstreamId: serviceModelId, ...(deployment.limits?.contextWindow && deployment.limits.maxOutputTokens ? { limits: { context: deployment.limits.contextWindow, output: deployment.limits.maxOutputTokens } } : {}) }],
-    defaultModelId: serviceModelId,
+    deployment,
+    protocol,
+    mappedProtocol,
+    ...(model?.name ? { modelName: model.name } : {}),
   });
   await mkdir(dirname(detection.configPath), { recursive: true, mode: 0o700 });
   const binding = await ensureCredentialForOpenCode(parsed, dependencies, deployment, protocol);
@@ -1187,15 +1410,15 @@ async function configureOpenCode(
   } catch (cause) {
     const failures: unknown[] = [cause];
     if (receipt) await executor.rollback(receipt).catch((error: unknown) => failures.push(error));
-    if (binding.kind === "runtime") await service.revokeRuntimeCredential(parsed.profile, binding.credentialId, operationSignal(parsed)).catch((error: unknown) => failures.push(error));
-    else await service.revokeApiKey(parsed.profile, binding.credentialId, operationSignal(parsed)).catch((error: unknown) => failures.push(error));
+    if (binding.kind === "runtime") await service.revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed)).catch((error: unknown) => failures.push(error));
+    else await service.revokeApiKey(parsed.profile, binding.credentialId, compensationSignal(parsed)).catch((error: unknown) => failures.push(error));
     if (failures.length > 1) throw new CliError({ code: "CONNECT_ROLLBACK_INCOMPLETE", message: "Connection failed and cleanup did not fully complete.", exitCode: EXIT_CODES.recovery, cause: new AggregateError(failures) });
     throw cause;
   }
   if (previous && previous.credentialId !== binding.credentialId) {
     try {
-      if (previous.kind === "runtime") await service.revokeRuntimeCredential(parsed.profile, previous.credentialId, operationSignal(parsed));
-      else await service.revokeApiKey(parsed.profile, previous.credentialId, operationSignal(parsed));
+      if (previous.kind === "runtime") await service.revokeRuntimeCredential(parsed.profile, previous.credentialId, compensationSignal(parsed));
+      else await service.revokeApiKey(parsed.profile, previous.credentialId, compensationSignal(parsed));
     } catch {
       warnings.push(`Previous credential ${previous.credentialId} could not be revoked automatically.`);
     }
@@ -1228,11 +1451,13 @@ async function executeOpenCode(parsed: ParsedArguments, dependencies: CliDepende
     if (!parsed.json) io.stderr(`Configured OpenCode with ${deployment.displayName} (${deployment.inferenceAlias}).\n`);
   }
   if (!binding) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No credential is stored for this profile.", exitCode: EXIT_CODES.authentication });
-  const runtime = await runtimeCredentialForLaunch(parsed, dependencies);
+  // A credential we just minted cannot be near expiry, so skip the rotation
+  // check and its extra credential-store round trip on the configure path.
+  const runtime: OpenCodeLaunchOutcome = needConfig
+    ? { binding, rotated: false, warnings: [] }
+    : await runtimeCredentialForLaunch(parsed, dependencies);
   binding = runtime.binding;
-  const environment: NodeJS.ProcessEnv = { ...(dependencies.environment ?? process.env), APEXNOVA_API_KEY: binding.secret.reveal() };
-  const exitCode = await (dependencies.launchOpenCode ?? defaultLaunchOpenCode)(parsed.operands, environment);
-  if (exitCode !== 0) throw new CliError({ code: "AGENT_EXITED", message: `OpenCode exited with code ${exitCode}.`, exitCode: EXIT_CODES.runtime, details: { agentExitCode: exitCode } });
+  await launchOpenCodeWithBinding(parsed, dependencies, binding, parsed.operands);
   return {
     data: { agentId: "opencode", profile: parsed.profile, deploymentId: binding.deploymentId, credentialKind: binding.kind ?? "runtime", credentialExpiresAt: binding.expiresAt, credentialRotated: runtime.rotated, exited: true, agentExitCode: 0 },
     warnings: [...configureWarnings, ...runtime.warnings],
@@ -1352,6 +1577,12 @@ async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependenc
   const platform = dependencies.platform ?? process.platform;
   checks.push({ name: "credential-backend", status: platform === "win32" || platform === "linux" ? "pass" : "fail", message: platform === "win32" ? "Windows Credential Manager" : platform === "linux" ? "Secret Service" : `unsupported on ${platform}` });
   checks.push({ name: "state-root", status: "pass", message: localStateRoot(dependencies) });
+  const hubConfig = resolveHubConfig(hubConfigContext(dependencies));
+  checks.push({
+    name: "hub-endpoint",
+    status: hubConfig ? "pass" : "fail",
+    message: hubConfig ? `${hubConfig.baseUrl} (${hubConfig.source})` : "not configured; run `apexnova init`",
+  });
   try {
     const account = await hubService(parsed, dependencies).whoami(parsed.profile, operationSignal(parsed));
     checks.push({ name: "hub-session", status: "pass", message: account.accountId ?? account.userId });
@@ -1436,7 +1667,7 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
         ...(target.restoreTarget ? { restoreTarget: target.restoreTarget } : {}),
       };
     } catch (cause) {
-      await service.revokeRuntimeCredential(parsed.profile, created.credentialId, operationSignal(parsed)).catch(() => {});
+      await service.revokeRuntimeCredential(parsed.profile, created.credentialId, compensationSignal(parsed)).catch(() => {});
       throw cause;
     }
   }
@@ -1444,7 +1675,7 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
   try {
     await executor.rollback(receipt);
   } catch (cause) {
-    if (replacement) await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, operationSignal(parsed)).catch(() => {});
+    if (replacement) await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, compensationSignal(parsed)).catch(() => {});
     throw cause;
   }
   if (summary?.integrationId === "opencode") {
@@ -1454,14 +1685,14 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
           await bindings.save(parsed.profile, replacement);
           runtimeCredentialRestored = true;
         } catch (cause) {
-          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, operationSignal(parsed)).catch(() => {});
-          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, operationSignal(parsed)).catch(() => {});
+          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, compensationSignal(parsed)).catch(() => {});
+          await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed)).catch(() => {});
           await bindings.delete(parsed.profile).catch(() => {});
           throw new CliError({ code: "RESTORE_BINDING_INCOMPLETE", message: "Configuration was restored, but the replacement runtime credential could not be saved; the profile was disconnected.", exitCode: EXIT_CODES.recovery, cause });
         }
       }
       try {
-        await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, operationSignal(parsed));
+        await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed));
         runtimeCredentialRevoked = true;
       } catch {
         runtimeCredentialRevoked = false;
@@ -1496,7 +1727,9 @@ function normalizeError(error: unknown): CliError {
     });
   }
   if (error instanceof HubClientError) {
-    const exitCode = error.code === "SESSION_NOT_FOUND" || error.code === "UNAUTHENTICATED" || error.code === "INSUFFICIENT_SCOPE" || error.code === "SESSION_CORRUPT" || error.code === "REFRESH_TOKEN_MISSING" || error.code === "OAUTH_ERROR" || error.code === "DEVICE_CODE_EXPIRED"
+    const exitCode = error.code === "HUB_NOT_CONFIGURED"
+      ? EXIT_CODES.usage
+      : error.code === "SESSION_NOT_FOUND" || error.code === "UNAUTHENTICATED" || error.code === "INSUFFICIENT_SCOPE" || error.code === "SESSION_CORRUPT" || error.code === "REFRESH_TOKEN_MISSING" || error.code === "OAUTH_ERROR" || error.code === "DEVICE_CODE_EXPIRED"
       ? EXIT_CODES.authentication
       : error.code === "ACCESS_DENIED" || error.code === "FORBIDDEN" || error.code === "KEY_TTL_POLICY"
         ? EXIT_CODES.permission
@@ -1539,8 +1772,8 @@ export async function runCli(
     }
     if (parsed.version) {
       io.stdout(parsed.json
-        ? `${JSON.stringify({ schemaVersion: "1", command: "version", requestId, ok: true, data: { version: "0.1.0" }, warnings: [] }, null, 2)}\n`
-        : "apexnova 0.1.0\n");
+        ? `${JSON.stringify({ schemaVersion: "1", command: "version", requestId, ok: true, data: { version: CLI_VERSION }, warnings: [] }, null, 2)}\n`
+        : `apexnova ${CLI_VERSION}\n`);
       return { exitCode: EXIT_CODES.success, requestId };
     }
 
@@ -1551,6 +1784,9 @@ export async function runCli(
         break;
       case "inspect":
         result = await executeInspect(parsed, dependencies);
+        break;
+      case "init":
+        result = await executeInit(parsed, dependencies);
         break;
       case "login":
         result = await executeLogin(parsed, dependencies);

@@ -1,5 +1,6 @@
 export type HubClientErrorCode =
   | "INVALID_CONFIG"
+  | "HUB_NOT_CONFIGURED"
   | "INVALID_RESPONSE"
   | "NETWORK_ERROR"
   | "OAUTH_ERROR"

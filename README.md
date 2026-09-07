@@ -7,7 +7,7 @@
 
 ## 快速安装
 
-一行命令下载源码、安装全部依赖并构建（自动通过 fnm 安装 Node 24、corepack 启用 pnpm，产物放到 `~/.apexnova-connect`，`apexnova` 软链到 `~/.local/bin`）：
+一行命令下载预构建的单文件 CLI（约 1 MB）。不需要 git、pnpm，也不在本机编译；只需要 Node.js 20+，没有的话脚本会自动通过 fnm 安装。
 
 **Linux / macOS：**
 
@@ -21,15 +21,44 @@ curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/s
 irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
 ```
 
-钉定某个 release tag：
+脚本会校验发布产物的 `sha256`，把 CLI 装到 `~/.apexnova-connect`，并在 `~/.local/bin` 生成 `apexnova` 启动器（启动器记录 node 的绝对路径，因此新开终端也能直接运行）。
+
+钉定某个 release：
 
 ```bash
-APEXNOVA_REF=v0.1.0 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+APEXNOVA_VERSION=v0.1.1 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 ```
 
-可用环境变量覆盖默认行为：`APEXNOVA_REF`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`NODE_MAJOR`、`PNPM_VERSION`。安装完成后运行 `apexnova --help`。
+可用环境变量覆盖默认行为：`APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
 
-> 注：脚本会 `git clone` 对应 ref 到 `~/.apexnova-connect`，若已存在则 fetch 更新。如需从开发源码构建，见下方「开发状态」一节。
+### 手动安装
+
+```bash
+curl -fsSLO https://github.com/Jason869905/Apexnova-connect/releases/latest/download/apexnova.mjs
+curl -fsSLO https://github.com/Jason869905/Apexnova-connect/releases/latest/download/apexnova.mjs.sha256
+sha256sum -c apexnova.mjs.sha256
+node apexnova.mjs --version
+```
+
+### 开始使用
+
+```bash
+apexnova login       # 设备码授权
+apexnova opencode    # 选模型 + 建 key + 写配置 + 启动 OpenCode
+```
+
+发布产物内置了生产 Hub 地址，装完即可 `login`。要指向其他环境（自建、staging、本机 dev），运行 `apexnova init` 把地址写进
+`~/.config/apexnova-connect/config.json`（Windows 为 `%APPDATA%\Apexnova\connect\config.json`）：
+
+```bash
+apexnova init --hub-url https://api.example.com --client-id apexnova-connect
+```
+
+`APEXNOVA_HUB_BASE_URL` / `APEXNOVA_OAUTH_CLIENT_ID` 环境变量的优先级高于该文件。从源码构建的版本不含内置默认值，必须先 `init` 或设置环境变量——这是为了避免开发版本误连生产。
+
+`apexnova doctor` 会显示当前生效的 Hub 地址及其来源。
+
+> 注：从源码构建请见下方「开发状态」一节。
 
 ## 项目简介
 

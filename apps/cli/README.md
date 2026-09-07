@@ -3,6 +3,7 @@
 M1 Developer Preview 的可执行 CLI。当前已实现：
 
 ```text
+apexnova init [--hub-url <url>] [--client-id <id>] [--path-prefix <p>]
 apexnova detect [opencode]
 apexnova inspect opencode
 apexnova login | logout | whoami | balance
@@ -21,4 +22,14 @@ apexnova restore [transaction-id] [--list] [--dry-run]
 
 `restore` 必须按事务逆序执行。恢复一次 `switch` 会为上一个 Deployment/协议重新签发短期凭据后再回滚配置；恢复最初的 `connect` 会撤销当前凭据并安全断开。恢复链只记录目标元数据，不保留旧 runtime secret。
 
-为避免开发版本误连生产环境，Hub 命令目前要求显式设置 `APEXNOVA_HUB_BASE_URL` 和 `APEXNOVA_OAUTH_CLIENT_ID`；仓库不提供隐式生产默认值。
+Hub 地址按 环境变量 > 配置文件 > 构建内置默认值 的顺序解析：
+
+- 环境变量：`APEXNOVA_HUB_BASE_URL`、`APEXNOVA_OAUTH_CLIENT_ID`、`APEXNOVA_HUB_PATH_PREFIX`；
+- 配置文件：`apexnova init` 写入的 `~/.config/apexnova-connect/config.json`（Windows 为 `%APPDATA%\Apexnova\connect\config.json`）；
+- 内置默认值：仅由 `pnpm bundle` 产出的发布产物携带。
+
+为避免开发版本误连生产环境，从源码构建的 CLI 不含内置默认值：三个来源都没有值时，Hub 命令以 `HUB_NOT_CONFIGURED`（退出码 2）失败并提示运行 `apexnova init`。`apexnova doctor` 的 `hub-endpoint` 检查会显示当前地址及其来源。
+
+`--timeout` 是整个命令的期限，不是单次 HTTP 请求的期限（默认 120 秒）。失败后的补偿操作（撤销刚签发的凭据）使用独立期限，不会因为主操作已超时而被跳过。
+
+版本号的唯一来源是 `apps/cli/package.json`；发布产物在打包时注入，源码构建时回读该文件，release workflow 会校验 git tag 与之一致。

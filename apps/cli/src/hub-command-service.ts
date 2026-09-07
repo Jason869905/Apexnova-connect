@@ -25,6 +25,8 @@ import {
   type UsageListResult,
 } from "@apexnova-connect/hub-client";
 
+import { hubConfigPath, resolveHubConfig } from "./hub-config.js";
+
 const CORE_SCOPE = [
   "account:read", "catalog:read", "billing:read", "usage:read",
   "devices:read", "devices:revoke", "runtime-credentials:write",
@@ -56,22 +58,31 @@ export interface HubCommandService {
 export interface DefaultHubCommandServiceOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
+  readonly homeDirectory?: string;
   readonly requestTimeoutMs?: number;
   readonly fetch?: typeof globalThis.fetch;
 }
 
 export function createDefaultHubCommandService(options: DefaultHubCommandServiceOptions = {}): HubCommandService {
   const environment = options.environment ?? process.env;
-  const baseUrl = environment.APEXNOVA_HUB_BASE_URL;
-  const clientId = environment.APEXNOVA_OAUTH_CLIENT_ID;
   const allowInsecureLoopback = environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1";
-  const apiPrefix = environment.APEXNOVA_HUB_PATH_PREFIX ?? "";
-  if (!baseUrl || !clientId) {
+  const resolved = resolveHubConfig({
+    ...(options.environment ? { environment: options.environment } : {}),
+    ...(options.platform ? { platform: options.platform } : {}),
+    ...(options.homeDirectory ? { homeDirectory: options.homeDirectory } : {}),
+  });
+  if (!resolved) {
     throw new HubClientError(
-      "INVALID_CONFIG",
-      "Hub staging is disabled until APEXNOVA_HUB_BASE_URL and APEXNOVA_OAUTH_CLIENT_ID are explicitly configured.",
+      "HUB_NOT_CONFIGURED",
+      `No Apexnova AI Hub endpoint is configured. Run \`apexnova init\` to store one in ${hubConfigPath({
+        ...(options.environment ? { environment: options.environment } : {}),
+        ...(options.platform ? { platform: options.platform } : {}),
+        ...(options.homeDirectory ? { homeDirectory: options.homeDirectory } : {}),
+      })}, or set APEXNOVA_HUB_BASE_URL and APEXNOVA_OAUTH_CLIENT_ID.`,
     );
   }
+  const { baseUrl, clientId } = resolved;
+  const apiPrefix = resolved.pathPrefix ?? "";
   const credentials = createDefaultCredentialStore(options.platform ? { platform: options.platform } : {});
   const sessions = new HubSessionStore(credentials);
   const oauth = new HubOAuthClient({

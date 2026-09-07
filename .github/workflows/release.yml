@@ -14,12 +14,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # apps/cli/package.json is the single source of truth for the CLI version,
+      # so a tag that disagrees with it must not produce a release.
+      - name: Verify tag matches apps/cli/package.json
+        run: |
+          set -euo pipefail
+          manifest="v$(node -p "require('./apps/cli/package.json').version")"
+          if [ "$manifest" != "${{ github.ref_name }}" ]; then
+            echo "Tag ${{ github.ref_name }} does not match apps/cli/package.json ($manifest)." >&2
+            exit 1
+          fi
+
+      - run: pnpm check
+
+      - name: Build the release bundle
+        run: pnpm bundle
+
+      - name: Verify the bundle reports the released version
+        run: |
+          set -euo pipefail
+          test "$(node dist/apexnova.mjs --version)" = "apexnova ${GITHUB_REF_NAME#v}"
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          files: |
+            dist/apexnova.mjs
+            dist/apexnova.mjs.sha256
           body: |
             ## 一行安装
+
+            下载预构建的单文件 CLI，不需要 git、pnpm 或本机编译，只需要 Node.js 20+（没有则脚本自动通过 fnm 安装）。
 
             **Linux / macOS (bash):**
 
@@ -33,6 +68,19 @@ jobs:
             irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/${{ github.ref_name }}/scripts/install.ps1 | iex
             ```
 
-            脚本会自动通过 fnm 安装 Node 24、用 corepack 启用 pnpm、下载本版本源码到 `~/.apexnova-connect`、安装依赖并构建，最后把 `apexnova` 放到 `~/.local/bin`。
+            安装脚本会校验 `apexnova.mjs.sha256`，把 CLI 装到 `~/.apexnova-connect`，并在 `~/.local/bin` 生成 `apexnova` 启动器。
 
-            环境变量可覆盖默认行为：`APEXNOVA_REF`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`NODE_MAJOR`、`PNPM_VERSION`。
+            装完直接 `apexnova login`，然后 `apexnova opencode`。生产 Hub 地址已内置；如需指向其他环境，运行 `apexnova init` 或设置 `APEXNOVA_HUB_BASE_URL` / `APEXNOVA_OAUTH_CLIENT_ID`。
+
+            ### 手动安装
+
+            ```bash
+            curl -fsSLO https://github.com/Jason869905/Apexnova-connect/releases/download/${{ github.ref_name }}/apexnova.mjs
+            curl -fsSLO https://github.com/Jason869905/Apexnova-connect/releases/download/${{ github.ref_name }}/apexnova.mjs.sha256
+            sha256sum -c apexnova.mjs.sha256
+            node apexnova.mjs --version
+            ```
+
+            ### 安装脚本环境变量
+
+            `APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
