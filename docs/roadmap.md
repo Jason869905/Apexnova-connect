@@ -109,6 +109,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 范围：
 
+- **修复 `restore` 的顺序判定来源**（M2 遗留缺陷，见下）；
 - Capability Definition Registry；
 - 协议、流式、Tool Call、结构化输出、图片、缓存和上下文测试；
 - 不可变 Compatibility Evidence；
@@ -117,11 +118,24 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - CLI `compatibility explain`；
 - Hub Evidence 查询接口。
 
-首批控制规模：
+首批控制规模（[ADR 0003](decisions/0003-m2-milestone-review.md) 建议进一步收窄为 2 个 Agent × 4 个 Deployment × 8 项测试）：
 
 - 3 个 Agent；
 - 6～10 个 Model Deployment；
 - 8～12 项基础能力测试。
+
+### 遗留缺陷：`restore` 的顺序判定来源
+
+`apexnova restore` 用**凭据绑定里的 `transactionId`** 判断「这是不是最新的事务」，但磁盘状态的权威来源是备份目录本身（每个事务都记录了 `appliedAt`、`state` 和内容哈希）。两者一旦不一致，两个方向会同时被锁死：
+
+- 较新的事务被顺序检查拒绝（`RESTORE_ORDER_CONFLICT`，因为绑定没记它）；
+- 较旧的事务被内容哈希检查拒绝（`CONFLICT`，因为文件已被较新的事务改过）。
+
+此时 CLI 没有任何出路，只能手工删除备份目录和绑定。2026-09-07 在一台开发机上真实遇到过，来源是旧版本写入配置后没有更新绑定。
+
+现行代码在保存绑定失败时会回滚 receipt，因此不应再产生这种状态；但**判定来源本身仍然是错的**，且没有针对不一致状态的恢复路径。
+
+修复方向：顺序从备份元数据推导（同一 integration 中最新的 `applied` 事务才可恢复），绑定只用于凭据链与重签发。因为会改动 `switch` 恢复时重新签发上一目标凭据的路径，需要连同该语义一起设计，不宜在补丁版本里仓促改。
 
 退出条件：
 
