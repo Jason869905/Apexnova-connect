@@ -31,6 +31,7 @@ import type {
 import {
   compensationSignal,
   credentialStore,
+  defaultCredentialHelperCommand,
   currentTime,
   defaultIo,
   hubService,
@@ -218,6 +219,13 @@ export function connectionIntent(
       ? { limits: { context: limits.contextWindow, output: limits.maxOutputTokens } }
       : {}),
     allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
+    ...(parsed.apiKeyHelper
+      ? {
+          credentialHelperCommand: (
+            dependencies.credentialHelperCommand ?? defaultCredentialHelperCommand
+          )(integration.manifest.id, parsed.profile),
+        }
+      : {}),
   };
 }
 

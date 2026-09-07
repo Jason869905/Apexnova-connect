@@ -114,6 +114,9 @@ export function createClaudeCodeIntegration(
         ...(intent.allowInsecureLoopback === undefined
           ? {}
           : { allowInsecureLoopback: intent.allowInsecureLoopback }),
+        ...(intent.credentialHelperCommand === undefined
+          ? {}
+          : { credentialHelperCommand: intent.credentialHelperCommand }),
       });
     },
 

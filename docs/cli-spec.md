@@ -33,7 +33,8 @@ CLI 是首个可审计、可脚本化宿主。它负责用户交互和编排，�
 --timeout <seconds>    单次网络或短操作超时；设备登录遵循设备码有效期
 --verbose              输出脱敏诊断
 --key <id>             使用已有 API key（opencode/usage 命令）
---rotating             使用 24h 短期 credential 而非永久 key（opencode 命令）
+--rotating             使用 24h 短期 credential 而非永久 key（run/connect 命令）
+--api-key-helper       让 Agent 自己取凭据（仅支持该机制的 Agent，如 Claude Code）
 --from <RFC3339>       用量查询起始时间（usage 命令）
 --to <RFC3339>         用量查询结束时间（usage 命令）
 --granularity <g>      用量聚合粒度 hour|day|month（usage 命令）
@@ -138,6 +139,16 @@ apexnova run opencode -- --model apexnova/glm-5.2
 流程：`detect → resolve deployment → ensure key → plan → apply → launch`。
 
 `ensure key` 行为：默认 `POST /v1/api-keys` 创建永久 `sk-` key；`--rotating` 创建 24h `anrt_`；`--key <id>` 验证存在并提示输入 secret。已有配置时跳过 plan/apply 直接 launch。永久 key 不过期无需续期；`--rotating` 剩余不足 1 小时时自动续期。
+
+### `apexnova credential print <agent>`
+
+把某个 Agent 当前绑定的凭据打到标准输出，**除凭据本身外不输出任何内容**（Claude Code 等产品的 credential helper 要求如此）。短期 credential 剩余不足一小时时先续期再输出。
+
+```text
+apexnova credential print claude-code --profile default
+```
+
+该命令只服务于 `--api-key-helper` 写入的 helper 配置。它不接受 `--json`，没有绑定凭据时以退出码 3 失败。凭据本身存放在同一用户可读的系统凭证库中，因此这个命令不引入新的暴露面；但它的输出不应被重定向进文件或日志。
 
 ### `apexnova models`
 

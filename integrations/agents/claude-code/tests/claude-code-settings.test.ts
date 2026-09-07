@@ -157,6 +157,60 @@ describe("planClaudeCodeSettings", () => {
     expect(second.operations).toHaveLength(0);
   });
 
+  it("writes apiKeyHelper only when a helper command is supplied", () => {
+    const helper = '"/opt/node" "/opt/apexnova.mjs" credential print claude-code --profile default';
+    const withHelper = planClaudeCodeSettings({
+      ...planBase,
+      existingContent: null,
+      credentialHelperCommand: helper,
+    });
+    const content = withHelper.operations[0]!.content;
+
+    expect(content).toContain('"apiKeyHelper"');
+    expect(content).toContain('"APEXNOVA_CONNECT": "managed-helper"');
+    expect(withHelper.warnings.join(" ")).toContain("keeps working");
+    expect(withHelper.warnings.join(" ")).not.toContain("will be rejected");
+  });
+
+  it("removes a helper it wrote when reconnecting without one", () => {
+    const helper = '"/opt/node" "/opt/apexnova.mjs" credential print claude-code --profile default';
+    const helperContent = planClaudeCodeSettings({
+      ...planBase,
+      existingContent: null,
+      credentialHelperCommand: helper,
+    }).operations[0]!.content;
+
+    const backToLauncher = planClaudeCodeSettings({
+      ...planBase,
+      existingContent: helperContent,
+    });
+    const content = backToLauncher.operations[0]!.content;
+
+    expect(content).not.toContain("apiKeyHelper");
+    expect(content).toContain('"APEXNOVA_CONNECT": "managed"');
+  });
+
+  it("leaves a helper the user configured alone", () => {
+    const existing = JSON.stringify({ apiKeyHelper: "~/bin/mine.sh" }, null, 2);
+
+    const content = planClaudeCodeSettings({
+      ...planBase,
+      existingContent: existing,
+    }).operations[0]!.content;
+
+    expect(content).toContain('"apiKeyHelper": "~/bin/mine.sh"');
+  });
+
+  it("refuses a helper command that spans lines", () => {
+    expect(() =>
+      planClaudeCodeSettings({
+        ...planBase,
+        existingContent: null,
+        credentialHelperCommand: "echo one\necho two",
+      }),
+    ).toThrowError(/single non-empty line/);
+  });
+
   it("refuses a base URL carrying credentials", () => {
     expect(() =>
       planClaudeCodeSettings({

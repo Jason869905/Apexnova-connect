@@ -16,9 +16,22 @@ export const CLAUDE_CODE_PROVIDER_ID = "apexnova" as const;
  */
 export const BASE_URL_KEY = "ANTHROPIC_BASE_URL" as const;
 export const MODEL_KEY = "ANTHROPIC_MODEL" as const;
-/** Provenance marker: it records who wrote the keys above, nothing more. */
+/**
+ * Provenance marker: it records who wrote the keys above and which credential
+ * mode was used, nothing more.
+ */
 export const MANAGED_MARKER_KEY = "APEXNOVA_CONNECT" as const;
 export const MANAGED_MARKER_VALUE = "managed" as const;
+export const MANAGED_HELPER_MARKER_VALUE = "managed-helper" as const;
+export const API_KEY_HELPER_KEY = "apiKeyHelper" as const;
+
+export type ManagedMarker =
+  | typeof MANAGED_MARKER_VALUE
+  | typeof MANAGED_HELPER_MARKER_VALUE;
+
+export function isManagedMarker(value: unknown): value is ManagedMarker {
+  return value === MANAGED_MARKER_VALUE || value === MANAGED_HELPER_MARKER_VALUE;
+}
 
 export type ClaudeCodeConfigErrorCode = "INVALID_CONFIG" | "INVALID_INPUT";
 
@@ -39,6 +52,11 @@ export interface PlanClaudeCodeSettingsOptions {
   readonly hubBaseUrl: string;
   readonly modelId: string;
   readonly allowInsecureLoopback?: boolean;
+  /**
+   * When present, Claude Code fetches the credential itself by running this
+   * command, and it keeps working outside `apexnova run claude-code`.
+   */
+  readonly credentialHelperCommand?: string;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -135,15 +153,34 @@ export function planClaudeCodeSettings(
       : { allowInsecureLoopback: options.allowInsecureLoopback }),
   });
 
+  const helper = options.credentialHelperCommand;
+  if (helper !== undefined && (helper.trim().length === 0 || /[\r\n]/.test(helper))) {
+    throw new ClaudeCodeConfigError(
+      "INVALID_INPUT",
+      "A credential helper command must be a single non-empty line.",
+    );
+  }
+  const marker = helper === undefined ? MANAGED_MARKER_VALUE : MANAGED_HELPER_MARKER_VALUE;
+  const previousMarker = settingsEnvironment(parseClaudeCodeSettings(source))[MANAGED_MARKER_KEY];
+
   let content = setKey(source, ["env", BASE_URL_KEY], baseUrl);
   content = setKey(content, ["env", MODEL_KEY], options.modelId);
-  content = setKey(content, ["env", MANAGED_MARKER_KEY], MANAGED_MARKER_VALUE);
+  content = setKey(content, ["env", MANAGED_MARKER_KEY], marker);
+  if (helper !== undefined) {
+    content = setKey(content, [API_KEY_HELPER_KEY], helper);
+  } else if (previousMarker === MANAGED_HELPER_MARKER_VALUE) {
+    // Only a helper this integration wrote is removed; one the user configured
+    // is left alone, and inspection warns about it instead.
+    content = setKey(content, [API_KEY_HELPER_KEY], undefined);
+  }
 
-  const applied = settingsEnvironment(parseClaudeCodeSettings(content));
+  const appliedSettings = parseClaudeCodeSettings(content);
+  const applied = settingsEnvironment(appliedSettings);
   if (
     applied[BASE_URL_KEY] !== baseUrl ||
     applied[MODEL_KEY] !== options.modelId ||
-    applied[MANAGED_MARKER_KEY] !== MANAGED_MARKER_VALUE
+    applied[MANAGED_MARKER_KEY] !== marker ||
+    (helper !== undefined && appliedSettings[API_KEY_HELPER_KEY] !== helper)
   ) {
     throw new ClaudeCodeConfigError(
       "INVALID_CONFIG",
@@ -176,8 +213,16 @@ export function planClaudeCodeSettings(
     requiresRestart: true,
     warnings: [
       "Claude Code reads its settings at startup; restart Claude Code after applying this plan.",
-      "No credential is written to the settings file: the settings env block outranks a shell export, so the launcher supplies ANTHROPIC_AUTH_TOKEN instead.",
-      "While this connection is applied, starting `claude` yourself sends requests to Apexnova AI Hub without that credential and they will be rejected. Start Claude Code with `apexnova run claude-code`, or restore this transaction to go back.",
+      helper === undefined
+        ? "No credential is written to the settings file: the settings env block outranks a shell export, so the launcher supplies ANTHROPIC_AUTH_TOKEN instead."
+        : "No credential is written to the settings file: Claude Code runs the apiKeyHelper command to fetch it, and a rotating credential is renewed on the way out.",
+      ...(helper === undefined
+        ? [
+            "While this connection is applied, starting `claude` yourself sends requests to Apexnova AI Hub without a credential and they will be rejected. Start Claude Code with `apexnova run claude-code`, connect again with --api-key-helper, or restore this transaction to go back.",
+          ]
+        : [
+            "apiKeyHelper points at this CLI, so Claude Code fetches the credential itself and starting `claude` directly keeps working. The helper stops working if the Apexnova-connect executable moves.",
+          ]),
       "Remote Control and voice dictation stay unavailable while Claude Code points at a non-Anthropic base URL.",
     ],
   };

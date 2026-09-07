@@ -70,6 +70,7 @@ export interface CliDependencies {
   readonly hubService?: HubCommandService;
   readonly credentialStore?: CredentialStore;
   readonly launchAgent?: (plan: LaunchPlan) => Promise<number>;
+  readonly credentialHelperCommand?: (agentId: string, profile: string) => string;
   readonly verifyHubInference?: (options: VerifyHubInferenceOptions) => Promise<HubInferenceVerification>;
   readonly createRequestId?: () => string;
   readonly now?: () => Date;
@@ -103,6 +104,7 @@ export interface ParsedArguments {
   readonly live: boolean;
   readonly apiKeyId?: string;
   readonly rotating: boolean;
+  readonly apiKeyHelper: boolean;
   readonly from?: string;
   readonly to?: string;
   readonly granularity?: "hour" | "day" | "month";
@@ -429,3 +431,23 @@ export function hubConfigLocation(dependencies: CliDependencies): string {
 
 export { hubConfigPath, readHubConfigFile, resolveHubConfig };
 export type { HubConfigContext, IntegrationContext, IntegrationRegistry, LaunchPlan, Platform };
+
+
+function shellQuote(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+/**
+ * The command a target product runs to fetch the current credential. It points
+ * back at this executable rather than at a generated script, so there is no
+ * extra file to keep in step, and `restore` removing the setting is enough to
+ * undo it. It breaks if the Apexnova-connect executable moves, which the
+ * product reports as a failing helper.
+ */
+export function defaultCredentialHelperCommand(agentId: string, profile: string): string {
+  const script = process.argv[1];
+  const base = script
+    ? `${shellQuote(process.execPath)} ${shellQuote(script)}`
+    : shellQuote(process.execPath);
+  return `${base} credential print ${agentId} --profile ${profile}`;
+}

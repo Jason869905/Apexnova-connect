@@ -12,13 +12,15 @@ import {
 } from "@apexnova-connect/integration-sdk";
 
 import {
+  isManagedMarker,
   parseClaudeCodeSettings,
   settingsEnvironment,
+  API_KEY_HELPER_KEY,
   BASE_URL_KEY,
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeConfigError,
+  MANAGED_HELPER_MARKER_VALUE,
   MANAGED_MARKER_KEY,
-  MANAGED_MARKER_VALUE,
   MODEL_KEY,
 } from "./claude-code-settings.js";
 
@@ -191,7 +193,9 @@ export async function inspectClaudeCode(
 
   const environment = settingsEnvironment(settings);
   const baseUrl = optionalString(environment[BASE_URL_KEY]);
-  const managed = environment[MANAGED_MARKER_KEY] === MANAGED_MARKER_VALUE;
+  const marker = environment[MANAGED_MARKER_KEY];
+  const managed = isManagedMarker(marker);
+  const helperIsOurs = marker === MANAGED_HELPER_MARKER_VALUE;
   if (!baseUrl) {
     return { ...base, status: "not-configured", managed: false, warnings: [] };
   }
@@ -211,9 +215,9 @@ export async function inspectClaudeCode(
       );
     }
   }
-  if (settings.apiKeyHelper !== undefined) {
+  if (settings[API_KEY_HELPER_KEY] !== undefined && !helperIsOurs) {
     warnings.push(
-      "apiKeyHelper is configured and supplies its own credential; the launcher's credential will not be used.",
+      "apiKeyHelper is configured by something other than Apexnova-connect and supplies its own credential; the launcher's credential will not be used.",
     );
   }
 
@@ -226,7 +230,9 @@ export async function inspectClaudeCode(
       providerId: CLAUDE_CODE_PROVIDER_ID,
       protocol: "anthropic-messages",
       baseUrl,
-      environmentVariables: [CLAUDE_CODE_CREDENTIAL_VARIABLE],
+      // In helper mode Claude Code fetches the credential itself, so no
+      // environment variable carries it.
+      environmentVariables: helperIsOurs ? [] : [CLAUDE_CODE_CREDENTIAL_VARIABLE],
       modelIds: model ? [model] : [],
       ...(model ? { defaultModelId: model } : {}),
     },

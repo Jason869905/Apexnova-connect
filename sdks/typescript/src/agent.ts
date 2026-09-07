@@ -62,6 +62,12 @@ export interface ConnectionIntent {
   readonly apiKeyEnvironmentVariable: string;
   readonly limits?: ModelLimits;
   readonly allowInsecureLoopback?: boolean;
+  /**
+   * A shell command that prints the current credential to stdout, for products
+   * that can fetch a rotating credential themselves instead of reading a fixed
+   * environment variable. Absent means the launcher injects the credential.
+   */
+  readonly credentialHelperCommand?: string;
 }
 
 export interface LaunchRequest {

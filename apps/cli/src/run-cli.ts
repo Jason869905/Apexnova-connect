@@ -85,6 +85,7 @@ Usage:
   apexnova switch <agent> --deployment <id> (--dry-run | --yes)
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
+  apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
   apexnova inspect <agent> [--config <path>]
   apexnova --version
@@ -102,6 +103,7 @@ Global options:
   --deployment <id>      Select a public model deployment
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
+  --api-key-helper       Let the Agent fetch the credential itself, where it supports one
   --from <iso>           Usage query start time (RFC 3339)
   --to <iso>             Usage query end time (RFC 3339)
   --granularity <g>      Usage aggregation: hour, day, or month
@@ -157,6 +159,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let live = false;
   let apiKeyId: string | undefined;
   let rotating = false;
+  let apiKeyHelper = false;
   let from: string | undefined;
   let to: string | undefined;
   let granularity: "hour" | "day" | "month" | undefined;
@@ -211,6 +214,9 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         break;
       case "--rotating":
         rotating = true;
+        break;
+      case "--api-key-helper":
+        apiKeyHelper = true;
         break;
       case "--force":
         force = true;
@@ -312,6 +318,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     live,
     ...(apiKeyId ? { apiKeyId } : {}),
     rotating,
+    apiKeyHelper,
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     ...(granularity ? { granularity } : {}),
@@ -1015,6 +1022,44 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   };
 }
 
+/**
+ * Prints the credential bound to an Agent and nothing else, for a target
+ * product's own credential helper to consume. A rotating credential near its
+ * expiry is renewed first, which is what makes the helper path stay valid over
+ * a long session. Never emits the JSON envelope: a banner alongside the key
+ * makes a helper fail.
+ */
+async function executeCredential(parsed: ParsedArguments, dependencies: CliDependencies) {
+  const [subcommand, ...rest] = parsed.operands;
+  if (subcommand !== "print") {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "credential accepts one subcommand: print.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const agentId = rest[0];
+  if (agentId === undefined || rest.length !== 1) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "credential print requires exactly one agent.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const integration = resolveIntegration(agentId, dependencies);
+  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
+  if (!(await bindings.load(integration.manifest.id, parsed.profile))) {
+    throw new CliError({
+      code: "RUNTIME_CREDENTIAL_NOT_FOUND",
+      message: `No credential is stored for ${integration.manifest.displayName} on profile ${parsed.profile}; run connect first.`,
+      exitCode: EXIT_CODES.authentication,
+    });
+  }
+  const runtime = await runtimeCredentialForLaunch(parsed, dependencies, integration);
+  (dependencies.io ?? defaultIo()).stdout(`${runtime.binding.secret.reveal()}\n`);
+  return { raw: true as const, data: {}, warnings: [] as readonly string[], human: "" };
+}
+
 async function executeVerify(parsed: ParsedArguments, dependencies: CliDependencies) {
   const integration = requireIntegration(parsed, dependencies, "verify");
   const agentId = integration.manifest.id;
@@ -1308,6 +1353,9 @@ export async function runCli(
       case "agents":
         result = await executeAgents(parsed, dependencies);
         break;
+      case "credential":
+        result = await executeCredential(parsed, dependencies);
+        break;
       case "usage":
         result = await executeUsage(parsed, dependencies);
         break;
@@ -1345,6 +1393,8 @@ export async function runCli(
         });
     }
 
+    // A raw result already wrote exactly what its caller must receive.
+    if ("raw" in result && result.raw) return { exitCode: EXIT_CODES.success, requestId };
     if (parsed.json) writeJsonSuccess(io, parsed.command, requestId, result.data, result.warnings);
     else io.stdout(`${result.human}\n`);
     return { exitCode: EXIT_CODES.success, requestId };

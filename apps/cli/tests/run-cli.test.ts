@@ -137,6 +137,43 @@ describe("CLI", () => {
     expect(capture.stderr()).toBe("");
   });
 
+  it("prints a bound credential for an agent helper with nothing else on stdout", async () => {
+    const capture = captureIo();
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "key_1",
+      secret: SecretValue.from("helper-secret"),
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+      kind: "user",
+    });
+
+    const result = await runCli(["credential", "print", "opencode"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith(),
+      hubService: mockHub(),
+      createRequestId: () => "local_credential",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(capture.stdout()).toBe("helper-secret\n");
+    expect(capture.stderr()).toBe("");
+  });
+
+  it("refuses to print a credential that was never bound", async () => {
+    const capture = captureIo();
+    const result = await runCli(["credential", "print", "opencode", "--json"], {
+      io: capture.io,
+      credentialStore: memoryCredentials(),
+      registry: registryWith(),
+      createRequestId: () => "local_credential_missing",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.authentication);
+    expect(JSON.parse(capture.stdout()).error.code).toBe("RUNTIME_CREDENTIAL_NOT_FOUND");
+  });
+
   it("refuses an unknown agent and names the ones it supports", async () => {
     const capture = captureIo();
     const result = await runCli(["detect", "hermes", "--json"], {
