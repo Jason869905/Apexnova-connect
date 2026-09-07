@@ -1,6 +1,6 @@
 # OpenCode + Apexnova AI Hub 使用指南
 
-> 适用版本：apexnova-connect v0.2.0 · OpenCode ≥1.18.29 <2.0.0
+> 适用版本：apexnova-connect v0.1.2 · OpenCode ≥1.18.29 <2.0.0
 > 平台：Windows、Linux
 
 ## 简介
@@ -19,7 +19,7 @@ apexnova balance      # 看余额
 
 ## 前置条件
 
-1. **Node.js ≥ 22**（推荐 24+）
+1. **Node.js ≥ 20**（一行安装脚本在缺失时会自动装）
 2. **OpenCode** 已安装并在 PATH 中可用（`opencode --version`）
 3. **Apexnova AI Hub 账号**，有可用余额
 4. **操作系统凭证后端**：
@@ -28,7 +28,25 @@ apexnova balance      # 看余额
 
 ## 安装
 
-### 从源码构建（当前）
+### 一行安装（推荐）
+
+下载预构建的单文件 CLI，不需要 git、pnpm 或本机编译：
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
+```
+
+脚本会校验产物 sha256，装到 `~/.apexnova-connect`，并在 `~/.local/bin` 生成 `apexnova` 启动器。若该目录不在 PATH 中，脚本会打印需要追加的一行。
+
+钉定版本用 `APEXNOVA_VERSION=v0.1.2`；其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
+
+### 从源码构建
 
 ```bash
 git clone <repo> && cd Apexnova-connect
@@ -45,6 +63,8 @@ alias apexnova='node /path/to/Apexnova-connect/apps/cli/dist/main.js'
 # Windows PowerShell — 加到 $PROFILE
 Set-Alias apexnova "node C:\path\to\Apexnova-connect\apps\cli\dist\main.js"
 ```
+
+源码构建**不含**内置 Hub 地址（避免开发版本误连生产），必须先 `apexnova init` 或设置环境变量，见下方「配置 Hub 地址」。
 
 ### Linux 凭证后端（仅 Linux 需要）
 
@@ -138,6 +158,8 @@ apexnova models
 apexnova switch opencode --deployment deployment.apexnova.xxx --yes
 ```
 
+> **非交互首次运行必须指定模型**：没有已绑定的 deployment 且终端不可交互（`--json`、`--non-interactive`、CI）时，`apexnova opencode` 不会替你挑一个，而是返回 `DEPLOYMENT_REQUIRED`（退出码 2）。先用 `apexnova models --json` 列出候选，再传 `--deployment`。
+
 ### 4. 查看用量和余额
 
 ```bash
@@ -216,7 +238,18 @@ apexnova logout
 apexnova doctor
 ```
 
-检查 OpenCode 安装、配置、凭证后端、Hub 会话和 credential 状态。
+检查 OpenCode 安装、配置、凭证后端、状态目录、Hub 会话，以及当前生效的 Hub 地址及其来源：
+
+```
+pass  hub-endpoint    https://api.apexnova-consulting.com (built-in)
+warn  hub-session     SESSION_NOT_FOUND
+```
+
+`hub-endpoint` 的来源标注为 `environment`、`config-file` 或 `built-in`；显示 `not configured` 时运行 `apexnova init`。
+
+## 超时
+
+`--timeout <秒>` 是**整条命令**的期限（默认 120 秒），不是单次 HTTP 请求的期限——`opencode`、`connect` 这类命令会串行发多个 Hub 请求，它们共享同一个期限。失败后撤销刚签发凭据的补偿操作使用独立期限，不会因为主操作已超时而被跳过。
 
 ## 环境变量参考
 
