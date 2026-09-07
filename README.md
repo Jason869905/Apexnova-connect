@@ -164,6 +164,8 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 
 ## M0 设计基线
 
+- [CLI 使用指南（通用）](docs/cli-usage-guide.md) —— 安装、登录、Key 模式、通用命令
+- Agent 使用指南：[OpenCode](docs/opencode-usage-guide.md)、[Codex](docs/codex-usage-guide.md)、[Claude Code](docs/claude-code-usage-guide.md)、[Hermes Agent](docs/hermes-usage-guide.md)
 - [产品范围与开源/商业边界](docs/product-scope.md)
 - [跨 Agent 领域模型](docs/domain-model.md)
 - [分阶段路线图](docs/roadmap.md)
