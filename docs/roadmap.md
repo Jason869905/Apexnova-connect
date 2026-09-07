@@ -81,9 +81,11 @@ M6 能跨领域复制
 
 预计：4～6 周。目标版本：`v0.2`。
 
+当前状态：进行中。契约与 registry 重构已完成，Claude Code、Codex 已实现并通过公共 Contract Test；Hermes Agent 待实机核实其配置面后实现；真实环境验收和 Hub `anthropic-messages` 面的实测尚未进行。
+
 范围：
 
-- Claude Code 和 Codex Integration；
+- Claude Code、Codex 和 Hermes Agent Integration；
 - Agent Discovery Contract；
 - DetectionResult 和 DiagnosticResult；
 - Integration 公共 Contract Test；
@@ -91,10 +93,12 @@ M6 能跨领域复制
 - 产品版本漂移和安全拒绝；
 - macOS Keychain 后端与三平台验收。
 
+Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标从三个 Agent 变为四个（含 M1 已交付的 OpenCode）。
+
 退出条件：
 
-- 三个 Agent 使用同一套发现、计划、验证和恢复生命周期；
-- 产品特有逻辑没有进入 `packages/core`；
+- 四个 Agent 使用同一套发现、计划、验证和恢复生命周期；
+- 产品特有逻辑没有进入 `packages/core` 和 `apps/cli`；
 - 未知配置格式不会被猜测修改；
 - 社区能够独立实现只读 Detection Integration；
 - 三个平台的凭证和恢复流程通过真实环境测试。

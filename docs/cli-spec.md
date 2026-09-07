@@ -45,15 +45,26 @@ CLI 是首个可审计、可脚本化宿主。它负责用户交互和编排，�
 
 ## 命令
 
+### `apexnova agents`
+
+列出本次构建注册的 Agent Integration：id、显示名、状态、支持平台、可消费协议和支持的产品版本范围。
+
+```text
+apexnova agents
+apexnova agents --json
+```
+
 ### `apexnova detect [agent]`
 
-扫描已注册 Integration，返回 Agent 安装、版本、配置位置、当前连接和检测置信度。
+扫描已注册 Integration，返回 Agent 安装、版本、配置位置、当前连接和检测置信度。省略 agent 时检测全部已注册 Integration。
 
 ```text
 apexnova detect
 apexnova detect opencode --json
-apexnova detect opencode --config ./opencode.jsonc
+apexnova detect codex --config ./config.toml
 ```
+
+输出符合 [`detection-result.schema.json`](../schemas/detection-result.schema.json)。`status` 区分 `installed`（可执行文件响应了版本探测）、`config-only`（只找到配置文件）、`not-found` 和 `unsupported`（版本超出 manifest 声明的范围）。`unsupported` 的 Agent 不会进入 `connect`。
 
 默认只读。不得读取无关目录或上传本地绝对路径。
 
@@ -61,11 +72,12 @@ apexnova detect opencode --config ./opencode.jsonc
 
 ### `apexnova inspect <agent>`
 
-显示目标 Agent 的当前 Provider、模型、协议、Integration 状态、受管理字段和已知限制。
+显示目标 Agent 的当前 Provider、模型、协议、Integration 状态、受管理字段和已知限制。输出符合 [`inspection-result.schema.json`](../schemas/inspection-result.schema.json)：只报告凭据引用的环境变量名，不读取也不输出其值；`status: "invalid"` 表示配置不可解析，此时 CLI 不会猜测或改写。
 
 ```text
 apexnova inspect opencode
-apexnova inspect opencode --config ./opencode.jsonc
+apexnova inspect claude-code
+apexnova inspect codex --config ./config.toml
 ```
 
 ### `apexnova login`
@@ -98,17 +110,21 @@ apexnova logout --all-devices
 
 显示余额、币种、信用额度、更新时间和计费主体。
 
-### `apexnova opencode`
+### `apexnova run <agent>`
 
-一行命令完成连接与启动：自动选模型 → 创建 key → 写配置 → 启动 OpenCode。
+一行命令完成连接与启动：自动选模型 → 创建 key → 写配置 → 启动目标 Agent。已经连接过的 profile 直接启动，不再生成计划。
 
 ```text
-apexnova opencode
-apexnova opencode --deployment <id>
-apexnova opencode --key <keyId>
-apexnova opencode --rotating
-apexnova opencode -- --model apexnova/glm-5.2
+apexnova run opencode
+apexnova run codex --deployment <id>
+apexnova run claude-code --key <keyId>
+apexnova run opencode --rotating
+apexnova run opencode -- --model apexnova/glm-5.2
 ```
+
+`apexnova opencode` 保留为 `apexnova run opencode` 的别名，v0.1 的文档和安装脚本继续有效。
+
+启动器要求 `detect` 结果为 `installed`：只有配置文件、没有可执行文件时返回 `AGENT_NOT_FOUND`。凭据只注入子进程环境，不进入 argv、配置文件或日志。
 
 选项：
 
@@ -169,6 +185,7 @@ apexnova models --compatible-only
 
 ```text
 apexnova connect opencode --deployment apexnova/model-x --dry-run
+apexnova connect codex --deployment apexnova/model-x --yes
 apexnova connect opencode --connection-profile coding-fast
 ```
 
@@ -243,7 +260,7 @@ apexnova restore <transaction-id>
 
 ### `apexnova doctor [agent]`
 
-执行只读诊断：
+执行只读诊断，省略 agent 时诊断全部已注册 Integration。每项检查符合 [`diagnostic-result.schema.json`](../schemas/diagnostic-result.schema.json) 的 `checks[]` 形状：
 
 - 运行环境和版本；
 - Integration 加载；
@@ -334,7 +351,7 @@ apexnova recommend \
 | 3 | 未认证或认证过期 |
 | 4 | 权限不足或用户拒绝 |
 | 5 | Agent/Integration 未发现或不支持 |
-| 6 | 配置冲突、版本未知或并发修改 |
+| 6 | 配置冲突、版本未知或并发修改（含 `PRODUCT_VERSION_UNSUPPORTED`） |
 | 7 | Verify 或 Compatibility 失败 |
 | 8 | 网络、Provider 或 Hub 暂时不可用 |
 | 9 | 余额、预算或 Rate Limit 阻止 |

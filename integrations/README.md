@@ -23,4 +23,8 @@ Integration 是 Apexnova-connect 连接外部产品的最小独立单元。每�
 └── README.md          # 支持范围、限制和恢复方式
 ```
 
+`_template/example-agent` 是可运行的只读 Detection 模板：复制它就能开始一个新 Integration，`pnpm test` 直接是绿的。
+
+每个 Integration 必须通过 `packages/integration-testing` 的公共 Contract Test（`describeIntegrationContract`）才能超出 `research` 状态。套件覆盖 manifest 有效性与 `manifest.ts`/`manifest.json` 漂移、未安装机器上的检测、对无法识别的配置格式的拒绝、计划的确定性与幂等、计划与启动命令行中不得出现 secret，以及 apply → verify → rollback 的字节级往返。
+
 详见 [新增 Integration 指南](../docs/adding-an-integration.md)。

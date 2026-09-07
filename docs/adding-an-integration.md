@@ -55,7 +55,9 @@ Integration 不应：
 
 ## 6. 测试
 
-每个 integration 应提供：
+每个 integration 必须通过 `packages/integration-testing` 的 `describeIntegrationContract`，否则不得超出 `research` 状态。只做检测的 integration 传 `readOnly: true`，套件会转而要求每个会修改状态的入口明确拒绝。
+
+除此之外还应提供：
 
 - 公共 contract tests；
 - 支持版本的脱敏配置 fixtures；

@@ -14,20 +14,28 @@ CLI 和 Desktop 负责用户交互、权限确认与任务编排。它们通过 
 
 ### Core, schemas and SDKs
 
-Core 定义领域状态、change plan 和规范化错误。`schemas` 是 manifest、capability 和交换数据的语言无关事实来源；`sdks` 为 TypeScript、Python 等运行时提供符合这些 Schema 的便利接口和公共测试工具。SDK 不得产生与 Schema 不一致的私有 contract。
+Core 定义领域状态、change plan 和规范化错误，并持有 Integration Registry。`schemas` 是 manifest、capability 和交换数据的语言无关事实来源；`sdks` 为 TypeScript、Python 等运行时提供符合这些 Schema 的便利接口和公共测试工具。SDK 不得产生与 Schema 不一致的私有 contract。
+
+Registry 只接收由 application 注入的 Integration 数组，自己不 import 任何具体 Integration，因此 core 里不会出现产品名。它负责：按 id 解析、按 manifest 的平台声明裁剪、把未知 Agent 变成规范化错误，以及**按 manifest 的 `compatibility.products[].versionRange` 拒绝版本漂移**——探测到的版本超出范围时检测被降级为 `unsupported`，不可能对一个从未测过配置格式的产品版本生成变更计划。版本范围只支持显式比较符集合，读不懂的范围按“不满足”处理。
 
 ### Integrations
 
-Integration 是产品边界。它负责：
+Integration 是产品边界，实现 `AgentIntegration` 契约。它负责：
 
 - 检测产品是否安装及其版本；
 - 声明当前平台真实支持的 capabilities；
 - 读取配置并生成 change plan；
 - 验证修改结果；
 - 描述是否需要重启、重载或手动操作；
-- 提供断开、恢复和卸载语义。
+- 提供断开、恢复和卸载语义；
+- 声明可写回的配置目录（`configRoots`），供 restore 计算允许的写入范围；
+- 描述如何启动产品并把凭据注入子进程环境（`planLaunch`）。
 
-Integration 不直接实现账户余额、计费策略或通用协议转换。
+Integration 不直接实现账户余额、计费策略或通用协议转换。失败通过 `AgentIntegrationError` 的规范化 `code` 上报，宿主据此映射退出码，不需要 import 任何 Integration 的私有错误类型。
+
+`schemas/detection-result.schema.json` 与 `schemas/inspection-result.schema.json` 是 Agent Discovery Contract 的语言无关定义：检测区分 `installed`、`config-only`、`not-found` 和 `unsupported`；检查区分 `not-configured`、`configured`、`legacy` 和 `invalid`，其中 `invalid` 表示配置不可解析，此时不得猜测或改写。检查结果只记录凭据的环境变量名，永远不含 secret。
+
+每个 Integration 必须通过 `packages/integration-testing` 的公共 Contract Test 才能超出 `research` 状态；只读 Detection Integration 走该套件的 `readOnly` 模式。
 
 ### Shared services
 

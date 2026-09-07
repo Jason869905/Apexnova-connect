@@ -43,9 +43,14 @@ node apexnova.mjs --version
 ### 开始使用
 
 ```bash
-apexnova login       # 设备码授权
-apexnova opencode    # 选模型 + 建 key + 写配置 + 启动 OpenCode
+apexnova login              # 设备码授权
+apexnova agents             # 看这份构建支持哪些 Agent
+apexnova run opencode       # 选模型 + 建 key + 写配置 + 启动 OpenCode
+apexnova run codex          # 同一条路径，换成 Codex
+apexnova run claude-code    # 同一条路径，换成 Claude Code
 ```
+
+`apexnova opencode` 保留为 `apexnova run opencode` 的别名。
 
 发布产物内置了生产 Hub 地址，装完即可 `login`。要指向其他环境（自建、staging、本机 dev），运行 `apexnova init` 把地址写进
 `~/.config/apexnova-connect/config.json`（Windows 为 `%APPDATA%\Apexnova\connect\config.json`）：
@@ -107,9 +112,10 @@ Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hu
 
 | 类别 | 集成 | 计划方式 | 当前状态 |
 | --- | --- | --- | --- |
-| Agent | OpenCode | 原生插件与自定义 Provider | 规划中 |
-| Agent | Codex | 自定义 Provider、Profile 与启动器 | 规划中 |
-| Agent | Claude Code | 兼容 Gateway、配置适配器与启动器 | 规划中 |
+| Agent | OpenCode | 自定义 Provider 配置与启动器 | `experimental`，已完成真实环境验收 |
+| Agent | Codex | `config.toml` 自定义 model provider 与启动器 | `experimental`，待真实环境验收 |
+| Agent | Claude Code | 官方 LLM gateway 设置与启动器 | `experimental`，待真实环境验收 |
+| Agent | Hermes Agent | `config.yaml` 自定义 provider 与启动器 | 待调研 |
 | Agent | DeepSeek Harness | 根据其公开扩展能力选择插件、Provider 或 Gateway | 待调研 |
 | 自动化 | n8n | Community Node 或凭证化节点集成 | 待调研 |
 | 自动化 | Dify | Model Provider 或插件集成 | 待调研 |
@@ -234,20 +240,25 @@ Apexnova-connect/
 - [x] 实现配置 change plan、受限文件执行、持久化备份与跨进程恢复基础模块；
 - [x] 实现 Windows/Linux 操作系统凭证存储基础模块；
 - [x] 实现长期 API Key（`POST /v1/api-keys`）和按 key 聚合用量查询；
-- [x] 实现 `apexnova opencode` 一行命令（自动选模型 + 创建 key + 写配置 + 启动）；
+- [x] 实现 `apexnova run <agent>` 一行命令（自动选模型 + 创建 key + 写配置 + 启动）；
 - [x] 实现交互式上下键模型选择器；
 - [x] 在 dev 环境和现网 staging 完成端到端联调；
-- [ ] 增加 macOS Keychain 后端并完成三平台真实环境验收；
+- [x] 建立 Agent Discovery Contract、Integration Registry 与公共 Contract Test；
+- [x] 增加 macOS Keychain 后端（尚未在真实 macOS 上验收）；
+- [ ] 完成三平台真实环境验收；
 - [ ] 发布 OpenCode integration MVP；
 - [ ] 发布 Apexnova-connect CLI；
-- [ ] 增加 Codex 与 Claude Code integrations；
+- [x] 增加 Codex 与 Claude Code integrations；
+- [ ] 核实 Hermes Agent 配置面并实现其 integration；
 - [ ] 完成 DeepSeek Harness、n8n 和 Dify 的可行性验证；
 - [ ] 发布 Integration Schema、TypeScript/Python SDK、模板和 contract test suite；
 - [ ] 发布桌面伴侣并建立签名、可复现构建和供应链验证流程。
 
 ## 开发状态
 
-基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已对齐 Hub H1 P6 OpenAPI/fixtures，并新增长期 API Key（`POST /v1/api-keys`、永久 `sk-`）和按 key 聚合用量查询。OpenCode integration 已能生成安全的 v2 JSONC change plan，并提供跨平台发现和脱敏检查。M1 CLI 已实现 `login/logout/whoami/balance/models`、`opencode`（一行命令：自动选模型 + 创建永久 key + 写配置 + 启动）、`usage`（按 key/时间/模型聚合用量）、交互式上下键模型选择器、`connect --dry-run/--yes`、`switch`、安全 launcher、`verify --live`、`doctor` 和事务 `restore`。已在 dev 环境（Next.js + nginx）和现网 staging（`api.apexnova-consulting.com`）完成端到端联调：device flow → 创建 `sk-` key → 真实推理 → 按 key 聚合用量 → 撤销失效。macOS Keychain 后端尚实现，应用 UI 框架未定。
+基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已对齐 Hub H1 P6 OpenAPI/fixtures，并新增长期 API Key（`POST /v1/api-keys`、永久 `sk-`）和按 key 聚合用量查询。OpenCode integration 已能生成安全的 v2 JSONC change plan，并提供跨平台发现和脱敏检查。M1 CLI 已实现 `login/logout/whoami/balance/models`、`opencode`（一行命令：自动选模型 + 创建永久 key + 写配置 + 启动）、`usage`（按 key/时间/模型聚合用量）、交互式上下键模型选择器、`connect --dry-run/--yes`、`switch`、安全 launcher、`verify --live`、`doctor` 和事务 `restore`。已在 dev 环境（Next.js + nginx）和现网 staging（`api.apexnova-consulting.com`）完成端到端联调：device flow → 创建 `sk-` key → 真实推理 → 按 key 聚合用量 → 撤销失效。macOS Keychain 后端已基于 `security` 实现，但尚未在真实 macOS 上验收；应用 UI 框架未定。
+
+M2 进行中：CLI 已改为由 Integration Registry 驱动，`detect/inspect/connect/switch/verify/run/doctor/restore` 对所有已注册 Agent 通用，产品逻辑全部下沉到各自的 integration。Codex（`~/.codex/config.toml`）与 Claude Code（`~/.claude/settings.json`）已实现并通过公共 Contract Test，尚未做真实环境验收；Hermes Agent 待实机核实配置面。
 
 本地要求：Node.js 24+ 与 pnpm 9.15+。
 
