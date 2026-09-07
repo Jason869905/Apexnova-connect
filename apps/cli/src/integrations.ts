@@ -1,6 +1,7 @@
 import type { AgentIntegration } from "@apexnova-connect/integration-sdk";
 import { claudeCodeIntegration } from "@apexnova-connect/integration-claude-code";
 import { codexIntegration } from "@apexnova-connect/integration-codex";
+import { hermesIntegration } from "@apexnova-connect/integration-hermes";
 import { openCodeIntegration } from "@apexnova-connect/integration-opencode";
 
 /**
@@ -9,5 +10,5 @@ import { openCodeIntegration } from "@apexnova-connect/integration-opencode";
  * product.
  */
 export function defaultAgentIntegrations(): readonly AgentIntegration[] {
-  return [openCodeIntegration, codexIntegration, claudeCodeIntegration];
+  return [openCodeIntegration, codexIntegration, claudeCodeIntegration, hermesIntegration];
 }

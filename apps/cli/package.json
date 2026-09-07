@@ -29,6 +29,7 @@
     "@apexnova-connect/hub-client": "workspace:*",
     "@apexnova-connect/integration-claude-code": "workspace:*",
     "@apexnova-connect/integration-codex": "workspace:*",
+    "@apexnova-connect/integration-hermes": "workspace:*",
     "@apexnova-connect/integration-opencode": "workspace:*",
     "@apexnova-connect/integration-sdk": "workspace:*",
     "@inquirer/prompts": "^7.0.0"

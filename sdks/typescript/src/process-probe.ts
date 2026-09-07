@@ -5,7 +5,11 @@ import type { Platform } from "./types.js";
 const DEFAULT_TIMEOUT_MS = 3_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 const SAFE_EXECUTABLE = /^[a-z0-9][a-z0-9-]*$/;
-const SEMANTIC_VERSION = /\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/;
+// A leading `v` is part of the version, not a word boundary: Hermes prints
+// "Hermes Agent v0.21.0 (2026.8.31)", where a \b-anchored pattern skips the
+// real version and matches the build date instead.
+const SEMANTIC_VERSION =
+  /(?<![0-9A-Za-z.])v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)/;
 
 export interface CommandProbeResult {
   readonly found: boolean;
@@ -126,7 +130,7 @@ export async function probeExecutableVersion(
       )))();
 
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  const version = output.match(SEMANTIC_VERSION)?.[0];
+  const version = output.match(SEMANTIC_VERSION)?.[1];
   const evidence: string[] = [];
   const warnings: string[] = [];
 

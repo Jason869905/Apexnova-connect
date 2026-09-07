@@ -13,6 +13,8 @@
     "integrations/agents/claude-code/tests/**/*.ts",
     "integrations/agents/codex/src/**/*.ts",
     "integrations/agents/codex/tests/**/*.ts",
+    "integrations/agents/hermes/src/**/*.ts",
+    "integrations/agents/hermes/tests/**/*.ts",
     "integrations/agents/opencode/src/**/*.ts",
     "integrations/agents/opencode/tests/**/*.ts",
     "packages/core/src/**/*.ts",

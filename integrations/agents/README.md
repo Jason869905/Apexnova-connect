@@ -7,7 +7,7 @@ AI Agent、Coding Agent、命令行助手和 Harness 的适配器目录。每个
 | [`opencode`](opencode/) | `experimental` | `opencode.json(c)` | openai-responses、openai-chat-completions | M1 已完成真实环境验收 |
 | [`codex`](codex/) | `experimental` | `~/.codex/config.toml` | 仅 openai-responses | 待真实环境验收 |
 | [`claude-code`](claude-code/) | `experimental` | `~/.claude/settings.json` | anthropic-messages | 待真实环境验收，且 Hub 的 anthropic 面尚未实测 |
-| [`hermes`](hermes/) | 待调研 | `~/.hermes/config.yaml` | 待核实 | 需先在实机核实配置面 |
+| [`hermes`](hermes/) | `experimental` | `~/.hermes/config.yaml` | 三种协议全支持 | 配置面已在 v0.21.0 实机核实，待真实环境验收 |
 | [`deepseek-harness`](deepseek-harness/) | 待调研 | — | — | 未开始 |
 
 每个 Integration 都必须通过 `packages/integration-testing` 的公共 Contract Test 才能超出 `research` 状态。

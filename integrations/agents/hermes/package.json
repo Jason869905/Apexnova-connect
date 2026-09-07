@@ -1,0 +1,27 @@
+{
+  "name": "@apexnova-connect/integration-hermes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hermes Agent integration for Apexnova-connect.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "manifest.json"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@apexnova-connect/integration-sdk": "workspace:*",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@apexnova-connect/integration-testing": "workspace:*"
+  }
+}

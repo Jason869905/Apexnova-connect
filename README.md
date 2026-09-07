@@ -115,7 +115,7 @@ Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hu
 | Agent | OpenCode | 自定义 Provider 配置与启动器 | `experimental`，已完成真实环境验收 |
 | Agent | Codex | `config.toml` 自定义 model provider 与启动器 | `experimental`，待真实环境验收 |
 | Agent | Claude Code | 官方 LLM gateway 设置与启动器 | `experimental`，待真实环境验收 |
-| Agent | Hermes Agent | `config.yaml` 自定义 provider 与启动器 | 待调研 |
+| Agent | Hermes Agent | `config.yaml` 自定义 custom endpoint 与启动器 | `experimental`，待真实环境验收 |
 | Agent | DeepSeek Harness | 根据其公开扩展能力选择插件、Provider 或 Gateway | 待调研 |
 | 自动化 | n8n | Community Node 或凭证化节点集成 | 待调研 |
 | 自动化 | Dify | Model Provider 或插件集成 | 待调研 |
@@ -249,7 +249,7 @@ Apexnova-connect/
 - [ ] 发布 OpenCode integration MVP；
 - [ ] 发布 Apexnova-connect CLI；
 - [x] 增加 Codex 与 Claude Code integrations；
-- [ ] 核实 Hermes Agent 配置面并实现其 integration；
+- [x] 核实 Hermes Agent 配置面并实现其 integration；
 - [ ] 完成 DeepSeek Harness、n8n 和 Dify 的可行性验证；
 - [ ] 发布 Integration Schema、TypeScript/Python SDK、模板和 contract test suite；
 - [ ] 发布桌面伴侣并建立签名、可复现构建和供应链验证流程。
@@ -258,7 +258,7 @@ Apexnova-connect/
 
 基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已对齐 Hub H1 P6 OpenAPI/fixtures，并新增长期 API Key（`POST /v1/api-keys`、永久 `sk-`）和按 key 聚合用量查询。OpenCode integration 已能生成安全的 v2 JSONC change plan，并提供跨平台发现和脱敏检查。M1 CLI 已实现 `login/logout/whoami/balance/models`、`opencode`（一行命令：自动选模型 + 创建永久 key + 写配置 + 启动）、`usage`（按 key/时间/模型聚合用量）、交互式上下键模型选择器、`connect --dry-run/--yes`、`switch`、安全 launcher、`verify --live`、`doctor` 和事务 `restore`。已在 dev 环境（Next.js + nginx）和现网 staging（`api.apexnova-consulting.com`）完成端到端联调：device flow → 创建 `sk-` key → 真实推理 → 按 key 聚合用量 → 撤销失效。macOS Keychain 后端已基于 `security` 实现，但尚未在真实 macOS 上验收；应用 UI 框架未定。
 
-M2 进行中：CLI 已改为由 Integration Registry 驱动，`detect/inspect/connect/switch/verify/run/doctor/restore` 对所有已注册 Agent 通用，产品逻辑全部下沉到各自的 integration。Codex（`~/.codex/config.toml`）与 Claude Code（`~/.claude/settings.json`）已实现并通过公共 Contract Test，尚未做真实环境验收；Hermes Agent 待实机核实配置面。
+M2 进行中：CLI 已改为由 Integration Registry 驱动，`detect/inspect/connect/switch/verify/run/doctor/restore` 对所有已注册 Agent 通用，产品逻辑全部下沉到各自的 integration。Codex（`~/.codex/config.toml`）、Claude Code（`~/.claude/settings.json`）与 Hermes Agent（`~/.hermes/config.yaml`）已实现并通过公共 Contract Test，尚未做真实环境验收。
 
 本地要求：Node.js 24+ 与 pnpm 9.15+。
 
