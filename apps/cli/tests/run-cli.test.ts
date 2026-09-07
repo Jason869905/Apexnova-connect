@@ -174,6 +174,30 @@ describe("CLI", () => {
     expect(JSON.parse(capture.stdout()).error.code).toBe("RUNTIME_CREDENTIAL_NOT_FOUND");
   });
 
+  it("leaves out an Agent whose manifest excludes this platform", async () => {
+    const capture = captureIo();
+    const linuxOnly = {
+      ...openCodeIntegration,
+      manifest: {
+        ...openCodeIntegration.manifest,
+        compatibility: {
+          ...openCodeIntegration.manifest.compatibility,
+          platforms: ["linux"] as const,
+        },
+      },
+    } as AgentIntegration;
+
+    const result = await runCli(["detect", "--json"], {
+      io: capture.io,
+      registry: createIntegrationRegistry([linuxOnly]),
+      platform: "win32",
+      createRequestId: () => "local_platform",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(capture.stdout()).data.agents).toEqual([]);
+  });
+
   it("refuses an unknown agent and names the ones it supports", async () => {
     const capture = captureIo();
     const result = await runCli(["detect", "hermes", "--json"], {

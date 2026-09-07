@@ -31,6 +31,7 @@ import {
   defaultIo,
   defaultSleep,
   hubConfigContext,
+  currentPlatform,
   hubService,
   integrationContext,
   integrationRegistry,
@@ -776,9 +777,11 @@ async function executeDetect(
   dependencies: CliDependencies,
 ): Promise<{ readonly data: unknown; readonly warnings: readonly string[]; readonly human: string }> {
   const requestedAgent = agentOperand(parsed, dependencies, { optional: true, command: "detect" });
+  // Without the platform filter, an Agent whose manifest excludes this platform
+  // (Hermes has no Windows build) is probed anyway and reported as missing.
   const targets = requestedAgent
     ? [resolveIntegration(requestedAgent, dependencies)]
-    : integrationRegistry(dependencies).list();
+    : integrationRegistry(dependencies).list(currentPlatform(dependencies));
 
   const detections = [];
   for (const integration of targets) {
@@ -1231,7 +1234,7 @@ async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependenc
   const requestedAgent = agentOperand(parsed, dependencies, { optional: true, command: "doctor" });
   const targets = requestedAgent
     ? [resolveIntegration(requestedAgent, dependencies)]
-    : integrationRegistry(dependencies).list();
+    : integrationRegistry(dependencies).list(currentPlatform(dependencies));
   const context = integrationContext(parsed, dependencies);
   const checks: DiagnosticCheck[] = [];
 
