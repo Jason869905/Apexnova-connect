@@ -47,7 +47,7 @@
 6. Windows/Linux 真实环境验收；
 7. OpenCode Integration 从 `planned` 升为 `experimental`。
 
-## M2 现网验收记录（2026-09-07，Windows 11 + Node v24.16.0，`api.apexnova-consulting.com`）
+## M2 现网验收记录（2026-09-07，Windows 11 与 Linux/WSL2，`api.apexnova-consulting.com`）
 
 用发布产物（`dist/apexnova.mjs`，内置生产 Hub 地址）在 Windows 侧完成。三个 Agent 各自跑完整生命周期，结束后全部恢复到连接前状态，配置文件逐字节一致。
 
@@ -59,7 +59,15 @@
 - `[passed]` Claude Code 两种凭据模式：默认注入模式，以及 `--api-key-helper`（写入指向本 CLI 的 `apiKeyHelper`，`credential print` 输出 48 字符单行、无任何多余内容，符合 Claude Code 对 helper 的要求）；再次以默认模式 `connect` 时，自己写的 `apiKeyHelper` 被删除、标记回到 `managed`；逆序 restore 三次后文件逐字节还原；
 - `[passed]` 计费对账：三次真实推理合计 `0.000022 USD`（余额 60.313920 → 60.313898），无残留 hold；结束后 `doctor` 全项 pass。
 
-未覆盖：Hermes Agent（无 Windows 版，需在 WSL 起 keyring 后单独验收）、macOS 全部流程、Linux/WSL 的凭证与恢复流程（该会话没有可用的 Secret Service）。
+### Linux/WSL 补充验收（同日）
+
+WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在另一条会话总线（`/tmp/dbus-*`）上，指向该总线后 Secret Service 可用；`doctor` 的 credential-backend 探针随即通过。
+
+- `[passed]` **Hermes Agent v0.21.0**：`connect --dry-run` → `connect --yes`（`openai-responses` → `api_mode: codex_responses`）→ `verify --live --yes`（请求 `20a9479c-a4af-4372-b34d-d499abccbed1`，实扣 `0.000007 USD`）→ `switch --protocol anthropic-messages` 到 glm-5.2（`base_url` 变为 `/anthropic`、`api_mode: anthropic_messages`）→ `verify --live --yes`（请求 `839db2fb-dc22-42b5-8a50-897a568b0744`，实扣 `0.000263 USD`）→ 逆序 `restore` 两次。6188 字节的真实 `config.yaml` 只改动 `model` 块的五个键，restore 后逐字节一致（`provider: auto` / OpenRouter 复原）；
+- `[passed]` Hermes 三种 `api_mode` 中的两种（`codex_responses`、`anthropic_messages`）经过真实推理验证；
+- `[passed]` Linux 的凭证存储（Secret Service）与事务恢复流程。
+
+未覆盖：macOS 全部流程（无实机，Keychain 后端只有 mock command runner 测试）；Hermes 的 `chat_completions` 模式未做真实推理。
 
 ## 本机 Docker 验证记录（2026-09-05）
 

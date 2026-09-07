@@ -81,7 +81,7 @@ M6 能跨领域复制
 
 预计：4～6 周。目标版本：`v0.2`。
 
-当前状态：进行中。契约与 registry 重构已完成；四个 Integration 均已实现并通过公共 Contract Test。OpenCode、Codex、Claude Code 已在 Windows + 现网 Hub 完成完整生命周期验收（含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。尚未完成：Hermes 的真实环境验收、Linux 与 macOS 的凭证与恢复流程验收。
+当前状态：进行中。契约与 registry 重构已完成；四个 Integration 均已实现、通过公共 Contract Test，并在现网 Hub 完成完整生命周期验收（OpenCode/Codex/Claude Code 在 Windows，Hermes 在 Linux/WSL2；含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。唯一未满足的退出条件是 macOS：无实机，Keychain 后端只有 mock command runner 测试。
 
 范围：
 
