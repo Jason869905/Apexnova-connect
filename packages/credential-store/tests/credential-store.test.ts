@@ -122,6 +122,44 @@ describe("system backends", () => {
     expect(runner.requests.flatMap((request) => request.args)).not.toContain(rawSecret);
   });
 
+  it("reports a Linux session with no keyring daemon as unavailable, not as a failed operation", async () => {
+    // What secret-tool actually prints on a headless or WSL session: it runs,
+    // waits for D-Bus, then exits non-zero.
+    const runner = new FakeCommandRunner(() => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "secret-tool: Error calling StartServiceByName for org.freedesktop.secrets: Timeout was reached\n",
+    }));
+    const store = new SystemCredentialStore(new LinuxSecretServiceBackend(runner));
+
+    await expect(store.set(key, SecretValue.from("value"))).rejects.toMatchObject({
+      code: "BACKEND_UNAVAILABLE",
+    });
+    // `lookup` exits 1 for a missing item too, so the service failure must not
+    // be mistaken for "no credential stored".
+    await expect(store.get(key)).rejects.toMatchObject({ code: "BACKEND_UNAVAILABLE" });
+    await expect(store.delete(key)).rejects.toMatchObject({ code: "BACKEND_UNAVAILABLE" });
+  });
+
+  it("still reports a genuinely absent Linux credential as null", async () => {
+    const runner = new FakeCommandRunner(() => ({ exitCode: 1, stdout: "", stderr: "" }));
+    const store = new SystemCredentialStore(new LinuxSecretServiceBackend(runner));
+
+    expect(await store.get(key)).toBeNull();
+    await expect(store.delete(key)).resolves.toBeUndefined();
+  });
+
+  it("treats a hung credential helper as an unavailable backend", async () => {
+    const runner = new FakeCommandRunner(() => {
+      throw new CommandRunnerError("timeout", "Credential helper timed out.");
+    });
+    const store = new SystemCredentialStore(new LinuxSecretServiceBackend(runner));
+
+    await expect(store.set(key, SecretValue.from("value"))).rejects.toMatchObject({
+      code: "BACKEND_UNAVAILABLE",
+    });
+  });
+
   it("passes macOS secrets through stdin and never through process arguments", async () => {
     const rawSecret = 'macos-"secret"\\value';
     const stored = new Map<string, string>();

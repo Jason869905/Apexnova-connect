@@ -22,6 +22,7 @@ import {
   type UsageQuery,
 } from "@apexnova-connect/hub-client";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
+import { CredentialStoreError, SecretValue } from "@apexnova-connect/credential-store";
 
 import {
   agentOperand,
@@ -1162,6 +1163,70 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   };
 }
 
+const CREDENTIAL_PROBE_KEY = {
+  integrationId: "apexnova-connect",
+  accountId: "doctor",
+  kind: "backend-probe",
+} as const;
+
+async function probeCredentialBackend(
+  dependencies: CliDependencies,
+  backendName: string,
+): Promise<DiagnosticCheck> {
+  const identity = { id: "credential-backend", severity: "error" } as const;
+  let store;
+  try {
+    store = credentialStore(dependencies);
+  } catch (error) {
+    return {
+      ...identity,
+      status: "fail",
+      code: `credential-backend.${error instanceof CredentialStoreError ? error.code : "unavailable"}`,
+      severity: "error",
+      message: backendName,
+      remediation: error instanceof Error ? error.message : "The credential backend is unavailable.",
+    };
+  }
+
+  const probe = SecretValue.from("apexnova-connect-doctor-probe");
+  try {
+    await store.set(CREDENTIAL_PROBE_KEY, probe);
+    const stored = await store.get(CREDENTIAL_PROBE_KEY);
+    await store.delete(CREDENTIAL_PROBE_KEY);
+    if (stored?.reveal() !== probe.reveal()) {
+      return {
+        ...identity,
+        status: "fail",
+        code: "credential-backend.readback-mismatch",
+        severity: "error",
+        message: `${backendName} accepted a probe credential but did not return it.`,
+      };
+    }
+    return {
+      id: "credential-backend",
+      status: "pass",
+      code: `credential-backend.${platformCode(dependencies)}`,
+      severity: "info",
+      message: backendName,
+    };
+  } catch (error) {
+    await store.delete(CREDENTIAL_PROBE_KEY).catch(() => {});
+    const normalized = normalizeError(error);
+    return {
+      ...identity,
+      status: "fail",
+      code: `credential-backend.${normalized.code}`,
+      severity: "error",
+      message: backendName,
+      remediation: normalized.message,
+    };
+  }
+}
+
+function platformCode(dependencies: CliDependencies): string {
+  return dependencies.platform ?? process.platform;
+}
+
 async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependencies) {
   const requestedAgent = agentOperand(parsed, dependencies, { optional: true, command: "doctor" });
   const targets = requestedAgent
@@ -1175,20 +1240,18 @@ async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependenc
   }
 
   const platform = dependencies.platform ?? process.platform;
-  const backendSupported = platform === "win32" || platform === "linux" || platform === "darwin";
-  checks.push({
-    id: "credential-backend",
-    status: backendSupported ? "pass" : "fail",
-    code: `credential-backend.${platform}`,
-    severity: backendSupported ? "info" : "error",
-    message: platform === "win32"
-      ? "Windows Credential Manager"
-      : platform === "linux"
-        ? "Secret Service"
-        : platform === "darwin"
-          ? "macOS Keychain"
-          : `unsupported on ${platform}`,
-  });
+  const backendName = platform === "win32"
+    ? "Windows Credential Manager"
+    : platform === "linux"
+      ? "Secret Service"
+      : platform === "darwin"
+        ? "macOS Keychain"
+        : `unsupported on ${platform}`;
+  // Naming the backend is not evidence it works: a headless Linux or WSL
+  // session has secret-tool installed and no keyring answering behind it, and
+  // the first sign used to be `login` failing after the user had approved the
+  // device. Write, read back and delete a probe value instead.
+  checks.push(await probeCredentialBackend(dependencies, backendName));
   checks.push({
     id: "state-root",
     status: "pass",
@@ -1291,6 +1354,21 @@ function normalizeError(error: unknown): CliError {
         ? "Your organization requires keys to have a maximum TTL. Use --rotating for short-lived credentials or specify a shorter expiry."
         : error.message;
     return new CliError({ code: error.code, message, exitCode, retryable: error.retryable, ...(error.retryAfterSeconds !== undefined ? { retryAfterSeconds: error.retryAfterSeconds } : {}), ...(error.requestId ? { details: { requestId: error.requestId } } : {}), cause: error });
+  }
+  // Without this a keyring that is missing or not answering surfaces as
+  // "The command failed unexpectedly", with nothing pointing at the keyring.
+  if (error instanceof CredentialStoreError) {
+    const exitCode =
+      error.code === "BACKEND_UNAVAILABLE" || error.code === "UNSUPPORTED_PLATFORM"
+        ? EXIT_CODES.unavailable
+        : error.code === "INVALID_KEY" || error.code === "INVALID_SECRET"
+          ? EXIT_CODES.usage
+          : EXIT_CODES.runtime;
+    const message =
+      error.code === "BACKEND_UNAVAILABLE"
+        ? `${error.message} Apexnova-connect stores sessions and credentials in the OS credential service and will not fall back to a plaintext file. On a headless Linux or WSL session, start a Secret Service provider (for example \`gnome-keyring-daemon --start --components=secrets\`) and try again.`
+        : error.message;
+    return new CliError({ code: error.code, message, exitCode, cause: error });
   }
   if (error instanceof ConfigExecutionError) {
     return new CliError({ code: error.code, message: error.message, exitCode: error.code === "ROLLBACK_FAILED" || error.code === "INVALID_RECEIPT" ? EXIT_CODES.recovery : error.code === "CONFLICT" ? EXIT_CODES.conflict : EXIT_CODES.runtime, cause: error });
