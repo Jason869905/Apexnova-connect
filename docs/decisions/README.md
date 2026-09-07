@@ -8,3 +8,4 @@
 
 - [ADR 0001：分离 Integration 交付契约与产品领域契约](0001-separate-integration-and-domain-contracts.md)
 - [ADR 0002：Agent Discovery Contract 与 Integration Registry](0002-agent-discovery-contract.md)
+- [ADR 0003：M2 里程碑评审](0003-m2-milestone-review.md)

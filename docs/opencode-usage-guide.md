@@ -1,7 +1,11 @@
 # OpenCode + Apexnova AI Hub 使用指南
 
-> 适用版本：apexnova-connect v0.1.2 · OpenCode ≥1.18.29 <2.0.0
+> 适用版本：apexnova-connect v0.2.0 · OpenCode ≥1.18.29 <2.0.0
 > 平台：Windows、Linux
+
+> [!NOTE]
+> v0.2 起支持四个 Agent：OpenCode、Codex、Claude Code、Hermes Agent。`apexnova agents` 列出本次构建支持哪些，`apexnova run <agent>` 是通用的一行启动命令。本文是 OpenCode 专属指南；其他 Agent 的受管理字段、已知限制和恢复方式见各自的
+> [Integration README](../integrations/agents/)。本文中的 `apexnova opencode` 是 `apexnova run opencode` 的别名，继续可用。
 
 ## 简介
 
@@ -44,7 +48,7 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 
 脚本会校验产物 sha256，装到 `~/.apexnova-connect`，并在 `~/.local/bin` 生成 `apexnova` 启动器。若该目录不在 PATH 中，脚本会打印需要追加的一行。
 
-钉定版本用 `APEXNOVA_VERSION=v0.1.2`；其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
+钉定版本用 `APEXNOVA_VERSION=v0.2.0`；其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
 
 ### 从源码构建
 
@@ -79,6 +83,23 @@ eval "$(dbus-launch --sh-syntax)"
 gnome-keyring-daemon --start --components=secrets
 echo -n "" | gnome-keyring-daemon --unlock
 ```
+
+`apexnova doctor` 的 `credential-backend` 检查会真实写入一个探针值再读回删除，所以它报 `PASS` 就是后端确实可用，不只是「这个平台理论上支持」。
+
+后端不可用时最常见的两种情况：
+
+- **没有任何 keyring 在跑**：`secret-tool` 会等到超时后非零退出，CLI 报 `BACKEND_UNAVAILABLE` 并提示启动命令。按上面三行启动即可。
+- **keyring 在跑，但挂在另一条会话总线上**：这时 `org.freedesktop.secrets` 在你当前的总线上无人应答，表现同样是超时。先确认 daemon 实际用的是哪条总线，再让命令指向它：
+
+  ```bash
+  pgrep -af gnome-keyring
+  tr '\0' '\n' < /proc/<pid>/environ | grep DBUS_SESSION_BUS_ADDRESS
+  export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-XXXXXX   # 用上一行的输出
+  ```
+
+  这条总线跟着那个 daemon 进程存活，机器重启后要重新确认，或干脆在当前总线上重起一个 daemon。
+
+Apexnova-connect 不会在凭证后端不可用时把密钥降级写进明文文件，因此这一步没通过之前 `login` 无法完成。
 
 ## 配置 Hub 地址
 
