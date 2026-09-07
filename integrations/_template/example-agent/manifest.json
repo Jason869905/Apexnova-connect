@@ -1,0 +1,31 @@
+{
+  "$schema": "../../../schemas/integration-manifest.schema.json",
+  "schemaVersion": "1",
+  "id": "example-agent",
+  "displayName": "Example Agent",
+  "description": "Detection-only integration template: it discovers a product and reports its configuration, and changes nothing.",
+  "version": "0.1.0",
+  "status": "experimental",
+  "category": "agent",
+  "delivery": {
+    "modes": ["config-adapter"]
+  },
+  "compatibility": {
+    "platforms": ["windows", "macos", "linux"],
+    "products": [
+      {
+        "name": "Example Agent",
+        "versionRange": ">=1.0.0",
+        "documentation": "https://example.invalid/docs/configuration"
+      }
+    ]
+  },
+  "protocols": [],
+  "capabilities": [],
+  "permissions": [
+    { "kind": "filesystem-read", "reason": "Inspect the target product configuration; this integration never writes." }
+  ],
+  "links": {
+    "documentation": "https://example.invalid/docs/configuration"
+  }
+}

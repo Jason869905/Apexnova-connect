@@ -4,6 +4,7 @@ import {
   CommandRunnerError,
   CredentialStoreError,
   LinuxSecretServiceBackend,
+  MacOsKeychainBackend,
   MemoryCredentialBackend,
   SecretValue,
   SystemCredentialStore,
@@ -121,6 +122,50 @@ describe("system backends", () => {
     expect(runner.requests.flatMap((request) => request.args)).not.toContain(rawSecret);
   });
 
+  it("passes macOS secrets through stdin and never through process arguments", async () => {
+    const rawSecret = 'macos-"secret"\\value';
+    const stored = new Map<string, string>();
+    const runner = new FakeCommandRunner((request) => {
+      if (request.args[0] === "-i") {
+        // Interactive mode: the whole command, secret included, arrives on stdin.
+        stored.set("item", rawSecret);
+        return { exitCode: 0, stdout: "", stderr: "" };
+      }
+      if (request.args[0] === "find-generic-password") {
+        const value = stored.get("item");
+        return value === undefined
+          ? { exitCode: 44, stdout: "", stderr: "The specified item could not be found" }
+          : { exitCode: 0, stdout: `${value}\n`, stderr: "" };
+      }
+      stored.delete("item");
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const store = new SystemCredentialStore(new MacOsKeychainBackend(runner));
+
+    await store.set(key, SecretValue.from(rawSecret));
+    expect((await store.get(key))?.reveal()).toBe(rawSecret);
+    await store.delete(key);
+    expect(await store.get(key)).toBeNull();
+
+    expect(runner.requests[0]?.executable).toBe("security");
+    expect(runner.requests[0]?.args).toEqual(["-i"]);
+    expect(runner.requests[0]?.stdin).toContain('macos-\\"secret\\"');
+    expect(runner.requests.flatMap((request) => request.args)).not.toContain(rawSecret);
+  });
+
+  it("treats a macOS keychain error written to stderr as a failure", async () => {
+    const runner = new FakeCommandRunner(() => ({
+      exitCode: 0,
+      stdout: "",
+      stderr: "security: SecKeychainAddGenericPassword: User interaction is not allowed.",
+    }));
+    const store = new SystemCredentialStore(new MacOsKeychainBackend(runner));
+
+    await expect(store.set(key, SecretValue.from("value"))).rejects.toMatchObject({
+      code: "OPERATION_FAILED",
+    });
+  });
+
   it("reports a Windows session without a credential set as unavailable", async () => {
     const runner = new FakeCommandRunner(() => ({
       exitCode: 0,
@@ -233,8 +278,10 @@ describe("system backends", () => {
       .toBeInstanceOf(SystemCredentialStore);
     expect(createDefaultCredentialStore({ platform: "linux", commandRunner: runner }))
       .toBeInstanceOf(SystemCredentialStore);
+    expect(createDefaultCredentialStore({ platform: "darwin", commandRunner: runner }))
+      .toBeInstanceOf(SystemCredentialStore);
     expect(() =>
-      createDefaultCredentialStore({ platform: "darwin", commandRunner: runner }),
+      createDefaultCredentialStore({ platform: "freebsd", commandRunner: runner }),
     ).toThrowError(expect.objectContaining({ code: "UNSUPPORTED_PLATFORM" }));
   });
 });

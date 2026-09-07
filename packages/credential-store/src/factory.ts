@@ -1,6 +1,7 @@
 import { SpawnCommandRunner, type CommandRunner } from "./command-runner.js";
 import { CredentialStoreError } from "./errors.js";
 import { LinuxSecretServiceBackend } from "./linux-secret-service.js";
+import { MacOsKeychainBackend } from "./macos-keychain.js";
 import { SystemCredentialStore } from "./system-credential-store.js";
 import { WindowsCredentialManagerBackend } from "./windows-credential-manager.js";
 
@@ -27,6 +28,12 @@ export function createDefaultCredentialStore(
   if (platform === "linux") {
     return new SystemCredentialStore(
       new LinuxSecretServiceBackend(runner),
+      storeOptions,
+    );
+  }
+  if (platform === "darwin") {
+    return new SystemCredentialStore(
+      new MacOsKeychainBackend(runner),
       storeOptions,
     );
   }

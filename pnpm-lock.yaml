@@ -51,6 +51,16 @@ importers:
         specifier: ^7.0.0
         version: 7.10.1(@types/node@24.13.3)
 
+  integrations/_template/example-agent:
+    dependencies:
+      '@apexnova-connect/integration-sdk':
+        specifier: workspace:*
+        version: link:../../../sdks/typescript
+    devDependencies:
+      '@apexnova-connect/integration-testing':
+        specifier: workspace:*
+        version: link:../../../packages/integration-testing
+
   integrations/agents/claude-code:
     dependencies:
       '@apexnova-connect/integration-sdk':

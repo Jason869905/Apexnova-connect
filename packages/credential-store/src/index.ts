@@ -11,6 +11,7 @@ export {
   type DefaultCredentialStoreOptions,
 } from "./factory.js";
 export { LinuxSecretServiceBackend } from "./linux-secret-service.js";
+export { MacOsKeychainBackend } from "./macos-keychain.js";
 export { MemoryCredentialBackend } from "./memory.js";
 export { SystemCredentialStore } from "./system-credential-store.js";
 export {

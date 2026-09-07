@@ -18,9 +18,9 @@ Apexnova-connect 的普通配置只保存稳定的凭证引用，不保存 acces
 | --- | --- | --- |
 | Windows | Windows Credential Manager（Win32） | 已实现，需交互式桌面会话验收 |
 | Linux | Secret Service（`secret-tool`） | 已实现，需桌面 keyring 与真实平台验收 |
-| macOS | Keychain | 尚未实现 |
+| macOS | Keychain（`security`） | 已实现，**尚未在真实 macOS 上验收**，目前只有 mock command runner 测试 |
 
-系统 helper 以 `shell: false` 启动，秘密通过 stdin 传输，不出现在进程参数中。helper 的 stdout/stderr 有大小限制，调用有超时；错误不会包含秘密或 helper 原始输出。
+系统 helper 以 `shell: false` 启动，秘密通过 stdin 传输，不出现在进程参数中。macOS 的 `security add-generic-password` 只接受把密码作为命令行参数，因此写入走 `security -i` 交互模式，把整条命令（含密码）从 stdin 送入；读取与删除不涉及秘密，走普通参数。交互模式在单条命令失败后仍会返回 0，所以写入同时检查退出码与 stderr。helper 的 stdout/stderr 有大小限制，调用有超时；错误不会包含秘密或 helper 原始输出。
 
 Windows Credential Manager 与当前用户的登录会话绑定。没有 credential set 的服务账号、网络登录或隔离运行环境会返回 `BACKEND_UNAVAILABLE`；应用不得因此降级到明文存储。
 

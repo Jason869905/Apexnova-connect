@@ -47,6 +47,12 @@ export interface IntegrationContractFixtures {
   };
   /** A protocol the integration must refuse, when it does not accept all of them. */
   readonly unsupportedProtocol?: ConnectionIntent["protocol"];
+  /**
+   * A detection-only integration: it discovers and inspects but never changes
+   * or launches anything. The suite then requires that every mutating entry
+   * point refuses rather than half-implementing the lifecycle.
+   */
+  readonly readOnly?: boolean;
 }
 
 const SECRET = "contract-suite-secret-value";
@@ -112,7 +118,9 @@ export function describeIntegrationContract(
     });
 
     it("declares only protocols its manifest also declares", () => {
-      expect(integration.supportedProtocols.length).toBeGreaterThan(0);
+      if (!fixtures.readOnly) {
+        expect(integration.supportedProtocols.length).toBeGreaterThan(0);
+      }
       const declared = integration.manifest.protocols.map((protocol) => protocol.id);
       for (const protocol of integration.supportedProtocols) {
         expect(declared).toContain(protocol);
@@ -174,7 +182,7 @@ export function describeIntegrationContract(
       });
     }
 
-    it("plans one write that carries no secret", async () => {
+    it.skipIf(fixtures.readOnly)("plans one write that carries no secret", async () => {
       const detection = await availableDetection();
       const plan = await integration.plan(
         context,
@@ -193,7 +201,7 @@ export function describeIntegrationContract(
       expect(JSON.stringify(plan)).not.toContain(SECRET);
     });
 
-    it("produces the same plan twice and no plan once applied", async () => {
+    it.skipIf(fixtures.readOnly)("produces the same plan twice and no plan once applied", async () => {
       const detection = await availableDetection();
       const first = await integration.plan(
         context,
@@ -220,7 +228,7 @@ export function describeIntegrationContract(
       expect(third.operations).toHaveLength(0);
     });
 
-    if (fixtures.preservedConfig) {
+    if (fixtures.preservedConfig && !fixtures.readOnly) {
       const preserved = fixtures.preservedConfig;
       it("keeps unrelated user settings", async () => {
         await writeFile(configPath, preserved.content, "utf8");
@@ -238,7 +246,7 @@ export function describeIntegrationContract(
       });
     }
 
-    if (fixtures.unsupportedProtocol) {
+    if (fixtures.unsupportedProtocol && !fixtures.readOnly) {
       const protocol = fixtures.unsupportedProtocol;
       it(`refuses a ${protocol} deployment instead of guessing`, async () => {
         const detection = await availableDetection();
@@ -251,7 +259,7 @@ export function describeIntegrationContract(
       });
     }
 
-    it("applies, verifies and rolls back to the original bytes", async () => {
+    it.skipIf(fixtures.readOnly)("applies, verifies and rolls back to the original bytes", async () => {
       const original = fixtures.preservedConfig?.content ?? "";
       if (original) await writeFile(configPath, original, "utf8");
 
@@ -287,7 +295,7 @@ export function describeIntegrationContract(
       }
     });
 
-    it("plans a launch that injects the credential into the environment only", async () => {
+    it.skipIf(fixtures.readOnly)("plans a launch that injects the credential into the environment only", async () => {
       const launch = await integration.planLaunch({
         context,
         credentialEnvironment: { [integration.credentialEnvironmentVariable]: SECRET },
@@ -299,6 +307,19 @@ export function describeIntegrationContract(
       expect(launch.environment[integration.credentialEnvironmentVariable]).toBe(SECRET);
       expect(launch.args.join(" ")).not.toContain(SECRET);
       expect(launch.executable).not.toContain(SECRET);
+    });
+
+    it.runIf(fixtures.readOnly)("refuses to change or launch anything", async () => {
+      const detection = await availableDetection();
+      const inspection = await integration.inspect(context, detection);
+
+      await expect(
+        integration.plan(context, detection, inspection, fixtures.intent),
+      ).rejects.toBeInstanceOf(AgentIntegrationError);
+      await expect(
+        integration.planLaunch({ context, credentialEnvironment: {}, args: [] }),
+      ).rejects.toBeInstanceOf(AgentIntegrationError);
+      expect(integration.manifest.capabilities).not.toContain("provider-config");
     });
 
     it("diagnoses without throwing and labels every check", async () => {
