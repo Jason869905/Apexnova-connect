@@ -1041,6 +1041,32 @@ async function runtimeCredentialForLaunch(parsed: ParsedArguments, dependencies:
   });
 }
 
+// Planning rewrites the whole config, so both entry points -- `connect` and the
+// one-command `opencode` path -- have to refuse a file too large to hold safely.
+const OPENCODE_CONFIG_LIMIT_BYTES = 2 * 1024 * 1024;
+
+async function readExistingOpenCodeConfig(
+  parsed: ParsedArguments,
+  detection: OpenCodeDetection,
+): Promise<string | null> {
+  if (!detection.configExists) return null;
+  let content: string;
+  try {
+    content = await readFile(detection.configPath, { encoding: "utf8", signal: operationSignal(parsed) });
+  } catch (cause) {
+    throw new CliError({ code: "CONFIG_READ_FAILED", message: "OpenCode configuration could not be read.", exitCode: EXIT_CODES.permission, cause });
+  }
+  if (Buffer.byteLength(content, "utf8") > OPENCODE_CONFIG_LIMIT_BYTES) {
+    throw new CliError({
+      code: "CONFIG_TOO_LARGE",
+      message: "OpenCode configuration exceeds the 2 MiB planning limit.",
+      exitCode: EXIT_CODES.conflict,
+      details: { configPath: detection.configPath, limitBytes: OPENCODE_CONFIG_LIMIT_BYTES },
+    });
+  }
+  return content;
+}
+
 interface OpenCodePlanInput {
   readonly dependencies: CliDependencies;
   readonly configPath: string;
@@ -1111,15 +1137,7 @@ async function createOpenCodePlan(parsed: ParsedArguments, dependencies: CliDepe
   const mappedProtocol = protocol ? openCodeProtocol(protocol.protocol) : undefined;
   if (!protocol || !mappedProtocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
   const model = catalog.models.find((item) => item.id === deployment.modelId);
-  let existingContent: string | null = null;
-  if (detection.configExists) {
-    try {
-      existingContent = await readFile(detection.configPath, { encoding: "utf8", signal: operationSignal(parsed) });
-    } catch (cause) {
-      throw new CliError({ code: "CONFIG_READ_FAILED", message: "OpenCode configuration could not be read.", exitCode: EXIT_CODES.permission, cause });
-    }
-    if (Buffer.byteLength(existingContent, "utf8") > 2 * 1024 * 1024) throw new CliError({ code: "CONFIG_TOO_LARGE", message: "OpenCode configuration exceeds the 2 MiB planning limit.", exitCode: EXIT_CODES.conflict });
-  }
+  const existingContent = await readExistingOpenCodeConfig(parsed, detection);
   const plan = buildOpenCodePlan({
     dependencies,
     configPath: detection.configPath,
@@ -1371,14 +1389,7 @@ async function configureOpenCode(
   const model = catalog.models.find((item) => item.id === deployment.modelId);
   const mappedProtocol = openCodeProtocol(protocol.protocol);
   if (!mappedProtocol) throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: "The selected deployment does not expose a supported OpenCode protocol.", exitCode: EXIT_CODES.unavailable });
-  let existingContent: string | null = null;
-  if (detection.configExists) {
-    try {
-      existingContent = await readFile(detection.configPath, { encoding: "utf8", signal: operationSignal(parsed) });
-    } catch (cause) {
-      throw new CliError({ code: "CONFIG_READ_FAILED", message: "OpenCode configuration could not be read.", exitCode: EXIT_CODES.permission, cause });
-    }
-  }
+  const existingContent = await readExistingOpenCodeConfig(parsed, detection);
   const plan = buildOpenCodePlan({
     dependencies,
     configPath: detection.configPath,

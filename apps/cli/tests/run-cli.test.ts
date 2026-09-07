@@ -733,6 +733,40 @@ describe("CLI", () => {
     });
   });
 
+  it("refuses an oversized OpenCode config on both the connect and opencode paths", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "apexnova-bigconfig-"));
+    const configPath = join(dir, "opencode.jsonc");
+    await writeFile(configPath, `{"$schema":"https://opencode.ai/config.json","x":"${"a".repeat(2 * 1024 * 1024)}"}`, "utf8");
+    const detection: OpenCodeDetection = { ...installed, configPath, configExists: true };
+
+    const shared = {
+      environment: {},
+      platform: "linux" as const,
+      homeDirectory: dir,
+      hubService: mockHub(),
+      credentialStore: memoryCredentials(),
+      detectOpenCode: async () => detection,
+      launchOpenCode: async () => 0,
+    };
+
+    const connectCapture = captureIo();
+    const connect = await runCli(
+      ["connect", "opencode", "--deployment", "deployment.nova", "--dry-run", "--json"],
+      { ...shared, io: connectCapture.io, createRequestId: () => "local_big_connect" },
+    );
+    expect(connect.exitCode).toBe(EXIT_CODES.conflict);
+    expect(JSON.parse(connectCapture.stdout())).toMatchObject({ error: { code: "CONFIG_TOO_LARGE" } });
+
+    // The one-command path used to skip this guard entirely.
+    const openCodeCapture = captureIo();
+    const openCode = await runCli(
+      ["opencode", "--deployment", "deployment.nova", "--json"],
+      { ...shared, io: openCodeCapture.io, createRequestId: () => "local_big_opencode" },
+    );
+    expect(openCode.exitCode).toBe(EXIT_CODES.conflict);
+    expect(JSON.parse(openCodeCapture.stdout())).toMatchObject({ error: { code: "CONFIG_TOO_LARGE" } });
+  });
+
   it("refuses to guess a deployment on a non-interactive first run", async () => {
     const capture = captureIo();
     const result = await runCli(["opencode", "--json"], {

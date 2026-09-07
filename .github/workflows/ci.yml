@@ -41,8 +41,8 @@ jobs:
       # The release artifact is only useful if it builds and self-tests here too.
       - run: pnpm bundle
 
-  installer:
-    name: installer scripts
+  installer-linux:
+    name: installer (linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,8 +50,61 @@ jobs:
       - name: Shell syntax
         run: bash -n scripts/install.sh
 
-      - name: PowerShell syntax
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm bundle
+
+      # Serve the artifact over real HTTP so the installer exercises its actual
+      # download and checksum path, not a file:// shortcut.
+      - name: Install from a locally served artifact
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8765 --directory dist >/dev/null 2>&1 &
+          server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8765/apexnova.mjs.sha256 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          export APEXNOVA_ASSET_URL="http://127.0.0.1:8765/apexnova.mjs"
+          export APEXNOVA_HOME="$RUNNER_TEMP/apexnova-home"
+          export APEXNOVA_BIN="$RUNNER_TEMP/apexnova-bin"
+          bash scripts/install.sh
+          "$APEXNOVA_BIN/apexnova" --version
+
+      # The v0.1.0 launcher recorded a bare `node`, which broke for anyone whose
+      # Node had been installed by the installer itself.
+      - name: Launcher works without node on PATH
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/barepath"
+          ln -sf "$(command -v bash)" "$RUNNER_TEMP/barepath/bash"
+          ln -sf "$(command -v env)" "$RUNNER_TEMP/barepath/env"
+          if env -i PATH="$RUNNER_TEMP/barepath" bash -c 'command -v node'; then
+            echo "expected node to be absent from the stripped PATH" >&2
+            exit 1
+          fi
+          version="$(env -i PATH="$RUNNER_TEMP/barepath" HOME="$HOME" "$RUNNER_TEMP/apexnova-bin/apexnova" --version)"
+          echo "$version"
+          case "$version" in apexnova\ *) ;; *) echo "unexpected launcher output" >&2; exit 1 ;; esac
+
+  installer-windows:
+    name: installer (windows)
+    runs-on: windows-latest
+    defaults:
+      run:
         shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PowerShell syntax
         run: |
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile(
@@ -69,27 +122,55 @@ jobs:
 
       - run: pnpm bundle
 
-      # Exercise the real install path against the artifact we just built, then
-      # prove the launcher still resolves Node when it is not on PATH -- the
-      # failure mode that broke the v0.1.0 installer.
-      - name: Install from a local artifact
+      - name: Install from a locally served artifact
         run: |
-          set -euo pipefail
-          export APEXNOVA_ASSET_URL="file://$PWD/dist/apexnova.mjs"
-          export APEXNOVA_HOME="$RUNNER_TEMP/apexnova-home"
-          export APEXNOVA_BIN="$RUNNER_TEMP/apexnova-bin"
-          bash scripts/install.sh
-          "$APEXNOVA_BIN/apexnova" --version
+          $dist = (Resolve-Path ./dist).Path
+          $server = Start-Process -FilePath 'python' `
+            -ArgumentList '-m', 'http.server', '8765', '--directory', $dist `
+            -WorkingDirectory $dist -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              try {
+                Invoke-WebRequest -Uri 'http://127.0.0.1:8765/apexnova.mjs.sha256' -UseBasicParsing | Out-Null
+                $ready = $true
+                break
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $ready) { throw 'artifact server did not become ready' }
+
+            $env:APEXNOVA_ASSET_URL = 'http://127.0.0.1:8765/apexnova.mjs'
+            $env:APEXNOVA_HOME = Join-Path $env:RUNNER_TEMP 'apexnova-home'
+            $env:APEXNOVA_BIN = Join-Path $env:RUNNER_TEMP 'apexnova-bin'
+            # A separate process so the script's own exit code is what we assert on.
+            & pwsh -NoProfile -File ./scripts/install.ps1
+            if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
+          } finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      # install.ps1 used to swallow every failure and still exit 0 under `iex`.
+      - name: Installer reports failure with a non-zero exit code
+        run: |
+          # Port 1 refuses the connection, so the failure needs no server.
+          $env:APEXNOVA_ASSET_URL = 'http://127.0.0.1:1/apexnova.mjs'
+          $env:APEXNOVA_HOME = Join-Path $env:RUNNER_TEMP 'apexnova-fail'
+          $env:APEXNOVA_BIN = Join-Path $env:RUNNER_TEMP 'apexnova-fail-bin'
+          & pwsh -NoProfile -File ./scripts/install.ps1
+          if ($LASTEXITCODE -eq 0) { throw 'a failed install must not exit 0' }
+          Write-Host "failed install exited $LASTEXITCODE as expected"
 
       - name: Launcher works without node on PATH
         run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/barepath"
-          ln -sf "$(command -v bash)" "$RUNNER_TEMP/barepath/bash"
-          ln -sf "$(command -v env)" "$RUNNER_TEMP/barepath/env"
-          if env -i PATH="$RUNNER_TEMP/barepath" bash -c 'command -v node'; then
-            echo "expected node to be absent from the stripped PATH" >&2
-            exit 1
-          fi
-          env -i PATH="$RUNNER_TEMP/barepath" HOME="$HOME" \
-            "$RUNNER_TEMP/apexnova-bin/apexnova" --version
+          $launcher = Join-Path $env:RUNNER_TEMP 'apexnova-bin\apexnova.cmd'
+          $saved = $env:PATH
+          $env:PATH = "$env:SystemRoot;$env:SystemRoot\System32"
+          try {
+            if (Get-Command node -ErrorAction SilentlyContinue) {
+              throw 'expected node to be absent from the stripped PATH'
+            }
+            $version = (& $launcher --version) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "launcher exited $LASTEXITCODE" }
+            Write-Host $version
+            if ($version -notmatch '^apexnova ') { throw "unexpected launcher output: $version" }
+          } finally { $env:PATH = $saved }
