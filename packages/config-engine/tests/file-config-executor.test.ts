@@ -357,4 +357,39 @@ describe("FileConfigExecutor", () => {
     });
     expect(await readFile(target, "utf8")).toBe(updated);
   });
+
+  it("leaves a refused rollback marked applied, not rolling-back", async () => {
+    const { configRoot, executor } = await fixture();
+    const configPath = join(configRoot, "agent.json");
+
+    const receipt = await executor.apply(
+      plan({
+        type: "write-file",
+        path: configPath,
+        mode: "create",
+        expectedContentHash: null,
+        content: '{"managed":true}\n',
+        containsSecrets: false,
+      }),
+    );
+
+    // Someone edits the file after it was applied, so removing it would discard
+    // a change this transaction never made.
+    await writeFile(configPath, '{"managed":true,"edited":true}\n', "utf8");
+
+    await expect(executor.rollback(receipt)).rejects.toMatchObject({ code: "CONFLICT" });
+
+    // Nothing was undone, so the transaction must still read as applied and the
+    // file must be untouched -- otherwise a recovery scan sees a half-undone
+    // transaction that never started.
+    const summaries = await executor.listBackups();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.state).toBe("applied");
+    expect(await readFile(configPath, "utf8")).toBe('{"managed":true,"edited":true}\n');
+
+    // And it stays retryable: undo the edit and the same rollback succeeds.
+    await writeFile(configPath, '{"managed":true}\n', "utf8");
+    await executor.rollback(receipt);
+    await expect(readFile(configPath, "utf8")).rejects.toThrow();
+  });
 });

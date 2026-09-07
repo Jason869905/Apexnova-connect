@@ -611,7 +611,15 @@ export class FileConfigExecutor implements ChangeExecutor {
     return candidate.transaction;
   }
 
-  async #rollbackEntries(entries: readonly FileRollbackEntry[]): Promise<void> {
+  /**
+   * Validates every entry before anything is written, and returns the ones that
+   * still need undoing. Throwing from here means the target files were not
+   * touched, which is what lets a refused rollback leave the transaction in the
+   * state it was actually in.
+   */
+  async #planRollback(
+    entries: readonly FileRollbackEntry[],
+  ): Promise<ReadonlySet<FileRollbackEntry>> {
     const allowedRoots = await this.#resolvedAllowedRoots();
     const pending = new Set<FileRollbackEntry>();
 
@@ -655,6 +663,17 @@ export class FileConfigExecutor implements ChangeExecutor {
       pending.add(entry);
     }
 
+    return pending;
+  }
+
+  async #rollbackEntries(entries: readonly FileRollbackEntry[]): Promise<void> {
+    await this.#applyRollback(entries, await this.#planRollback(entries));
+  }
+
+  async #applyRollback(
+    entries: readonly FileRollbackEntry[],
+    pending: ReadonlySet<FileRollbackEntry>,
+  ): Promise<void> {
     for (const entry of [...entries].reverse()) {
       if (!pending.has(entry)) continue;
       if (entry.mode === "create") {
@@ -831,11 +850,15 @@ export class FileConfigExecutor implements ChangeExecutor {
     }
 
     const transactionDirectory = await this.#transactionDirectory(transaction.transactionId);
+    // Validate first: a rollback that is going to be refused must not leave the
+    // transaction marked `rolling-back`, because nothing was rolled back and a
+    // later recovery scan would misread a still-applied transaction as half-undone.
+    const pending = await this.#planRollback(transaction.entries);
     transaction = { ...transaction, state: "rolling-back" };
     await this.#writeTransaction(transaction);
 
     try {
-      await this.#rollbackEntries(transaction.entries);
+      await this.#applyRollback(transaction.entries, pending);
       await removeTransactionDirectory(transactionDirectory);
       await syncDirectory(dirname(transactionDirectory));
     } catch (cause) {
