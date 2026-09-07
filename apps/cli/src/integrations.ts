@@ -1,4 +1,5 @@
 import type { AgentIntegration } from "@apexnova-connect/integration-sdk";
+import { codexIntegration } from "@apexnova-connect/integration-codex";
 import { openCodeIntegration } from "@apexnova-connect/integration-opencode";
 
 /**
@@ -7,5 +8,5 @@ import { openCodeIntegration } from "@apexnova-connect/integration-opencode";
  * product.
  */
 export function defaultAgentIntegrations(): readonly AgentIntegration[] {
-  return [openCodeIntegration];
+  return [openCodeIntegration, codexIntegration];
 }

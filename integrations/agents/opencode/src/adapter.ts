@@ -4,6 +4,7 @@ import { win32 } from "node:path";
 
 import {
   AgentIntegrationError,
+  protocolRootUrl,
   type AgentInspection,
   type AgentIntegration,
   type ApplyReceipt,
@@ -41,24 +42,6 @@ const SUPPORTED_PROTOCOLS: readonly ProtocolId[] = [
   "openai-responses",
   "openai-chat-completions",
 ];
-
-/**
- * Turns a Hub protocol endpoint into the provider root OpenCode expects: the
- * Vercel AI SDK appends the operation path itself.
- */
-function providerBaseUrl(endpoint: string, protocol: ProtocolId): string {
-  const url = new URL(endpoint);
-  const suffix =
-    protocol === "openai-responses"
-      ? "/responses"
-      : protocol === "openai-chat-completions"
-        ? "/chat/completions"
-        : "";
-  if (suffix && url.pathname.endsWith(suffix)) {
-    url.pathname = url.pathname.slice(0, -suffix.length);
-  }
-  return url.toString().replace(/\/$/, "");
-}
 
 function requireOpenCodeProtocol(protocol: ProtocolId): OpenCodeProtocol {
   if (protocol === "openai-responses" || protocol === "openai-chat-completions") {
@@ -181,7 +164,7 @@ export function createOpenCodeIntegration(
         createdAt: intent.createdAt,
         configPath: detection.configPath,
         existingContent,
-        hubBaseUrl: providerBaseUrl(intent.baseUrl, intent.protocol),
+        hubBaseUrl: protocolRootUrl(intent.baseUrl, intent.protocol),
         ...(intent.allowInsecureLoopback === undefined
           ? {}
           : { allowInsecureLoopback: intent.allowInsecureLoopback }),

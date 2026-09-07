@@ -7,6 +7,8 @@
   "include": [
     "apps/cli/src/**/*.ts",
     "apps/cli/tests/**/*.ts",
+    "integrations/agents/codex/src/**/*.ts",
+    "integrations/agents/codex/tests/**/*.ts",
     "integrations/agents/opencode/src/**/*.ts",
     "integrations/agents/opencode/tests/**/*.ts",
     "packages/core/src/**/*.ts",

@@ -70,6 +70,8 @@ export type {
   ModelLimits,
 } from "./agent.js";
 
+export { assertSafeBaseUrl, protocolRootUrl } from "./protocol-url.js";
+
 export { probeExecutableVersion, toPlatform } from "./process-probe.js";
 
 export type {

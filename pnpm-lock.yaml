@@ -35,6 +35,9 @@ importers:
       '@apexnova-connect/hub-client':
         specifier: workspace:*
         version: link:../../packages/hub-client
+      '@apexnova-connect/integration-codex':
+        specifier: workspace:*
+        version: link:../../integrations/agents/codex
       '@apexnova-connect/integration-opencode':
         specifier: workspace:*
         version: link:../../integrations/agents/opencode
@@ -44,6 +47,19 @@ importers:
       '@inquirer/prompts':
         specifier: ^7.0.0
         version: 7.10.1(@types/node@24.13.3)
+
+  integrations/agents/codex:
+    dependencies:
+      '@apexnova-connect/integration-sdk':
+        specifier: workspace:*
+        version: link:../../../sdks/typescript
+      smol-toml:
+        specifier: 1.8.0
+        version: 1.8.0
+    devDependencies:
+      '@apexnova-connect/integration-testing':
+        specifier: workspace:*
+        version: link:../../../packages/integration-testing
 
   integrations/agents/opencode:
     dependencies:
@@ -867,6 +883,10 @@ packages:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
 
+  smol-toml@1.8.0:
+    resolution: {integrity: sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ==}
+    engines: {node: '>= 18'}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
@@ -1567,6 +1587,8 @@ snapshots:
   siginfo@2.0.0: {}
 
   signal-exit@4.1.0: {}
+
+  smol-toml@1.8.0: {}
 
   source-map-js@1.2.1: {}
 
