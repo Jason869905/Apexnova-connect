@@ -47,6 +47,20 @@
 6. Windows/Linux 真实环境验收；
 7. OpenCode Integration 从 `planned` 升为 `experimental`。
 
+## M2 现网验收记录（2026-09-07，Windows 11 + Node v24.16.0，`api.apexnova-consulting.com`）
+
+用发布产物（`dist/apexnova.mjs`，内置生产 Hub 地址）在 Windows 侧完成。三个 Agent 各自跑完整生命周期，结束后全部恢复到连接前状态，配置文件逐字节一致。
+
+- `[passed]` 凭证后端实测：`doctor` 的 credential-backend 检查真实写入探针值、读回、删除，Windows Credential Manager 通过；
+- `[passed]` 目录：46 个 deployment，文本类全部同时暴露 `openai-responses` / `openai-chat` / `anthropic-messages`；
+- `[passed]` **OpenCode 1.18.29**：`connect --dry-run` → `connect --yes` → 配置级 `verify` → `verify --live --yes`（请求 `c7c9c4d9-f10a-461e-9382-3e9fd92edb45`，9 input / 23 output，实扣 `0.000008 USD`）→ `switch` 到 glm-5.2 → 逆序 `restore` 两次；乱序 restore 被 `RESTORE_ORDER_CONFLICT` 拒绝，switch 的恢复重新签发了上一目标的凭据；
+- `[passed]` **Codex 0.147.0**：`connect --yes` → `verify --live --yes`（请求 `1c7aa4e9-8d3c-47d4-9d8d-f25d30948295`，实扣 `0.000007 USD`）→ `restore`。写入内容与 dry-run 预览逐字节一致；3351 字节、90 行的用户 `config.toml` 只多出顶层两行与 `[model_providers.apexnova]` 一段，restore 后与连接前完全一致（`model = "gpt-5.6-sol"` 复原）；
+- `[passed]` **Claude Code 2.1.233**：首次真实走通 `anthropic-messages`——runtime credential 按该协议签发，`/anthropic/v1/messages` 调用成功（请求 `cf0d50b0-655a-4372-a596-2322709e09b2`，实扣 `0.000007 USD`）。5958 字节、225 行的用户 `settings.json` 只多出一个 `env` 块；
+- `[passed]` Claude Code 两种凭据模式：默认注入模式，以及 `--api-key-helper`（写入指向本 CLI 的 `apiKeyHelper`，`credential print` 输出 48 字符单行、无任何多余内容，符合 Claude Code 对 helper 的要求）；再次以默认模式 `connect` 时，自己写的 `apiKeyHelper` 被删除、标记回到 `managed`；逆序 restore 三次后文件逐字节还原；
+- `[passed]` 计费对账：三次真实推理合计 `0.000022 USD`（余额 60.313920 → 60.313898），无残留 hold；结束后 `doctor` 全项 pass。
+
+未覆盖：Hermes Agent（无 Windows 版，需在 WSL 起 keyring 后单独验收）、macOS 全部流程、Linux/WSL 的凭证与恢复流程（该会话没有可用的 Secret Service）。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：
