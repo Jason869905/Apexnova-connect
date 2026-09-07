@@ -13,12 +13,14 @@ import {
   toInspectionDocument,
   validateDetectionDocument,
   validateInspectionDocument,
+  toPlatform,
   validateIntegrationManifest,
   type AgentIntegration,
   type AvailableDetection,
   type ConnectionIntent,
   type IntegrationContext,
   type InspectionStatus,
+  type Platform,
 } from "@apexnova-connect/integration-sdk";
 
 /** A configuration the integration must refuse instead of rewriting. */
@@ -57,6 +59,34 @@ export interface IntegrationContractFixtures {
 
 const SECRET = "contract-suite-secret-value";
 
+/**
+ * The platform to exercise an integration on. Running it where its manifest
+ * excludes the platform tests the refusal, not the integration: Hermes has no
+ * Windows build, so on a Windows runner it would only ever prove that it says
+ * so.
+ */
+export function contractPlatform(
+  integration: AgentIntegration,
+  currentPlatform: Platform | undefined = toPlatform(process.platform),
+): Platform {
+  const supported = integration.manifest.compatibility.platforms;
+  if (currentPlatform && supported.includes(currentPlatform)) return currentPlatform;
+  const fallback = supported[0];
+  if (!fallback) {
+    throw new TypeError(`${integration.manifest.id} declares no supported platforms.`);
+  }
+  return fallback;
+}
+
+/**
+ * Windows executable resolution walks `PATH`, so an environment without one is
+ * not a machine any integration has to cope with -- and an empty `PATH` makes
+ * that loop run zero times, which no `pathExists` fixture can compensate for.
+ */
+export function contractEnvironment(platform: Platform): Record<string, string | undefined> {
+  return platform === "windows" ? { PATH: "C:\\apexnova-contract-bin" } : {};
+}
+
 async function removeRoot(root: string): Promise<void> {
   const resolvedTemp = await realpath(tmpdir());
   if (
@@ -88,11 +118,12 @@ export function describeIntegrationContract(
       root = await mkdtemp(join(tmpdir(), "apexnova-contract-"));
       configPath = join(root, "config", fixtures.configFileName);
       await mkdir(dirname(configPath), { recursive: true });
+      const platform = contractPlatform(integration);
       context = {
-        platform: process.platform === "win32" ? "windows" : "linux",
+        platform,
         workingDirectory: root,
         homeDirectory: join(root, "home"),
-        environment: {},
+        environment: contractEnvironment(platform),
         configPath,
       };
     });
@@ -144,7 +175,7 @@ export function describeIntegrationContract(
         platform: context.platform,
         workingDirectory: join(root, "empty"),
         homeDirectory: join(root, "empty-home"),
-        environment: {},
+        environment: contractEnvironment(context.platform),
       };
       await mkdir(bare.workingDirectory, { recursive: true });
       const detection = await integration.detect(bare);
