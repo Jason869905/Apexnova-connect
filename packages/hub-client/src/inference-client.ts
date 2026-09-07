@@ -8,7 +8,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 export interface VerifyHubInferenceOptions {
   readonly endpoint: string;
-  readonly protocol: "openai-responses" | "openai-chat";
+  readonly protocol: "openai-responses" | "openai-chat" | "anthropic-messages";
   readonly model: string;
   readonly deploymentId: string;
   readonly runtimeCredential: SecretValue;
@@ -43,7 +43,12 @@ function validateOptions(options: VerifyHubInferenceOptions): URL {
   ) {
     throw new HubClientError("INVALID_CONFIG", "Hub inference endpoint must be HTTPS without credentials, query, or fragment.");
   }
-  const expectedSuffix = options.protocol === "openai-responses" ? "/v1/responses" : "/v1/chat/completions";
+  const expectedSuffix =
+    options.protocol === "openai-responses"
+      ? "/v1/responses"
+      : options.protocol === "anthropic-messages"
+        ? "/v1/messages"
+        : "/v1/chat/completions";
   if (!endpoint.pathname.endsWith(expectedSuffix)) {
     throw new HubClientError("INVALID_CONFIG", `Hub inference endpoint does not match ${options.protocol}.`);
   }
@@ -63,9 +68,18 @@ function validateOptions(options: VerifyHubInferenceOptions): URL {
 }
 
 function requestBody(protocol: VerifyHubInferenceOptions["protocol"], model: string): unknown {
-  return protocol === "openai-responses"
-    ? { model, input: "Reply with exactly OK.", max_output_tokens: 8, stream: false, store: false }
-    : { model, messages: [{ role: "user", content: "Reply with exactly OK." }], max_tokens: 8, stream: false };
+  if (protocol === "openai-responses") {
+    return { model, input: "Reply with exactly OK.", max_output_tokens: 8, stream: false, store: false };
+  }
+  if (protocol === "anthropic-messages") {
+    return { model, max_tokens: 8, messages: [{ role: "user", content: "Reply with exactly OK." }], stream: false };
+  }
+  return { model, messages: [{ role: "user", content: "Reply with exactly OK." }], max_tokens: 8, stream: false };
+}
+
+/** The Anthropic Messages API requires its version header on every request. */
+function protocolHeaders(protocol: VerifyHubInferenceOptions["protocol"]): Record<string, string> {
+  return protocol === "anthropic-messages" ? { "anthropic-version": "2023-06-01" } : {};
 }
 
 function errorCode(status: number, apiCode: string | undefined) {
@@ -89,6 +103,7 @@ export async function verifyHubInference(options: VerifyHubInferenceOptions): Pr
         accept: "application/json",
         authorization: `Bearer ${options.runtimeCredential.reveal()}`,
         "content-type": "application/json",
+        ...protocolHeaders(options.protocol),
       },
       body: JSON.stringify(requestBody(options.protocol, options.model)),
       redirect: "error",
@@ -130,6 +145,10 @@ export async function verifyHubInference(options: VerifyHubInferenceOptions): Pr
   if (options.protocol === "openai-responses") {
     if (typeof root.id !== "string" || !Array.isArray(root.output)) {
       throw new HubClientError("INVALID_RESPONSE", "Hub Responses API verification payload is invalid.");
+    }
+  } else if (options.protocol === "anthropic-messages") {
+    if (typeof root.id !== "string" || root.type !== "message" || !Array.isArray(root.content)) {
+      throw new HubClientError("INVALID_RESPONSE", "Hub Anthropic Messages verification payload is invalid.");
     }
   } else if (typeof root.id !== "string" || !Array.isArray(root.choices)) {
     throw new HubClientError("INVALID_RESPONSE", "Hub Chat Completions verification payload is invalid.");

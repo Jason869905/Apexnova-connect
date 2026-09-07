@@ -49,6 +49,48 @@ describe("verifyHubInference", () => {
     expect(JSON.stringify(result)).not.toContain("runtime-secret");
   });
 
+  it("verifies an Anthropic Messages request with its version header", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(JSON.stringify({
+      id: "msg_123",
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "OK" }],
+    }), { status: 200, headers }));
+
+    const result = await verifyHubInference({
+      endpoint: "https://api.example.test/anthropic/v1/messages",
+      protocol: "anthropic-messages",
+      model: "nova",
+      deploymentId: "deployment.nova",
+      runtimeCredential: SecretValue.from("runtime-secret"),
+      fetch,
+    });
+
+    expect(result.protocol).toBe("anthropic-messages");
+    const request = fetch.mock.calls[0]?.[1];
+    expect((request?.headers as Record<string, string>)["anthropic-version"]).toBe("2023-06-01");
+    expect(JSON.parse(String(request?.body))).toEqual({
+      model: "nova",
+      max_tokens: 8,
+      messages: [{ role: "user", content: "Reply with exactly OK." }],
+      stream: false,
+    });
+    expect(JSON.stringify(result)).not.toContain("runtime-secret");
+  });
+
+  it("rejects an Anthropic endpoint that is not the messages path", async () => {
+    await expect(
+      verifyHubInference({
+        endpoint: "https://api.example.test/v1/responses",
+        protocol: "anthropic-messages",
+        model: "nova",
+        deploymentId: "deployment.nova",
+        runtimeCredential: SecretValue.from("runtime-secret"),
+        fetch: vi.fn<typeof globalThis.fetch>(),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_CONFIG" });
+  });
+
   it("supports Chat Completions and explicit .localhost aliasing", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(JSON.stringify({
       id: "chatcmpl_123",

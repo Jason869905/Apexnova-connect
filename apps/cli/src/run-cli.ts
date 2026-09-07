@@ -1056,7 +1056,11 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   if (binding.expiresAt !== undefined && Date.parse(binding.expiresAt) <= Date.now()) {
     throw new CliError({ code: "RUNTIME_CREDENTIAL_EXPIRED", message: "The stored runtime credential has expired; reconnect before live verification.", exitCode: EXIT_CODES.authentication });
   }
-  if (binding.protocol !== "openai-responses" && binding.protocol !== "openai-chat") {
+  if (
+    binding.protocol !== "openai-responses" &&
+    binding.protocol !== "openai-chat" &&
+    binding.protocol !== "anthropic-messages"
+  ) {
     throw new CliError({ code: "PROTOCOL_NOT_SUPPORTED", message: `Live verification does not support ${binding.protocol}.`, exitCode: EXIT_CODES.unavailable });
   }
   const bindingProtocol = binding.protocol;

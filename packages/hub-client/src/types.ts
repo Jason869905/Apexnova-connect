@@ -115,7 +115,7 @@ export interface HubPricingEstimate {
 
 export interface HubInferenceVerification {
   readonly status: number;
-  readonly protocol: "openai-responses" | "openai-chat";
+  readonly protocol: "openai-responses" | "openai-chat" | "anthropic-messages";
   readonly requestId: string;
   readonly providerId: string;
   readonly requestedModel: string;

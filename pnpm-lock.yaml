@@ -35,6 +35,9 @@ importers:
       '@apexnova-connect/hub-client':
         specifier: workspace:*
         version: link:../../packages/hub-client
+      '@apexnova-connect/integration-claude-code':
+        specifier: workspace:*
+        version: link:../../integrations/agents/claude-code
       '@apexnova-connect/integration-codex':
         specifier: workspace:*
         version: link:../../integrations/agents/codex
@@ -47,6 +50,19 @@ importers:
       '@inquirer/prompts':
         specifier: ^7.0.0
         version: 7.10.1(@types/node@24.13.3)
+
+  integrations/agents/claude-code:
+    dependencies:
+      '@apexnova-connect/integration-sdk':
+        specifier: workspace:*
+        version: link:../../../sdks/typescript
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
+    devDependencies:
+      '@apexnova-connect/integration-testing':
+        specifier: workspace:*
+        version: link:../../../packages/integration-testing
 
   integrations/agents/codex:
     dependencies:

@@ -174,7 +174,7 @@ export function describeIntegrationContract(
       });
     }
 
-    it("plans one write that names the credential variable and carries no secret", async () => {
+    it("plans one write that carries no secret", async () => {
       const detection = await availableDetection();
       const plan = await integration.plan(
         context,
@@ -190,7 +190,6 @@ export function describeIntegrationContract(
       expect(operation.path).toBe(configPath);
       expect(operation.mode).toBe("create");
       expect(operation.containsSecrets).toBe(false);
-      expect(operation.content).toContain(fixtures.intent.apiKeyEnvironmentVariable);
       expect(JSON.stringify(plan)).not.toContain(SECRET);
     });
 
@@ -274,6 +273,12 @@ export function describeIntegrationContract(
       const inspection = await integration.inspect(context, await availableDetection());
       expect(inspection.status).toBe("configured");
       expect(inspection.managed).toBe(true);
+      // However the product refers to its credential -- a placeholder in the
+      // file or an injected variable -- inspection has to name the variable and
+      // never the value.
+      expect(inspection.connection?.environmentVariables).toContain(
+        integration.credentialEnvironmentVariable,
+      );
       expect(JSON.stringify(inspection)).not.toContain(SECRET);
 
       await executor.rollback(result.receipt);
