@@ -129,7 +129,13 @@ export async function probeExecutableVersion(
         options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       )))();
 
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  // A command that failed prints whatever it likes -- a broken Codex install
+  // emits a Node.js crash banner, whose "Node.js v22.23.1" would otherwise be
+  // recorded as the product version and then checked against the manifest
+  // range. An untrustworthy output yields no version at all.
+  const output = result.error
+    ? ""
+    : `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   const version = output.match(SEMANTIC_VERSION)?.[1];
   const evidence: string[] = [];
   const warnings: string[] = [];

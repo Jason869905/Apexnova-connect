@@ -26,6 +26,24 @@ describe("probeExecutableVersion", () => {
     expect(await version("tool v2.0.0-rc.1\n")).toBe("2.0.0-rc.1");
   });
 
+  it("records no version when the version command itself failed", async () => {
+    const probe = await probeExecutableVersion({
+      executable: "example",
+      displayName: "Example",
+      platform: "linux",
+      // A broken npm install prints a Node crash banner rather than its version.
+      run: async () => ({
+        found: true,
+        stderr: "Error: Missing optional dependency\n\nNode.js v22.23.1\n",
+        error: "Command failed",
+      }),
+    });
+
+    expect(probe.found).toBe(true);
+    expect(probe.version).toBeUndefined();
+    expect(probe.warnings[0]).toContain("did not complete successfully");
+  });
+
   it("reports a missing executable as a normal result", async () => {
     const probe = await probeExecutableVersion({
       executable: "example",
