@@ -1,6 +1,6 @@
 # OpenCode + Apexnova AI Hub 使用指南
 
-> 适用版本：apexnova-connect v0.2.0 · OpenCode ≥1.18.29 <2.0.0
+> 适用版本：apexnova-connect v0.2.1 · OpenCode ≥1.18.29 <2.0.0
 > 平台：Windows、Linux
 
 > [!NOTE]
@@ -48,7 +48,7 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 
 脚本会校验产物 sha256，装到 `~/.apexnova-connect`，并在 `~/.local/bin` 生成 `apexnova` 启动器。若该目录不在 PATH 中，脚本会打印需要追加的一行。
 
-钉定版本用 `APEXNOVA_VERSION=v0.2.0`；其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
+钉定版本用 `APEXNOVA_VERSION=v0.2.1`；其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
 
 ### 从源码构建
 
