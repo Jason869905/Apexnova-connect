@@ -62,3 +62,12 @@ export type {
   SubjectVerdict,
   VerdictOptions,
 } from "./verdict.js";
+
+export { runCapabilitySuite } from "./suite.js";
+
+export type {
+  CapabilityOutcomeDetail,
+  CapabilitySuiteOptions,
+  CapabilitySuiteResult,
+  SuiteProtocol,
+} from "./suite.js";

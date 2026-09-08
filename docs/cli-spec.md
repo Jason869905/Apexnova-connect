@@ -271,6 +271,27 @@ apexnova restore <transaction-id>
 
 恢复一次 `switch` 时，凭据库只保存上一个 Deployment/协议及事务链，不保存已撤销的旧 secret。CLI 会先为上一个目标签发并通过控制面确认一枚新 runtime credential，再回滚配置、原子保存新绑定并撤销当前凭据。恢复最初的 `connect` 则回到连接前配置、撤销当前凭据并删除本地绑定。若新凭据签发或验证失败，文件保持不变；若配置已经恢复但绑定保存失败，CLI 撤销相关凭据并进入安全断开状态。
 
+### `apexnova compatibility run <agent>`
+
+对一个 Deployment 运行首批能力测试套件，产出一条不可变的本地 Evidence。**会真实计费。**
+
+```text
+apexnova compatibility run opencode --deployment <id>
+apexnova compatibility run opencode --deployment <id> --yes
+apexnova compatibility run opencode --deployment <id> --budget 0.20 --yes
+```
+
+一次运行发七个请求，其中五个进入推理面计费（另外两个是被拒的无效凭据与无效请求）。流程：
+
+1. 探测本机 Agent 版本——Evidence 必须写明它是对哪个版本采集的，取不到版本就拒绝运行；
+2. 向 Hub 取估价。估价高于本地上限（默认 `0.05`，用 `--budget` 显式抬高）时返回 `BUDGET_EXCEEDED` 并且不发任何请求；
+3. 没有 `--yes` 时返回 `APPROVAL_REQUIRED`，附估价、Deployment、协议和将测的能力清单，不签发凭据、不发请求；
+4. 签发只作用于该 Deployment 与协议的 runtime credential，跑完（无论成败）立即撤销；
+5. 按 requestId 向 Hub 核对真实扣费，未结算的请求以警告列出；
+6. 写入 Evidence 并给出当前 Verdict。
+
+首批支持 `openai-responses` 与 `anthropic-messages`；其他协议返回 `PROTOCOL_NOT_SUPPORTED`。任何一项能力失败都是 Evidence 里的一条结论，不是命令失败。
+
 ### `apexnova compatibility explain [agent]`
 
 只读地解释本地已采集的 Compatibility Evidence。不调用 Hub，不产生计费。

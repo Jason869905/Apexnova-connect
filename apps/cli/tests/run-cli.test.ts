@@ -12,6 +12,7 @@ import {
   CAPABILITY_DEFINITIONS,
   FileEvidenceStore,
   createEvidence,
+  type CapabilitySuiteResult,
   type CapabilitySupport,
   type EvidenceSubject,
 } from "@apexnova-connect/capabilities";
@@ -1184,12 +1185,164 @@ describe("CLI", () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-usage-"));
     const capture = captureIo();
 
-    const result = await runCli(["compatibility", "run", "opencode", "--json"], {
+    const result = await runCli(["compatibility", "list", "--json"], {
       ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
       io: capture.io,
     });
 
     expect(result.exitCode).toBe(EXIT_CODES.usage);
     expect(JSON.parse(capture.stdout()).error.code).toBe("INVALID_ARGUMENT");
+  });
+
+  function suiteResult(overrides: Readonly<Record<string, CapabilitySupport>> = {}): CapabilitySuiteResult {
+    return {
+      suite: { id: "apexnova.capability-suite", version: "0.1.0" },
+      outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({
+        capabilityId: definition.id,
+        support: overrides[definition.id] ?? "supported",
+        detail: "probe answered as expected",
+        requestIds: ["req_capability_1"],
+      })),
+      requestIds: ["req_capability_1", "req_capability_2"],
+      billableRequests: 5,
+    };
+  }
+
+  function runDependencies(root: string, overrides: Record<string, unknown> = {}) {
+    return {
+      registry: registryWith({ detect: async () => installed }),
+      platform: "win32" as const,
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+      now: () => new Date("2026-09-08T10:00:00.000Z"),
+      createRequestId: () => "local_compat_run",
+      ...overrides,
+    };
+  }
+
+  it("shows the estimate and sends nothing until the run is approved", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-run-approval-"));
+    const suite = vi.fn(async () => suiteResult());
+    const createRuntimeCredential = vi.fn(mockHub().createRuntimeCredential);
+    const capture = captureIo();
+
+    const result = await runCli(
+      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--json"],
+      { ...runDependencies(root), io: capture.io, hubService: mockHub({ createRuntimeCredential }), runCapabilitySuite: suite },
+    );
+
+    expect(result.exitCode).toBe(EXIT_CODES.permission);
+    const output = JSON.parse(capture.stdout());
+    expect(output.error.code).toBe("APPROVAL_REQUIRED");
+    expect(output.error.details.estimate.amount).toBe("0.000060");
+    expect(output.error.details.capabilities).toHaveLength(CAPABILITY_DEFINITIONS.length);
+    expect(suite).not.toHaveBeenCalled();
+    expect(createRuntimeCredential).not.toHaveBeenCalled();
+  });
+
+  it("refuses a run whose estimate is over the local ceiling", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-run-budget-"));
+    const suite = vi.fn(async () => suiteResult());
+    const expensive = mockHub({
+      estimatePricing: async () => ({
+        deploymentId: "deployment.nova", model: "nova", currency: "USD", billingMode: "token",
+        listAmount: "0.900000", discountRate: "0", amount: "0.900000",
+        priceVersion: "2026-09-05T10:00:00Z", estimateOnly: true,
+      }),
+    });
+    const capture = captureIo();
+
+    const refused = await runCli(
+      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      { ...runDependencies(root), io: capture.io, hubService: expensive, runCapabilitySuite: suite },
+    );
+
+    expect(refused.exitCode).toBe(EXIT_CODES.billing);
+    expect(JSON.parse(capture.stdout()).error.code).toBe("BUDGET_EXCEEDED");
+    expect(suite).not.toHaveBeenCalled();
+
+    // The ceiling is a guard, not a wall: raising it deliberately lets the run through.
+    const raisedCapture = captureIo();
+    const raised = await runCli(
+      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--budget", "1", "--yes", "--json"],
+      { ...runDependencies(root), io: raisedCapture.io, hubService: expensive, runCapabilitySuite: suite },
+    );
+
+    expect(raised.exitCode).toBe(EXIT_CODES.success);
+    expect(suite).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the suite on a scoped credential, revokes it, reconciles the cost and stores the evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-run-"));
+    const suite = vi.fn(async () => suiteResult({ "protocol.cancellation": "partial" }));
+    const revoke = vi.fn(async () => undefined);
+    const createRuntimeCredential = vi.fn(mockHub().createRuntimeCredential);
+    const usage: HubCommandService["usage"] = async (_profile, requestId) => ({
+      id: `usage_${requestId}`,
+      requestId,
+      at: "2026-09-08T10:00:00.000Z",
+      status: "success",
+      resolvedModel: "nova",
+      resolvedDeploymentId: "deployment.nova",
+      source: "capability-suite",
+      usage: { inputTokens: 17, outputTokens: 70 },
+      currency: "USD",
+      amount: "0.000100",
+    });
+    const capture = captureIo();
+
+    const result = await runCli(
+      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      {
+        ...runDependencies(root),
+        io: capture.io,
+        hubService: mockHub({ createRuntimeCredential, revokeRuntimeCredential: revoke, usage }),
+        runCapabilitySuite: suite,
+      },
+    );
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data).toMatchObject({
+      verdict: "partial",
+      billed: { amount: "0.000200", currency: "USD" },
+      requestIds: ["req_capability_1", "req_capability_2"],
+      subject: { agentVersion: "1.18.29", deploymentId: "deployment.nova", protocol: "openai-responses" },
+    });
+
+    // The credential exists only for the run.
+    expect(createRuntimeCredential).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledWith("default", "rtc_1", expect.any(AbortSignal));
+
+    // And the finding is on disk, which is what explain reads next.
+    const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
+    const stored = await store.list();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.id).toBe(output.data.evidenceId);
+    expect(stored[0]?.result.summary).toContain("billed 0.000200 USD");
+    expect(stored[0]?.result.capabilities?.find((item) => item.capabilityId === "protocol.cancellation"))
+      .toMatchObject({ support: "partial", value: "probe answered as expected" });
+  });
+
+  it("revokes the run credential even when the suite itself fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-run-failure-"));
+    const revoke = vi.fn(async () => undefined);
+    const capture = captureIo();
+
+    const result = await runCli(
+      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      {
+        ...runDependencies(root),
+        io: capture.io,
+        hubService: mockHub({ revokeRuntimeCredential: revoke }),
+        runCapabilitySuite: async () => { throw new Error("endpoint unreachable"); },
+      },
+    );
+
+    expect(result.exitCode).not.toBe(EXIT_CODES.success);
+    expect(revoke).toHaveBeenCalledWith("default", "rtc_1", expect.any(AbortSignal));
+    const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
+    expect(await store.list()).toEqual([]);
   });
 });

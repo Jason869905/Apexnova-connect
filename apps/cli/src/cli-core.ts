@@ -9,6 +9,10 @@ import {
   type LaunchPlan,
   type Platform,
 } from "@apexnova-connect/integration-sdk";
+import type {
+  CapabilitySuiteOptions,
+  CapabilitySuiteResult,
+} from "@apexnova-connect/capabilities";
 import {
   createIntegrationRegistry,
   IntegrationRegistryError,
@@ -72,6 +76,9 @@ export interface CliDependencies {
   readonly launchAgent?: (plan: LaunchPlan) => Promise<number>;
   readonly credentialHelperCommand?: (agentId: string, profile: string) => string;
   readonly verifyHubInference?: (options: VerifyHubInferenceOptions) => Promise<HubInferenceVerification>;
+  readonly runCapabilitySuite?: (
+    options: CapabilitySuiteOptions,
+  ) => Promise<CapabilitySuiteResult>;
   readonly createRequestId?: () => string;
   readonly now?: () => Date;
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -112,6 +119,7 @@ export interface ParsedArguments {
   readonly clientId?: string;
   readonly pathPrefix?: string;
   readonly force: boolean;
+  readonly budget?: string;
 }
 
 export interface CliErrorShape {

@@ -186,6 +186,15 @@ apexnova restore <transaction-id> --yes
 
 ## 兼容性
 
+采集证据（**会真实计费**）：
+
+```bash
+apexnova compatibility run opencode --deployment glm-5.2          # 只看估价，不发请求
+apexnova compatibility run opencode --deployment glm-5.2 --yes    # 批准后真跑
+```
+
+一次运行发七个请求、其中五个计费，跑完按 requestId 与 Hub 用量对账。估价超过本地上限（默认 `0.05`）会直接拒绝，确实要跑更贵的模型时用 `--budget` 显式抬高。测试用的 runtime credential 只作用于被测 Deployment，跑完立即撤销。
+
 查看本地已采集的兼容性证据说明了什么：
 
 ```bash
@@ -198,7 +207,7 @@ apexnova compatibility explain opencode --deployment <id>
 
 过期的证据不会被删除，而是标记为 stale 并继续显示，因为它正是某项能力显示为 `unknown` 的原因。短时效的能力（流式、Tool Call）30 天过期，协议静态字段 90 天。
 
-采集证据的 `compatibility run` 还未提供，因此现在这条命令通常会告诉你尚未采集。
+还没跑过 `compatibility run` 时，这条命令会直接告诉你尚未采集。
 
 ## 超时
 

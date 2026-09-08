@@ -18,6 +18,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@apexnova-connect/credential-store": "workspace:*",
     "@apexnova-connect/schemas": "workspace:*",
     "ajv": "8.20.0"
   }

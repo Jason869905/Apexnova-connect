@@ -121,6 +121,9 @@ importers:
 
   packages/capabilities:
     dependencies:
+      '@apexnova-connect/credential-store':
+        specifier: workspace:*
+        version: link:../credential-store
       '@apexnova-connect/schemas':
         specifier: workspace:*
         version: link:../../schemas

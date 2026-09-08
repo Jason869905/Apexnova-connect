@@ -22,9 +22,13 @@ import {
   type UsageQuery,
 } from "@apexnova-connect/hub-client";
 import {
+  CAPABILITY_DEFINITIONS,
   FileEvidenceStore,
   computeVerdict,
+  createEvidence,
+  runCapabilitySuite,
   type EvidenceSubject,
+  type SuiteProtocol,
 } from "@apexnova-connect/capabilities";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
 import { CredentialStoreError, SecretValue } from "@apexnova-connect/credential-store";
@@ -80,6 +84,13 @@ import { CLI_VERSION } from "./version.js";
 
 const LIVE_VERIFY_ESTIMATE_USAGE = { inputTokens: 64, outputTokens: 256 } as const;
 
+// Five billable requests, sized from the probe bodies. Non-binding, like every
+// estimate: the requestIds the run reports are what the real cost is read from.
+const CAPABILITY_SUITE_ESTIMATE_USAGE = { inputTokens: 400, outputTokens: 700 } as const;
+
+/** A local ceiling, because Hub has no per-request spending cap yet (M1-HUB-01). */
+const CAPABILITY_SUITE_BUDGET = 0.05;
+
 const HELP = `Apexnova-connect CLI
 
 Usage:
@@ -93,6 +104,7 @@ Usage:
   apexnova switch <agent> --deployment <id> (--dry-run | --yes)
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
+  apexnova compatibility run <agent> --deployment <id> [--budget <amount>] [--yes]
   apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
   apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
@@ -110,6 +122,7 @@ Global options:
   --protocol <id>        Select or filter a protocol
   --compatible-only      Hide unavailable or unsupported deployments
   --deployment <id>      Select a public model deployment
+  --budget <amount>      Local ceiling for a billable suite run (default 0.05)
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
   --api-key-helper       Let the Agent fetch the credential itself, where it supports one
@@ -163,6 +176,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let protocol: string | undefined;
   let compatibleOnly = false;
   let deployment: string | undefined;
+  let budget: string | undefined;
   let dryRun = false;
   let list = false;
   let live = false;
@@ -267,6 +281,18 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         deployment = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--budget": {
+        budget = valueAfter(args, index, arg);
+        if (!/^[0-9]+(?:\.[0-9]+)?$/.test(budget)) {
+          throw new CliError({
+            code: "INVALID_ARGUMENT",
+            message: "--budget must be a decimal amount, such as 0.05.",
+            exitCode: EXIT_CODES.usage,
+          });
+        }
+        index += 1;
+        break;
+      }
       case "--agent":
         agent = valueAfter(args, index, arg);
         index += 1;
@@ -322,6 +348,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(protocol ? { protocol } : {}),
     compatibleOnly,
     ...(deployment ? { deployment } : {}),
+    ...(budget ? { budget } : {}),
     dryRun,
     list,
     live,
@@ -754,6 +781,213 @@ async function installedVersionOf(
   }
 }
 
+function suiteProtocol(hubProtocol: string): SuiteProtocol | undefined {
+  if (hubProtocol === "openai-responses") return "openai-responses";
+  if (hubProtocol === "anthropic-messages") return "anthropic-messages";
+  return undefined;
+}
+
+/**
+ * Runs the capability suite against one deployment and writes what it found.
+ *
+ * This is the billable half of M3: it mints a runtime credential scoped to the
+ * one deployment under test, sends the probes, revokes the credential, and
+ * reconciles every request it made against Hub usage. Nothing is sent before
+ * the estimate has been shown and approved, and a local ceiling refuses a run
+ * that would cost more than expected -- Hub has no per-request cap yet.
+ */
+async function executeCompatibilityRun(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  operands: readonly string[],
+) {
+  const agentId = operands[0];
+  if (agentId === undefined || operands.length !== 1) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility run requires exactly one agent.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const integration = resolveIntegration(agentId, dependencies);
+  const detection = requireAvailable(
+    await detectForCommand(parsed, dependencies, integration),
+    integration,
+  );
+  const agentVersion = "productVersion" in detection ? detection.productVersion : undefined;
+  if (agentVersion === undefined) {
+    throw new CliError({
+      code: "AGENT_VERSION_UNKNOWN",
+      message: `The installed ${integration.manifest.displayName} version could not be determined; evidence has to name the version it was collected against.`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+
+  const service = hubService(parsed, dependencies);
+  const signal = operationSignal(parsed);
+  const catalog = await service.catalog(parsed.profile, signal);
+  const deployment = await resolveDeployment(parsed, dependencies, integration, catalog);
+  const hubProtocol = selectProtocol(deployment, integration, parsed.protocol);
+  const protocol = suiteProtocol(hubProtocol.protocol);
+  const protocolId = toProtocolId(hubProtocol.protocol);
+  if (protocol === undefined || protocolId === undefined) {
+    throw new CliError({
+      code: "PROTOCOL_NOT_SUPPORTED",
+      message: `The first capability batch covers openai-responses and anthropic-messages; ${hubProtocol.protocol} is not in it yet.`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+
+  const estimate = await service.estimatePricing(
+    parsed.profile,
+    deployment.id,
+    CAPABILITY_SUITE_ESTIMATE_USAGE,
+    signal,
+  );
+  const ceiling = parsed.budget === undefined ? CAPABILITY_SUITE_BUDGET : Number(parsed.budget);
+  if (Number(estimate.amount) > ceiling) {
+    throw new CliError({
+      code: "BUDGET_EXCEEDED",
+      message: `Hub estimates ${estimate.amount} ${estimate.currency} for the suite, above the ${ceiling} ceiling. Raise it with --budget if that is intended.`,
+      exitCode: EXIT_CODES.billing,
+      details: { estimate, estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE, ceiling },
+    });
+  }
+  if (!parsed.yes) {
+    throw new CliError({
+      code: "APPROVAL_REQUIRED",
+      message: `The suite sends seven requests to ${deployment.id} over ${hubProtocol.protocol}, five of them billable. Hub estimates ${estimate.amount} ${estimate.currency}, which is not a spending cap. Re-run with --yes to approve.`,
+      exitCode: EXIT_CODES.permission,
+      details: {
+        estimate,
+        estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
+        deploymentId: deployment.id,
+        protocol: hubProtocol.protocol,
+        capabilities: CAPABILITY_DEFINITIONS.map((definition) => definition.id),
+      },
+    });
+  }
+
+  const environment = dependencies.environment ?? process.env;
+  const created = await service.createRuntimeCredential(parsed.profile, {
+    name: `${integration.manifest.displayName} capability suite (${parsed.profile})`,
+    protocols: [hubProtocol.protocol],
+    publicDeploymentIds: [deployment.id],
+    expiresIn: 86_400,
+  }, signal);
+
+  let suiteResult;
+  try {
+    suiteResult = await (dependencies.runCapabilitySuite ?? runCapabilitySuite)({
+      endpoint: hubProtocol.baseUrl,
+      protocol,
+      model: deployment.inferenceAlias,
+      deploymentId: deployment.id,
+      credential: created.secret,
+      requestTimeoutMs: parsed.timeoutSeconds * 1_000,
+      allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
+      signal,
+    });
+  } finally {
+    // The credential exists only for this run, whatever the run found.
+    await service
+      .revokeRuntimeCredential(parsed.profile, created.credentialId, compensationSignal(parsed))
+      .catch(() => {});
+  }
+
+  const warnings: string[] = [];
+  const requestIds = [...new Set(suiteResult.requestIds)];
+  let billed = 0;
+  let currency = estimate.currency;
+  const unsettled: string[] = [];
+  for (const requestId of requestIds) {
+    try {
+      const usage = await service.usage(parsed.profile, requestId, signal);
+      if (usage) {
+        billed += Number(usage.amount);
+        currency = usage.currency;
+      } else {
+        unsettled.push(requestId);
+      }
+    } catch {
+      unsettled.push(requestId);
+    }
+  }
+  if (unsettled.length > 0) {
+    warnings.push(
+      `Hub has not settled ${unsettled.length} of ${requestIds.length} requests yet; reconcile them later with the request IDs below.`,
+    );
+  }
+
+  const supported = suiteResult.outcomes.filter((outcome) => outcome.support === "supported").length;
+  const billedAmount = billed.toFixed(6);
+  const subject: EvidenceSubject = {
+    agentId: integration.manifest.id,
+    agentVersion,
+    integrationId: integration.manifest.id,
+    integrationVersion: integration.manifest.version,
+    deploymentId: deployment.id,
+    protocol: protocolId,
+    platform: platformTag(dependencies),
+  };
+  const evidence = createEvidence({
+    sourceType: "maintainer-test",
+    subject,
+    observedAt: new Date(currentTime(dependencies)).toISOString(),
+    testSuite: {
+      id: suiteResult.suite.id,
+      version: suiteResult.suite.version,
+      environment: `${platformTag(dependencies)} node ${process.version}`,
+    },
+    outcomes: suiteResult.outcomes.map((outcome) => ({
+      capabilityId: outcome.capabilityId,
+      support: outcome.support,
+      value: outcome.detail,
+    })),
+    summary: truncateSummary(
+      `${supported}/${suiteResult.outcomes.length} supported; ${suiteResult.billableRequests} billable requests; billed ${billedAmount} ${currency}; requests ${requestIds.join(" ")}`,
+    ),
+  });
+
+  const store = evidenceStore(dependencies);
+  const stored = await store.append(evidence);
+  const verdict = computeVerdict({
+    subject,
+    evidence: await store.list({ agentId: subject.agentId }),
+    now: new Date(currentTime(dependencies)),
+  });
+
+  return {
+    data: {
+      evidenceId: stored.evidence.id,
+      subject,
+      verdict: verdict.verdict,
+      outcomes: suiteResult.outcomes,
+      estimate,
+      estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
+      billed: { amount: billedAmount, currency },
+      requestIds,
+      ...(unsettled.length > 0 ? { unsettledRequestIds: unsettled } : {}),
+    },
+    warnings,
+    human: [
+      `${integration.manifest.displayName} ${agentVersion} · ${deployment.id} · ${hubProtocol.protocol}: ${verdict.verdict}`,
+      ...suiteResult.outcomes.map(
+        (outcome) =>
+          `  ${outcome.capabilityId.padEnd(26)} ${outcome.support.padEnd(11)} ${outcome.detail}`,
+      ),
+      `Billed: ${billedAmount} ${currency} over ${requestIds.length} requests (non-binding estimate was ${estimate.amount} ${estimate.currency})`,
+      `Requests: ${requestIds.join(", ")}`,
+      `Evidence: ${stored.evidence.id}`,
+    ].join("\n"),
+  };
+}
+
+/** The schema caps a summary at 1200 characters; a long request list must not lose the record. */
+function truncateSummary(summary: string): string {
+  return summary.length <= 1_200 ? summary : `${summary.slice(0, 1_199)}…`;
+}
+
 /**
  * Reads what has been collected locally and says what it adds up to. It answers
  * from stored evidence only -- no Hub call, no billing -- so "nothing has been
@@ -775,10 +1009,11 @@ function capabilityNote(capability: {
 
 async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDependencies) {
   const [subcommand, ...rest] = parsed.operands;
+  if (subcommand === "run") return await executeCompatibilityRun(parsed, dependencies, rest);
   if (subcommand !== "explain") {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility accepts one subcommand: explain.",
+      message: "compatibility accepts two subcommands: run and explain.",
       exitCode: EXIT_CODES.usage,
     });
   }
