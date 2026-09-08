@@ -69,19 +69,29 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 
 未覆盖：macOS 全部流程（无实机，Keychain 后端只有 mock command runner 测试）；Hermes 的 `chat_completions` 模式未做真实推理。
 
-## M3 首次能力采集记录（2026-09-08，Linux/WSL2，`api.apexnova-consulting.com`）
+## M3 首批能力采集记录（2026-09-08，Linux/WSL2，`api.apexnova-consulting.com`）
 
-对 GLM-5.2（`deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw`，inference alias `glm-5.2`，`available`）跑了首批能力套件的两条协议。目录声明该 deployment 同时支持 `openai-responses`、`openai-chat` 与 `anthropic-messages`。
+首批四个 Deployment（见 [ADR 0004 修订](decisions/0004-m3-scope-and-evidence-path.md)）× 两个 Agent，共 11 轮（含两轮更正性重跑）。OpenCode 1.18.29 走 `openai-responses`，Claude Code 2.1.261 走 `anthropic-messages`。
 
-- `[passed]` **OpenCode 1.18.29 / `openai-responses`：8 项中 7 项 supported，Verdict `partial`**（Evidence `evidence.f1e9a0dd5a089281d39c6d950402eeab`）。鉴权、模型映射、非流式形状与用量、流式顺序（50 个事件，`response.created` 开头 `response.completed` 结尾）、中断、错误语义（无效请求返回 400 + 结构化错误 + requestId）、单 Tool Call（参数符合声明的 JSON Schema）全部通过；
-- `[failed]` 同一条运行里 `agent.structured-output` 不通过：请求带 `text.format.json_schema` 且 `max_output_tokens: 256`，实际返回 24 input / 495 output tokens 的散文，既不遵循 schema 也超出 max token 设定（请求 `6cd45909-cb95-49d6-a8d4-ac8325048feb`）；
-- `[failed]` **Claude Code 2.1.261 / `anthropic-messages`：Verdict `incompatible`**（Evidence `evidence.7da34dd0c2d96231718823959bfc285d`）。鉴权、模型映射、非流式、流式顺序（`message_start` → `message_stop`）、中断均通过，但**带 `tools` 的请求、带 `tool_choice` 的结构化输出请求、以及故意写坏的请求全部返回 HTTP 502**，且这三个 502 响应不带 `x-apexnova-request-id`，在 Hub 用量里也没有对应记录；
-- `[finding]` 因此**目录对该 deployment 的协议声明与真实可用并不等价**：`anthropic-messages` 可以做基础对话与流式，但 Tool Call 走不通，而无效请求得到的是 502 而不是可诊断的 4xx。这正是 M3 不采信目录声明的理由；需要 Hub 侧确认 502 来自网关翻译还是上游模型；
-- `[passed]` 计费对账：OpenCode 一轮 6 个归因请求实扣 `0.001645 USD`（含一条 400 计 0），Claude Code 一轮 3 个归因请求实扣 `0.000330 USD`，两轮合计 `0.001975 USD`，非约束估价为每轮 `0.001820 USD`；
-- `[finding]` 被客户端 abort 的长流式请求（`44c55922-3161-4620-881f-13cc514eeb98`）在 Hub 用量里**没有任何记录**。中断是否计费、如何计费需要 Hub 明确语义；
-- `[fixed]` Connect 侧缺陷：运行结束时立即对账，Hub 尚未结算，CLI 把未结算报成 `Billed: 0.000000 USD`——本地数字被当成实际费用。已修正为重试若干次后如实区分「已结算/未结算」，并在人类可读输出里点名未结算的 requestId；非 `--json` 模式下 warnings 本来就不显示，因此这条必须进正文。
+| Deployment | 目录声明 | OpenCode / `openai-responses` | Claude Code / `anthropic-messages` |
+| --- | --- | --- | --- |
+| `glm-5.2` | tool.calling | `partial`（结构化输出不通过） | `compatible` |
+| `glm-5.1` | 两项都不声明 | `partial`（结构化输出不通过） | `compatible` |
+| `deepseek-v4-pro-0813` | tool.calling + structured-output.json | `partial`（结构化输出不通过） | `compatible` |
+| `qwen3.8-flash` | tool.calling + structured-output.json | `partial`（结构化输出不通过） | `partial`（结构化输出不通过） |
 
-两轮各自的 runtime credential 只作用于该 deployment，跑完即撤销。
+以下为需要 Hub 侧处理或确认的结论：
+
+- `[finding]` **`openai-responses` 路径疑似忽略 `text.format.json_schema`：4 个 Deployment 全部不通过**，其中 `deepseek-v4-pro-0813` 与 `qwen3.8-flash` 在目录里明确声明了 `structured-output.json`。请求带 `text.format.json_schema` 且 `max_output_tokens: 256`，返回 HTTP 200 但内容是散文，未报任何字段错误——上游代理静默丢弃未知字段的典型表现。同一批模型在 `anthropic-messages` 上用 tool 机制承载 schema 则 3/4 通过，因此这不是模型能力问题；
+- `[finding]` **`qwen3.8-flash` 拒绝一切形式的强制 `tool_choice`**：`litellm.BadRequestError: OpenAIException - The tool_choice parameter does not support being set to required or object`。它自身的 Tool Call 完全正常（不强制时两条协议都通过），但 `anthropic-messages` 的结构化输出必须靠强制指定 tool 承载 schema，因此该组合不可用；
+- `[finding]` **被客户端 abort 的流式请求在 Hub 用量里永远没有记录**：11 轮里每一轮都恰好有一个请求查不到（即那条被中断的长流式）。中断请求是否计费、按什么口径计费，需要 Hub 明确语义；
+- `[finding]` **目录不暴露上游 Provider 身份**：46 个 Deployment 全部报告 `provider.apexnova-ai-hub`，`providers` 数组为空。Evidence 的 `subject` 因此只能记「Apexnova」，同一 Deployment 换了上游不会让既有 Evidence 过期；
+- `[observed]` `discountRate` 逐 Deployment 不同：`glm-5.2` 为 `0.5`，其余为 `1`；
+- `[corrected]` 首轮（17:55）`glm-5.2` 在 `anthropic-messages` 上的 Tool Call、结构化输出和无效请求全部返回 HTTP 502（无 requestId、无用量记录），当时记为该组合不可用。**同一组合在 18:12 重跑得到 `compatible`（8/8 通过）**，因此那三次 502 是瞬时故障而非该 Deployment 的属性。两条 Evidence 都保留在库中，Verdict 取较新的一条——这正是不可变记录加时间序的意义。仍需 Hub 侧确认那批 502 的来源；
+- `[fixed]` Connect 侧探针缺陷：`agent.single-tool-call` 原本发送强制 `tool_choice`，把「模型能否调用工具」测成了「端点是否支持强制指定工具」。`qwen3.8-flash` 因此被误记为不支持 Tool Call。已改为只声明工具不强制选择（Agent 真实的做法），套件版本升到 `0.2.0`，受影响的两轮已重跑更正；
+- `[fixed]` Connect 侧计费缺陷：运行结束立即对账时 Hub 尚未结算，CLI 把未结算报成 `Billed: 0.000000 USD`。已改为重试后如实区分「已结算/未结算」并点名未结算的 requestId。
+
+计费对账：当日 11 轮合计实扣 `0.008724 USD`，Hub 用量记录逐条吻合（成功请求计费，4xx/5xx 计 0，被中断的流式无记录）。每轮的 runtime credential 只作用于被测 Deployment，跑完即撤销。
 
 ## 本机 Docker 验证记录（2026-09-05）
 

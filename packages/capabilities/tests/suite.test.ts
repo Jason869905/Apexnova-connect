@@ -229,3 +229,21 @@ describe("stream event names", () => {
     expect(support(result)["protocol.streaming-order"]).toBe("supported");
   });
 });
+
+describe("probe shape", () => {
+  it("offers the tool without forcing the choice", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const recording: typeof globalThis.fetch = async (input, init) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return healthyHub("openai-responses")(input, init);
+    };
+
+    await runCapabilitySuite(options("openai-responses", recording));
+
+    // Forcing the choice tests a stronger claim than "a tool is callable", and
+    // some deployments reject the forced form outright.
+    const toolRequest = bodies.find((body) => Array.isArray(body.tools) && body.text === undefined);
+    expect(toolRequest).toBeDefined();
+    expect(toolRequest?.tool_choice).toBeUndefined();
+  });
+});

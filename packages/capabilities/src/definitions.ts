@@ -29,7 +29,7 @@ export const CAPABILITY_SUITE_ID = "apexnova.capability-suite";
  * suite changed in a way that invalidates earlier results, so verdicts stop
  * accepting evidence from an older major (see `isEvidenceLive`).
  */
-export const CAPABILITY_SUITE_VERSION = "0.1.0";
+export const CAPABILITY_SUITE_VERSION = "0.2.0";
 
 /** The M3 first batch fixed by ADR 0004: six protocol tests and two interaction tests. */
 export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [

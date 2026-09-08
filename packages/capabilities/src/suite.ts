@@ -283,11 +283,18 @@ function longerStreamBody(options: CapabilitySuiteOptions): unknown {
   };
 }
 
+/**
+ * Declares one tool and asks for it, without forcing the choice. Forcing is a
+ * stronger claim than the capability makes -- an Agent loop offers tools and
+ * lets the model decide -- and some deployments reject a forced `tool_choice`
+ * outright, which would report tool calling as broken on a model that calls
+ * tools perfectly well.
+ */
 function toolBody(options: CapabilitySuiteOptions): unknown {
   if (options.protocol === "openai-responses") {
     return {
       model: options.model,
-      input: "What is the weather in Oslo? Use the tool.",
+      input: "What is the weather in Oslo? Use the get_weather tool to answer.",
       max_output_tokens: 256,
       store: false,
       tools: [
@@ -299,13 +306,12 @@ function toolBody(options: CapabilitySuiteOptions): unknown {
           strict: true,
         },
       ],
-      tool_choice: "required",
     };
   }
   return {
     model: options.model,
     max_tokens: 256,
-    messages: [{ role: "user", content: "What is the weather in Oslo? Use the tool." }],
+    messages: [{ role: "user", content: "What is the weather in Oslo? Use the get_weather tool to answer." }],
     tools: [
       {
         name: "get_weather",
@@ -313,7 +319,6 @@ function toolBody(options: CapabilitySuiteOptions): unknown {
         input_schema: WEATHER_TOOL_SCHEMA,
       },
     ],
-    tool_choice: { type: "tool", name: "get_weather" },
   };
 }
 
@@ -343,7 +348,8 @@ function structuredBody(options: CapabilitySuiteOptions): unknown {
   }
   // Anthropic Messages has no separate structured-output mode; a tool whose
   // input schema is the target shape is the supported way, and the evidence
-  // says so rather than reporting the capability as missing.
+  // says so rather than reporting the capability as missing. Forcing the choice
+  // is inherent to that mechanism, unlike the tool-call probe above.
   return {
     model: options.model,
     max_tokens: 256,
@@ -584,7 +590,7 @@ export async function runCapabilitySuite(
     !tool.ok
       ? outcome("agent.single-tool-call", "unsupported", `HTTP ${tool.status}${tool.failure ? ` (${tool.failure})` : apiMessage(tool)}`, [tool.requestId])
       : toolArgs === undefined
-        ? outcome("agent.single-tool-call", "unsupported", "the response carried no tool call", [tool.requestId])
+        ? outcome("agent.single-tool-call", "unsupported", "the model answered without calling the offered tool", [tool.requestId])
         : typeof toolArgs.city === "string"
           ? outcome("agent.single-tool-call", "supported", "the tool was called with arguments matching the declared schema", [tool.requestId])
           : outcome("agent.single-tool-call", "partial", "a tool call came back with arguments that do not match the declared schema", [tool.requestId]),
