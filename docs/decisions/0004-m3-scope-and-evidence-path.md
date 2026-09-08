@@ -55,6 +55,25 @@ M3 要回答的问题是「能证明」：任何公开的 `compatible` 都必须
 
 8. **声明不是证据。** 现网 catalog 里几乎每个文本 Deployment 都同时声明三种协议。测试必须验证「声明」与「真实可用」是否一致；不一致时产出 `incompatible` 或 `compatible-with-limits` 的 Evidence，不允许沿用目录声明当作结论展示。
 
+## 修订（2026-09-08）：Provider 标准无法满足，首批四个 Deployment 已固定
+
+第一次按决策 3 的标准去现网目录挑选时，第一条标准就落空了。
+
+**现网 catalog 的 46 个 Deployment 全部报告同一个 `providerId`（`provider.apexnova-ai-hub`），而且 `providers` 数组是空的。** Hub 没有对外暴露上游厂商身份，所以「至少覆盖 2 个 Provider」在客户端可见的数据里根本无法验证，更无法作为挑选标准。这是 Hub 侧的缺口：同一个模型由不同上游服务时是不同的问题，Evidence 的 `subject` 却只能记下「Apexnova」，因此**同一 Deployment 换了上游，现有的 Evidence 不会因此过期**。已登记为 M3 对 Hub 的待确认项。
+
+该标准由**模型家族**替代——它是目录里唯一可观测的多样性维度。其余标准不变。首批四个：
+
+| Deployment | Inference alias | 目录声明的能力 | 挑它的理由 | 每轮估价 |
+| --- | --- | --- | --- | --- |
+| `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` | `glm-5.2` | tool.calling（**不含** structured-output.json） | M1/M2 的真实调用基线，可与历史 requestId 相互印证；已采集 | `0.001820` |
+| `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` | `qwen3.8-flash` | tool.calling + structured-output.json | 两项都声明的正向对照，且是目录里最便宜的一个 | `0.000275` |
+| `deployment.apexnova.cmt0bub5d0042139w2xobpghn` | `deepseek-v4-pro-0813` | tool.calling + structured-output.json | 第三个家族。GLM-5.2 在 `anthropic-messages` 上的 Tool Call 502 究竟来自网关还是模型，需要跨家族才能分开 | `0.001650` |
+| `deployment.apexnova.cmq4770nr0000edzis38w378a` | `glm-5.1` | 两项都**不**声明 | 负向对照：声明缺失时是否真的缺失。同家族相邻版本，顺带回答「版本变化是否改变结论」——Evidence 的过期规则正是建立在这个假设上 | `0.002641` |
+
+`anthropic-messages` 的原生路径（Claude 家族的 `claude-fable-5-1`，或 `gpt-6-astra`）没有进首批：单轮估价 `0.039000`，是其余三个加起来的七倍，而「502 是网关还是模型」用跨家族的便宜 Deployment 已经能分开。等这个问题有了答案再决定是否值得为原生路径单独付费。
+
+另外两处目录观察，一并留给 Hub 侧：`discountRate` 逐 Deployment 不同（GLM-5.2 是 `0.5`，上表其余为 `1`）；`providers` 数组为空但 Deployment 引用了 `provider.apexnova-ai-hub`。
+
 ## 后果
 
 - M3 的进度不再挂在 Hub 上。代价是本地存储与未来的 Hub Evidence 接口之间需要一次同步实现，这笔成本被接受。
