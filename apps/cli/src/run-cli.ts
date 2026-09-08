@@ -24,8 +24,10 @@ import {
 import {
   CAPABILITY_DEFINITIONS,
   FileEvidenceStore,
+  buildCompatibilityMatrix,
   computeVerdict,
   createEvidence,
+  renderCompatibilityMatrix,
   runCapabilitySuite,
   type EvidenceSubject,
   type SuiteProtocol,
@@ -106,6 +108,7 @@ Usage:
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
   apexnova compatibility run <agent> --deployment <id> [--budget <amount>] [--yes]
   apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
+  apexnova compatibility matrix [--agent <id>] [--deployment <id>] [--protocol <id>]
   apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
   apexnova inspect <agent> [--config <path>]
@@ -1002,6 +1005,36 @@ function truncateSummary(summary: string): string {
 }
 
 /**
+ * Renders the published matrix from the evidence on hand. It is generated, not
+ * maintained: a hand-written matrix is a claim nobody can trace, which is the
+ * thing M3 exists to stop. Reads the local store only, so it costs nothing.
+ */
+async function executeCompatibilityMatrix(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  operands: readonly string[],
+) {
+  if (operands.length > 0) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility matrix takes no operands; filter with --agent, --deployment or --protocol.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const evidence = await evidenceStore(dependencies).list({
+    ...(parsed.agent === undefined ? {} : { agentId: parsed.agent }),
+    ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+    ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
+  });
+  const matrix = buildCompatibilityMatrix({ evidence, now: new Date(currentTime(dependencies)) });
+  return {
+    data: matrix,
+    warnings: matrix.rows.length === 0 ? ["No evidence has been collected yet."] : ([] as readonly string[]),
+    human: renderCompatibilityMatrix(matrix),
+  };
+}
+
+/**
  * Reads what has been collected locally and says what it adds up to. It answers
  * from stored evidence only -- no Hub call, no billing -- so "nothing has been
  * collected" is an answer it gives rather than an error, and a subject whose
@@ -1023,10 +1056,11 @@ function capabilityNote(capability: {
 async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDependencies) {
   const [subcommand, ...rest] = parsed.operands;
   if (subcommand === "run") return await executeCompatibilityRun(parsed, dependencies, rest);
+  if (subcommand === "matrix") return await executeCompatibilityMatrix(parsed, dependencies, rest);
   if (subcommand !== "explain") {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility accepts two subcommands: run and explain.",
+      message: "compatibility accepts three subcommands: run, explain and matrix.",
       exitCode: EXIT_CODES.usage,
     });
   }

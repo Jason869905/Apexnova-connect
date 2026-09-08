@@ -292,6 +292,20 @@ apexnova compatibility run opencode --deployment <id> --budget 0.20 --yes
 
 首批支持 `openai-responses` 与 `anthropic-messages`；其他协议返回 `PROTOCOL_NOT_SUPPORTED`。任何一项能力失败都是 Evidence 里的一条结论，不是命令失败。
 
+### `apexnova compatibility matrix`
+
+把本地证据渲染成公开的兼容性矩阵（Markdown）。只读，不调用 Hub。
+
+```text
+apexnova compatibility matrix
+apexnova compatibility matrix --agent opencode --deployment <id> --protocol <id>
+apexnova compatibility matrix > docs/compatibility-matrix.md
+```
+
+矩阵按 subject 逐行给出 Verdict、逐项能力的支持情况和所依据的 Evidence ID——公开的结论必须能被追回到记录。厂商声明单独标为 `claimed ..., untested`，永远不计入已验证；过期证据照常显示并标注 `(expired)`，但不支撑 Verdict。
+
+[`docs/compatibility-matrix.md`](compatibility-matrix.md) 就是这条命令的产物，不应手工编辑。
+
 ### `apexnova compatibility explain [agent]`
 
 只读地解释本地已采集的 Compatibility Evidence。不调用 Hub，不产生计费。

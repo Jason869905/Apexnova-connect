@@ -1229,6 +1229,37 @@ describe("CLI", () => {
     expect(emptyCapture.stdout()).toContain("no compatibility evidence has been collected");
   });
 
+  it("renders the published matrix from the stored evidence", async () => {
+    const { root, record } = await withEvidence({ "agent.structured-output": "unsupported" });
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "matrix"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const rendered = capture.stdout();
+    expect(rendered).toContain("# Compatibility Matrix");
+    expect(rendered).toContain("apexnova.capability-suite");
+    expect(rendered).toContain("deployment.nova");
+    // A published verdict has to name the record it rests on.
+    expect(rendered).toContain(record.id);
+    expect(rendered).toContain("`partial`");
+
+    const emptyCapture = captureIo();
+    const empty = await mkdtemp(join(tmpdir(), "apexnova-cli-matrix-empty-"));
+    const emptyResult = await runCli(["compatibility", "matrix", "--json"], {
+      ...explainDependencies(empty, "2026-09-20T10:00:00.000Z"),
+      io: emptyCapture.io,
+    });
+
+    expect(emptyResult.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(emptyCapture.stdout());
+    expect(output.data.rows).toEqual([]);
+    expect(output.warnings).toContain("No evidence has been collected yet.");
+  });
+
   it("rejects a subcommand it does not have", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-usage-"));
     const capture = captureIo();

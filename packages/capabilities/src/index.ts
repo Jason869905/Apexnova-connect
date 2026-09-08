@@ -71,3 +71,11 @@ export type {
   CapabilitySuiteResult,
   SuiteProtocol,
 } from "./suite.js";
+
+export { buildCompatibilityMatrix, renderCompatibilityMatrix } from "./matrix.js";
+
+export type {
+  CompatibilityMatrix,
+  CompatibilityMatrixRow,
+  MatrixOptions,
+} from "./matrix.js";

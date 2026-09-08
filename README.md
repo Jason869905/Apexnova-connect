@@ -171,6 +171,7 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 - [分阶段路线图](docs/roadmap.md)
 - [CLI 命令与输出规范](docs/cli-spec.md)
 - [兼容性证据规范](docs/compatibility-evidence.md)
+- [兼容性矩阵](docs/compatibility-matrix.md) —— 由 `apexnova compatibility matrix` 从证据生成，Deployment ID 与模型别名的对照见 [ADR 0004](docs/decisions/0004-m3-scope-and-evidence-path.md)
 - [Apexnova AI Hub 对接需求与 API 契约](docs/apexnova-ai-hub-requirements.md)
 - [机器可读 Schema](schemas/README.md)
 

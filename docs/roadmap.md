@@ -109,7 +109,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 当前状态：进行中。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
 
-已完成：`packages/capabilities`（8 项能力定义与版本化套件、Evidence 的不可变本地存储与过期语义、Verdict 计算）、可运行的能力测试套件（`openai-responses` 与 `anthropic-messages`，离线 fixture 测试）、`compatibility run`（估价、预算上限、按 requestId 对账）与只读的 `compatibility explain`。进行中：对现网 Deployment 的首次真实采集与 4 个 Deployment 的固定。
+已完成：`packages/capabilities`（8 项能力定义与版本化套件、Evidence 的不可变本地存储与过期语义、Verdict 计算、Vendor Claimed 与 Apexnova Verified 分离）、可运行的能力测试套件（`openai-responses` 与 `anthropic-messages`，离线 fixture 测试）、`compatibility run`（估价、预算上限、按 requestId 对账）、`compatibility explain`、`compatibility matrix` 与由它生成的[兼容性矩阵](compatibility-matrix.md)；首批 4 个 Deployment 已固定并完成真实采集（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。进行中：Hub 的 Evidence 查询接口对齐与过期后的重采集流程。
 
 范围：
 

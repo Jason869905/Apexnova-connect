@@ -24,7 +24,10 @@ export interface CapabilityRequirement {
 export interface CapabilityVerdict {
   readonly capabilityId: string;
   readonly level: CapabilityLevel;
+  /** What testing established. A provider claim never lands here. */
   readonly support: CapabilitySupport;
+  /** What the provider says, kept beside the tested result and never merged into it. */
+  readonly claimed?: CapabilitySupport;
   readonly evidenceId?: string;
   readonly observedAt?: string;
   readonly expiresAt?: string;
@@ -98,14 +101,20 @@ export function computeVerdict(options: VerdictOptions): CompatibilityVerdictRes
   const candidates = options.evidence.filter((record) => sameSubject(record.subject, options.subject));
   const superseded = supersededIds(candidates);
   const observations = new Map<string, Observation>();
+  const claims = new Map<string, Observation>();
   for (const record of candidates) {
     if (superseded.has(record.id)) continue;
     const suiteCurrent = isSuiteCurrent(record);
     for (const statement of record.result.capabilities ?? []) {
       const live = suiteCurrent && isStatementLive(statement, options.now, record.expiresAt);
-      observations.set(
+      // A provider claim is not a test result. M0 is explicit: a claim with no
+      // measurement behind it leaves the capability unverified, so claims are
+      // kept in their own bucket and reported beside the tested support rather
+      // than standing in for it.
+      const target = statement.sourceType === "provider-claim" ? claims : observations;
+      target.set(
         statement.capabilityId,
-        newest(observations.get(statement.capabilityId), { statement, evidence: record, live }),
+        newest(target.get(statement.capabilityId), { statement, evidence: record, live }),
       );
     }
   }
@@ -118,11 +127,14 @@ export function computeVerdict(options: VerdictOptions): CompatibilityVerdictRes
 
   for (const [capabilityId, level] of levels) {
     const observation = observations.get(capabilityId);
+    const claim = claims.get(capabilityId);
     const support: CapabilitySupport =
       observation && observation.live ? observation.statement.support : "unknown";
     const stale = observation !== undefined && !observation.live;
     const reason = observation === undefined
-      ? "No evidence has been collected for this subject."
+      ? claim === undefined
+        ? "No evidence has been collected for this subject."
+        : `Only a provider claim exists (${claim.evidence.id}); nothing has been tested.`
       : stale
         ? `Evidence ${observation.evidence.id} expired on ${observation.statement.expiresAt ?? observation.evidence.expiresAt}.`
         : `Evidence ${observation.evidence.id} observed ${observation.statement.observedAt ?? observation.evidence.observedAt}.`;
@@ -133,6 +145,7 @@ export function computeVerdict(options: VerdictOptions): CompatibilityVerdictRes
       support,
       stale,
       reason,
+      ...(claim === undefined ? {} : { claimed: claim.statement.support }),
       ...(observation === undefined
         ? {}
         : {
@@ -155,7 +168,11 @@ export function computeVerdict(options: VerdictOptions): CompatibilityVerdictRes
     if (level === "required" && support === "unknown") {
       unknown = true;
       reasons.push(
-        stale ? `${capabilityId} is required and its evidence expired.` : `${capabilityId} is required and unverified.`,
+        stale
+          ? `${capabilityId} is required and its evidence expired.`
+          : claim !== undefined
+            ? `${capabilityId} is required and only claimed, not tested.`
+            : `${capabilityId} is required and unverified.`,
       );
       continue;
     }
