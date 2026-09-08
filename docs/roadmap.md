@@ -107,6 +107,8 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.3`。
 
+当前状态：已开启。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
+
 范围：
 
 - ~~修复 `restore` 的顺序判定来源~~（M2 遗留缺陷，已在 M3 开始前修复，见下）；
@@ -118,11 +120,11 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - CLI `compatibility explain`；
 - Hub Evidence 查询接口。
 
-首批控制规模（[ADR 0003](decisions/0003-m2-milestone-review.md) 建议进一步收窄为 2 个 Agent × 4 个 Deployment × 8 项测试）：
+首批控制规模（[ADR 0004](decisions/0004-m3-scope-and-evidence-path.md) 采纳 ADR 0003 的收窄建议，原定为 3 个 Agent、6～10 个 Deployment、8～12 项测试）：
 
-- 3 个 Agent；
-- 6～10 个 Model Deployment；
-- 8～12 项基础能力测试。
+- 2 个 Agent：OpenCode（`openai-responses`）与 Claude Code（`anthropic-messages`）；
+- 4 个 Model Deployment，按 ADR 0004 的标准在采集时固定；
+- 8 项基础能力测试：6 项 Protocol Conformance、2 项 Agent Interaction。
 
 ### 遗留缺陷：`restore` 的顺序判定来源（已修复）
 
