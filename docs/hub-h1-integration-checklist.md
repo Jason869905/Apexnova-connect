@@ -82,12 +82,12 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 
 以下为需要 Hub 侧处理或确认的结论：
 
-- `[finding]` **`openai-responses` 路径疑似忽略 `text.format.json_schema`：4 个 Deployment 全部不通过**，其中 `deepseek-v4-pro-0813` 与 `qwen3.8-flash` 在目录里明确声明了 `structured-output.json`。请求带 `text.format.json_schema` 且 `max_output_tokens: 256`，返回 HTTP 200 但内容是散文，未报任何字段错误——上游代理静默丢弃未知字段的典型表现。同一批模型在 `anthropic-messages` 上用 tool 机制承载 schema 则 3/4 通过，因此这不是模型能力问题；
+- `[finding]` **`openai-responses` 路径上 `text.format.json_schema` 不生效：4 个 Deployment 全部不通过**，其中 `deepseek-v4-pro-0813` 与 `qwen3.8-flash` 在目录里明确声明了 `structured-output.json`。请求带 `text.format.json_schema` 且 `max_output_tokens: 256`，返回 HTTP 200 但内容是散文，未报任何字段错误。同一批模型在 `anthropic-messages` 上用 tool 机制承载 schema 则 3/4 通过，因此不是模型能力问题。**Hub 已核实翻译层无误**（已翻成 `response_format.json_schema` 写进上游请求体），忽略发生在上游且上游不报错，因此「透传后确认」不可行；真问题是目录里那条能力声明的证据等级——Hub 将新增 `capabilityStatements[]`，未实测的一律标 `provider-claim`；
 - `[finding]` **`qwen3.8-flash` 拒绝一切形式的强制 `tool_choice`**：`litellm.BadRequestError: OpenAIException - The tool_choice parameter does not support being set to required or object`。它自身的 Tool Call 完全正常（不强制时两条协议都通过），但 `anthropic-messages` 的结构化输出必须靠强制指定 tool 承载 schema，因此该组合不可用；
 - `[finding]` **被客户端 abort 的流式请求计费不一致**：12 轮采集里 11 轮的那条中断请求在用量里查不到，且数小时后仍然查不到（例如 `44c55922-3161-4620-881f-13cc514eeb98`、`0d14fcf7-eb31-4c82-88d2-20ea38eb9847`）；余下 1 轮该请求正常计费。不是「一律不计费」而是**同一种请求有时计费有时消失**，需要 Hub 明确中断的计费口径；
-- `[finding]` **目录不暴露上游 Provider 身份**：46 个 Deployment 全部报告 `provider.apexnova-ai-hub`，`providers` 数组为空。Evidence 的 `subject` 因此只能记「Apexnova」，同一 Deployment 换了上游不会让既有 Evidence 过期；
+- `[finding]` **目录不暴露上游 Provider 身份**：46 个 Deployment 全部报告 `provider.apexnova-ai-hub`，公共投影不碰内部供应线路。Evidence 的 `subject` 因此只能记「Apexnova」，同一 Deployment 换了上游不会让既有 Evidence 过期。（原记录称 `providers` 数组为空，**系误记**：那是 Connect 的 `models --json` 未透出该字段，Hub 目录恒返回一条 `provider.apexnova-ai-hub`；已修 CLI 输出。Hub 将以带盐的 `implementationFingerprint` 补此洞。）
 - `[observed]` `discountRate` 逐 Deployment 不同：`glm-5.2` 为 `0.5`，其余为 `1`；
-- `[corrected]` 首轮（17:55）`glm-5.2` 在 `anthropic-messages` 上的 Tool Call、结构化输出和无效请求全部返回 HTTP 502（无 requestId、无用量记录），当时记为该组合不可用。**同一组合在 18:12 重跑得到 `compatible`（8/8 通过）**，因此那三次 502 是瞬时故障而非该 Deployment 的属性。两条 Evidence 都保留在库中，Verdict 取较新的一条——这正是不可变记录加时间序的意义。仍需 Hub 侧确认那批 502 的来源；
+- `[corrected]` 首轮（17:55）`glm-5.2` 在 `anthropic-messages` 上的 Tool Call、结构化输出和无效请求全部返回 HTTP 502（无 requestId、无用量记录），当时记为该组合不可用。**同一组合在 18:12 重跑得到 `compatible`（8/8 通过）**，因此那三次 502 是瞬时故障而非该 Deployment 的属性。两条 Evidence 都保留在库中，Verdict 取较新的一条——这正是不可变记录加时间序的意义。**归属已由 Hub 复核**：应用层所有错误早退都盖公共响应头，代码路径上不存在「返回 502 但不带 request-id」，最可能是 nginx 在 upstream 连不上时自己吐的。当时未保留响应体，无法回溯；下次复现按响应体前 200 字节判别（`{"error":…}` 为 Hub，`<html>…502 Bad Gateway` 为 nginx）。Hub 另确认「上游连不上的 502 不写用量记录」确为真缺陷，与 request-id 一并在 P1 修；
 - `[fixed]` Connect 侧探针缺陷：`agent.single-tool-call` 原本发送强制 `tool_choice`，把「模型能否调用工具」测成了「端点是否支持强制指定工具」。`qwen3.8-flash` 因此被误记为不支持 Tool Call。已改为只声明工具不强制选择（Agent 真实的做法），套件版本升到 `0.2.0`，受影响的两轮已重跑更正；
 - `[fixed]` Connect 侧计费缺陷：运行结束立即对账时 Hub 尚未结算，CLI 把未结算报成 `Billed: 0.000000 USD`。已改为重试后如实区分「已结算/未结算」并点名未结算的 requestId。
 

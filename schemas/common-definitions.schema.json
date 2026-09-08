@@ -18,9 +18,21 @@
       "format": "date-time"
     },
     "protocolId": {
+      "description": "Protocol identifiers. The Hub catalog's own vocabulary is authoritative: compatibility evidence subjects carry the value the catalog returns verbatim, so one protocol never appears under two spellings. openai-chat-completions is retained for Agent and Integration declarations, which predate the catalog vocabulary.",
       "type": "string",
       "anyOf": [
-        { "enum": ["openai-responses", "openai-chat-completions", "anthropic-messages"] },
+        {
+          "enum": [
+            "openai-responses",
+            "openai-chat",
+            "openai-chat-completions",
+            "anthropic-messages",
+            "openai-embeddings",
+            "openai-images",
+            "apexnova-media-images",
+            "apexnova-media-videos"
+          ]
+        },
         { "pattern": "^x-[a-z0-9]+(?:[.-][a-z0-9]+)+$" }
       ]
     },

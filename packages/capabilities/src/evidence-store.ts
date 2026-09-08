@@ -11,7 +11,9 @@ import {
   type EvidenceSubject,
 } from "./evidence.js";
 
-const EVIDENCE_FILE = /^(evidence\.[0-9a-f]{32})\.json$/;
+/** Both the pinned form and the one records carried before it was agreed. */
+const EVIDENCE_ID = /^(?:ev\.sha256\.[0-9a-f]{64}|evidence\.[0-9a-f]{32})$/;
+const EVIDENCE_FILE = /^((?:ev\.sha256\.[0-9a-f]{64}|evidence\.[0-9a-f]{32}))\.json$/;
 
 export interface EvidenceStoreOptions {
   readonly root: string;
@@ -65,7 +67,7 @@ export class FileEvidenceStore {
   }
 
   #pathFor(id: string): string {
-    if (!/^evidence\.[0-9a-f]{32}$/.test(id)) {
+    if (!EVIDENCE_ID.test(id)) {
       throw new CapabilityError("INVALID_EVIDENCE", `Evidence ID is invalid: ${id}.`);
     }
     return join(this.#root, `${id}.json`);

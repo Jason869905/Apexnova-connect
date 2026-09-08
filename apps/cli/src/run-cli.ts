@@ -602,6 +602,10 @@ async function executeModels(parsed: ParsedArguments, dependencies: CliDependenc
     catalogVersion: catalog.catalogVersion,
     generatedAt: catalog.generatedAt,
     expiresAt: catalog.expiresAt,
+    // The snapshot's providers were parsed but never surfaced, and reading this
+    // output as if it were the snapshot is what produced a wrong finding about
+    // the catalog. Emit what was actually returned.
+    providers: catalog.providers,
     deployments,
   };
   if (io.isInteractive && !parsed.nonInteractive && !parsed.json && deployments.length > 0) {
@@ -949,8 +953,13 @@ async function collectEvidence(
     integrationId: integration.manifest.id,
     integrationVersion: integration.manifest.version,
     deploymentId: deployment.id,
+    // The catalog's own value, verbatim: one protocol under two spellings would
+    // split a subject in two and the evidence would never accumulate.
     protocol: protocolId,
     platform: platformTag(dependencies),
+    ...(deployment.implementationFingerprint === undefined
+      ? {}
+      : { implementationFingerprint: deployment.implementationFingerprint }),
   };
   const evidence = createEvidence({
     sourceType: "maintainer-test",
@@ -1036,7 +1045,9 @@ async function executeCompatibilityRun(
   const deployment = await resolveDeployment(parsed, dependencies, integration, catalog);
   const hubProtocol = selectProtocol(deployment, integration, parsed.protocol);
   const protocol = suiteProtocol(hubProtocol.protocol);
-  const protocolId = toProtocolId(hubProtocol.protocol);
+  // toProtocolId only checks that this is a protocol the contracts know; the
+  // value recorded is the catalog's own, so a subject cannot split in two.
+  const protocolId = toProtocolId(hubProtocol.protocol) === undefined ? undefined : hubProtocol.protocol;
   if (protocol === undefined || protocolId === undefined) {
     throw new CliError({
       code: "PROTOCOL_NOT_SUPPORTED",
@@ -1229,11 +1240,15 @@ async function executeCompatibilityRefresh(
       plan.push({ ...base, skipped: `the deployment is ${deployment.availability.status}` });
       continue;
     }
-    const hubProtocol = deployment.protocols.find(
-      (item) => toProtocolId(item.protocol) === candidate.subject.protocol,
-    );
+    // Match the catalog value first; records collected before that was pinned
+    // may carry the normalized spelling instead.
+    const hubProtocol =
+      deployment.protocols.find((item) => item.protocol === candidate.subject.protocol) ??
+      deployment.protocols.find((item) => toProtocolId(item.protocol) === candidate.subject.protocol);
     const protocol = hubProtocol ? suiteProtocol(hubProtocol.protocol) : undefined;
-    const protocolId = hubProtocol ? toProtocolId(hubProtocol.protocol) : undefined;
+    const protocolId = hubProtocol && toProtocolId(hubProtocol.protocol) !== undefined
+      ? hubProtocol.protocol
+      : undefined;
     if (!hubProtocol || protocol === undefined || protocolId === undefined) {
       plan.push({ ...base, skipped: `the deployment no longer offers ${candidate.subject.protocol}` });
       continue;

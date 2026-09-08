@@ -149,6 +149,12 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
     inferenceAlias: string(item.inferenceAlias, "deployment.inferenceAlias", 512),
     aliases: item.aliases === undefined ? [] : strings(item.aliases, "deployment.aliases"),
     protocols,
+    ...(item.implementationFingerprint === undefined
+      ? {}
+      : { implementationFingerprint: string(item.implementationFingerprint, "deployment.implementationFingerprint", 128) }),
+    ...(item.implementationChangedAt === undefined
+      ? {}
+      : { implementationChangedAt: string(item.implementationChangedAt, "deployment.implementationChangedAt", 64) }),
     ...(item.limits === undefined ? {} : { limits: (() => {
       const limits = object(item.limits, "deployment.limits");
       const integer = (value: unknown, field: string) => {

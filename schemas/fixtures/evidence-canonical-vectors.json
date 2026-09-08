@@ -1,0 +1,114 @@
+{
+  "$schema": "https://schemas.apexnova.dev/connect/compatibility-evidence.schema.json",
+  "description": "Cross-language vectors for the compatibility evidence content hash. Drop id and signature, sort object keys recursively by UTF-16 code unit, leave arrays in order, serialize without whitespace, sha256 over UTF-8, lowercase hex. The id is that hex prefixed with ev.sha256.",
+  "vectors": [
+    {
+      "name": "minimal-record",
+      "note": "id and signature are dropped before hashing; keys sort recursively.",
+      "input": {
+        "id": "ev.sha256.0000000000000000000000000000000000000000000000000000000000000000",
+        "signature": "ignored",
+        "schemaVersion": "0.1",
+        "sourceType": "maintainer-test",
+        "subject": {
+          "platform": "linux-x64",
+          "protocol": "openai-responses",
+          "agentId": "opencode",
+          "agentVersion": "1.18.29",
+          "integrationId": "opencode",
+          "integrationVersion": "0.1.0",
+          "deploymentId": "deployment.nova"
+        },
+        "testSuite": {
+          "id": "apexnova.capability-suite",
+          "version": "0.2.0"
+        },
+        "result": {
+          "verdict": "verified",
+          "passed": 1,
+          "failed": 0
+        },
+        "observedAt": "2026-09-08T10:00:00.000Z",
+        "expiresAt": "2026-12-07T10:00:00.000Z"
+      },
+      "canonical": "{\"expiresAt\":\"2026-12-07T10:00:00.000Z\",\"observedAt\":\"2026-09-08T10:00:00.000Z\",\"result\":{\"failed\":0,\"passed\":1,\"verdict\":\"verified\"},\"schemaVersion\":\"0.1\",\"sourceType\":\"maintainer-test\",\"subject\":{\"agentId\":\"opencode\",\"agentVersion\":\"1.18.29\",\"deploymentId\":\"deployment.nova\",\"integrationId\":\"opencode\",\"integrationVersion\":\"0.1.0\",\"platform\":\"linux-x64\",\"protocol\":\"openai-responses\"},\"testSuite\":{\"id\":\"apexnova.capability-suite\",\"version\":\"0.2.0\"}}",
+      "sha256": "7d3e02a0c3353dce333e83c05982236e44abc72cd1a4e3e6489b3f078383857c",
+      "id": "ev.sha256.7d3e02a0c3353dce333e83c05982236e44abc72cd1a4e3e6489b3f078383857c"
+    },
+    {
+      "name": "nested-arrays-keep-order",
+      "note": "Object keys sort at every level; array order is preserved.",
+      "input": {
+        "schemaVersion": "0.1",
+        "sourceType": "maintainer-test",
+        "subject": {
+          "agentId": "a.b",
+          "agentVersion": "1",
+          "integrationId": "a.b",
+          "integrationVersion": "1",
+          "deploymentId": "d.e",
+          "protocol": "anthropic-messages",
+          "platform": "p"
+        },
+        "testSuite": {
+          "version": "0.2.0",
+          "id": "apexnova.capability-suite"
+        },
+        "result": {
+          "failed": 1,
+          "passed": 2,
+          "verdict": "partial",
+          "capabilities": [
+            {
+              "support": "supported",
+              "capabilityId": "b.second",
+              "sourceType": "maintainer-test"
+            },
+            {
+              "capabilityId": "a.first",
+              "support": "unsupported",
+              "sourceType": "maintainer-test"
+            }
+          ]
+        },
+        "observedAt": "2026-01-02T03:04:05.000Z",
+        "expiresAt": "2026-02-01T03:04:05.000Z"
+      },
+      "canonical": "{\"expiresAt\":\"2026-02-01T03:04:05.000Z\",\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"result\":{\"capabilities\":[{\"capabilityId\":\"b.second\",\"sourceType\":\"maintainer-test\",\"support\":\"supported\"},{\"capabilityId\":\"a.first\",\"sourceType\":\"maintainer-test\",\"support\":\"unsupported\"}],\"failed\":1,\"passed\":2,\"verdict\":\"partial\"},\"schemaVersion\":\"0.1\",\"sourceType\":\"maintainer-test\",\"subject\":{\"agentId\":\"a.b\",\"agentVersion\":\"1\",\"deploymentId\":\"d.e\",\"integrationId\":\"a.b\",\"integrationVersion\":\"1\",\"platform\":\"p\",\"protocol\":\"anthropic-messages\"},\"testSuite\":{\"id\":\"apexnova.capability-suite\",\"version\":\"0.2.0\"}}",
+      "sha256": "951b46b23fb7b26ab3e6ee7da267eccc0589f2d7770d14b363c8ba33f5e5d588",
+      "id": "ev.sha256.951b46b23fb7b26ab3e6ee7da267eccc0589f2d7770d14b363c8ba33f5e5d588"
+    },
+    {
+      "name": "unicode-and-escapes",
+      "note": "UTF-8 before hashing; quotes, backslashes, tabs, CJK and astral emoji.",
+      "input": {
+        "schemaVersion": "0.1",
+        "sourceType": "community-test",
+        "subject": {
+          "agentId": "x",
+          "agentVersion": "1",
+          "integrationId": "x",
+          "integrationVersion": "1",
+          "deploymentId": "d",
+          "protocol": "openai-chat",
+          "platform": "p"
+        },
+        "testSuite": {
+          "id": "apexnova.capability-suite",
+          "version": "0.2.0"
+        },
+        "result": {
+          "verdict": "unknown",
+          "passed": 0,
+          "failed": 0,
+          "summary": "quote \" backslash \\ tab \t 中文 emoji 🙂"
+        },
+        "observedAt": "2026-01-02T03:04:05.000Z",
+        "expiresAt": "2026-02-01T03:04:05.000Z"
+      },
+      "canonical": "{\"expiresAt\":\"2026-02-01T03:04:05.000Z\",\"observedAt\":\"2026-01-02T03:04:05.000Z\",\"result\":{\"failed\":0,\"passed\":0,\"summary\":\"quote \\\" backslash \\\\ tab \\t 中文 emoji 🙂\",\"verdict\":\"unknown\"},\"schemaVersion\":\"0.1\",\"sourceType\":\"community-test\",\"subject\":{\"agentId\":\"x\",\"agentVersion\":\"1\",\"deploymentId\":\"d\",\"integrationId\":\"x\",\"integrationVersion\":\"1\",\"platform\":\"p\",\"protocol\":\"openai-chat\"},\"testSuite\":{\"id\":\"apexnova.capability-suite\",\"version\":\"0.2.0\"}}",
+      "sha256": "9318b715989a16f1fea9bd45ffecfd66870ab9d045a2cd03e823d611ce6c4786",
+      "id": "ev.sha256.9318b715989a16f1fea9bd45ffecfd66870ab9d045a2cd03e823d611ce6c4786"
+    }
+  ]
+}

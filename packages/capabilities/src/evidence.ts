@@ -31,8 +31,11 @@ export interface EvidenceSubject {
   readonly integrationId: string;
   readonly integrationVersion: string;
   readonly deploymentId: string;
+  /** The catalog's own protocol value, so one protocol never gets two spellings. */
   readonly protocol: string;
   readonly platform: string;
+  /** The deployment's implementation at collection time, once the catalog exposes one. */
+  readonly implementationFingerprint?: string;
   readonly scenarioId?: string;
 }
 
@@ -187,17 +190,38 @@ function canonicalize(value: unknown): unknown {
   return value;
 }
 
-function canonical(evidence: Omit<CompatibilityEvidence, "id">): string {
-  return JSON.stringify(canonicalize(evidence));
+/**
+ * The canonical serialization both sides hash. Pinned with Hub so the server can
+ * recompute an ID it was handed: without an agreed rule, "content hash" is only
+ * a claim the client makes and the immutability check can never fire.
+ *
+ * 1. drop `id` and `signature`;
+ * 2. sort object keys recursively by UTF-16 code unit, leaving arrays in order;
+ * 3. serialize with no whitespace;
+ * 4. sha256 over UTF-8, lowercase hex.
+ */
+export function canonicalEvidenceJson(evidence: Readonly<Record<string, unknown>>): string {
+  const { id: _id, signature: _signature, ...rest } = evidence;
+  return JSON.stringify(canonicalize(rest));
+}
+
+export function evidenceContentHash(evidence: Readonly<Record<string, unknown>>): string {
+  return createHash("sha256").update(canonicalEvidenceJson(evidence), "utf8").digest("hex");
 }
 
 /** Content-addressed, so writing the same run twice is idempotent rather than a conflict. */
 export function evidenceId(evidence: Omit<CompatibilityEvidence, "id">): string {
-  return `evidence.${createHash("sha256").update(canonical(evidence)).digest("hex").slice(0, 32)}`;
+  return `ev.sha256.${evidenceContentHash(evidence)}`;
 }
 
+/** Records written before the ID form was pinned with Hub. */
+export function isLegacyEvidenceId(id: string): boolean {
+  return /^evidence\.[0-9a-f]{32}$/.test(id);
+}
+
+/** Covers the whole record including its ID, for detecting a tampered file. */
 export function evidenceDigest(evidence: CompatibilityEvidence): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(canonicalize(evidence))).digest("hex")}`;
+  return `sha256:${createHash("sha256").update(JSON.stringify(canonicalize(evidence)), "utf8").digest("hex")}`;
 }
 
 export function addDays(timestamp: string, days: number): string {

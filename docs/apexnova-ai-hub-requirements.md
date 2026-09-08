@@ -543,10 +543,10 @@ Connect 已经在本地跑通了完整链路：版本化能力测试套件、不
 
 以下每条都来自 2026-09-08 的真实采集，是 M3 继续推进的实际阻塞项：
 
-**(a) 公共目录不暴露上游 Provider 身份。** 现网 46 个 Deployment 全部报告 `providerId: provider.apexnova-ai-hub`，且 catalog 的 `providers` 数组为空。后果是 Evidence 的 `subject` 只能记「Apexnova」，**同一个 Deployment 换了上游供应线路，既有 Evidence 不会因此过期**，公开的兼容性结论会静默失真。
+**(a) 公共目录不暴露上游 Provider 身份。** 现网 46 个 Deployment 全部报告 `providerId: provider.apexnova-ai-hub`。（原文另称 `providers` 数组为空，**该处有误**：那是 Connect 的 `models --json` 没有透出该字段，Hub 的目录恒返回一条 `provider.apexnova-ai-hub`，已更正，见 12B.5。）后果是 Evidence 的 `subject` 只能记「Apexnova」，**同一个 Deployment 换了上游供应线路，既有 Evidence 不会因此过期**，公开的兼容性结论会静默失真。
 需求：公共投影暴露稳定的上游身份或不可逆的实现指纹（例如 `implementationFingerprint`，在模型版本、Endpoint 或上游线路变化时改变），并提供其变更时间点可查询。若上游身份属于商业机密，指纹方案即可满足需求。
 
-**(b) 推理错误响应缺少 Request ID。** 观测到 `401` 与 `502` 响应不带 `x-apexnova-request-id`（例：`anthropic-messages` 上三次 502 无 ID、无用量记录，无法追踪也无法对账）。
+**(b) 推理错误响应缺少 Request ID。** 观测到 `401` 与 `502` 响应不带 `x-apexnova-request-id`（例：`anthropic-messages` 上三次 502 无 ID、无用量记录，无法追踪也无法对账）。那三次 502 的归属未定——Hub 已确认应用层出口一律带该头，来源可能是 nginx；判别法与后续见 12B.5。Hub 同时确认「上游连不上的 502 不写用量记录」是真缺陷。
 需求：**所有**推理响应（含 4xx/5xx）都返回该响应头，与成功路径一致。
 
 **(c) 中断请求的计费口径不一致。** 12 轮采集中，客户端 abort 的流式请求有 11 轮在用量里查不到（数小时后仍然查不到，例如 `44c55922-3161-4620-881f-13cc514eeb98`），1 轮正常计费。
@@ -555,8 +555,8 @@ Connect 已经在本地跑通了完整链路：版本化能力测试套件、不
 **(d) 用量查询无法区分「未结算」与「不计费」。** `GET /v1/billing/usage?requestId=` 对两者都返回空，客户端只能猜。Connect 因此一度把未结算显示成 `0.000000 USD`。
 需求：对 Hub 已知的 requestId 返回明确状态（`pending` / `settled` / `not-billable`），不要用空结果表达三种含义。
 
-**(e) `openai-responses` 路径静默忽略 `text.format.json_schema`。** 4 个 Deployment 全部如此，其中 `deepseek-v4-pro-0813` 与 `qwen3.8-flash` 在目录里明确声明了 `structured-output.json`。请求返回 `200`，内容是散文，不报任何字段错误；同批模型在 `anthropic-messages` 上用 tool 承载 schema 则 3/4 通过。
-需求：要么透传/翻译该字段，要么以 4xx 明确拒绝。**静默忽略最糟**——Agent 会以为自己拿到了结构化输出。
+**(e) `openai-responses` 路径上 `text.format.json_schema` 不生效。** 4 个 Deployment 全部如此，其中 `deepseek-v4-pro-0813` 与 `qwen3.8-flash` 在目录里明确声明了 `structured-output.json`。请求返回 `200`，内容是散文，不报任何字段错误；同批模型在 `anthropic-messages` 上用 tool 承载 schema 则 3/4 通过。
+Hub 已核实**翻译层无误**（已翻成 `response_format.json_schema` 并写进上游请求体），忽略发生在上游且上游不报错，因此「透传后确认」不可行。真正的问题因此变成目录里那条 `structured-output.json` 的证据等级——处置见 12B.5 与 §J(e)。
 
 **(f) 目录无法表达「支持 tools 但不支持强制 `tool_choice`」。** `qwen3.8-flash` 对 `tool_choice: required` 与 `tool_choice: {type:"tool"}` 一律返回 `400 litellm.BadRequestError`，但普通 tool 调用完全正常。
 需求：能力声明区分「可调用工具」与「可强制指定工具」，否则调用方只能靠试错发现。
@@ -577,6 +577,75 @@ Connect 已经在本地跑通了完整链路：版本化能力测试套件、不
 2. 幂等提交、`supersedes` 链、撤回、过期过滤、`provider-claim` 与实测分离的 contract test；
 3. 12A.5 中 (b)、(d) 两项作为 H2 的硬性前置——它们不修好，Evidence 的对账与追踪在服务端同样不成立；
 4. Connect 侧对应实现为 `apexnova compatibility sync`（尚未开工，等本节接口冻结）。
+
+## 12B. 对 Hub 回执的答复（2026-09-08）
+
+针对 Hub 在 `infra/docs/hub-h1-connect-handoff.md` §H–§L（commit `f76251a`）的回复。**§H 四处全部确认，(c) 的口径已表态**，Connect 侧的改动已随本次提交落地。
+
+### 12B.1 H-1 协议 id：按 Hub 的目录词表改，且只保留一种拼写
+
+`protocolId` 枚举已加入 `openai-chat`、`openai-embeddings`、`openai-images`、`apexnova-media-images`、`apexnova-media-videos`。目录返回什么就是什么，不要求 Hub 改。
+
+同时定死一条规则，避免出现「同一个协议两种拼写」把 subject 劈成两行：**`subject.protocol` 一律填目录返回的原值**。Connect 内部的 `openai-chat → openai-chat-completions` 归一化只用于 Agent/Integration 的能力声明（那套词表早于目录词表存在），不再进入 Evidence。首批 4 个 Deployment 用的是 `openai-responses` 与 `anthropic-messages`，两套词表下拼写相同，因此**既有记录无需迁移**。
+
+### 12B.2 H-2 `id` 形制：接受 `ev.sha256.<64hex>`
+
+已改为该形制并写进 schema 的 `pattern`。schema 同时保留识别 `evidence.<32hex>`——那是本形制定下之前已经写在本地库里的 12 条记录，它们不可变，只能被识别而不能被改写。Hub 侧按 `ev.sha256.<64hex>` 做主键校验即可；如果收到 `evidence.<32hex>`，那一定是补传的历史记录，可以按「无法服务端重算」处理或直接拒收，我们不依赖它们上行。
+
+### 12B.3 H-3 canonical JSON：照单接受，向量已给
+
+四步规则**逐字接受**，与 Connect 现有实现一致（此前只是没写下来，这一条 Hub 提得对）。规则已写进 `schemas/compatibility-evidence.schema.json` 的 `id.description`。
+
+三条跨语言测试向量在 [`schemas/fixtures/evidence-canonical-vectors.json`](../schemas/fixtures/evidence-canonical-vectors.json)，机器可读，每条含 `input`、`canonical`（规范化后的字符串）、`sha256`、`id`：
+
+| 向量 | 钉的是什么 |
+| --- | --- |
+| `minimal-record` | `id` 与 `signature` 被剔除；键递归排序 |
+| `nested-arrays-keep-order` | 逐层排序，**数组顺序保持不动** |
+| `unicode-and-escapes` | UTF-8 编码后哈希；引号、反斜杠、制表符、中文、星平面 emoji |
+
+Connect 侧已在 contract test 里钉住（`packages/capabilities/tests/canonical-vectors.test.ts`）；请 Hub 直接读同一份 fixture，不要各自抄一遍常量。任一侧改动导致向量对不上，都应当按契约问题处理，而不是更新快照。
+
+### 12B.4 H-4 指纹：进 `subject`，不走接收元数据
+
+**选 `subject`**，与 Hub 的建议相反，理由是本地优先这条路会因为另一种选择而断掉：
+
+1. **离线可验证**。Evidence 的公开价值在于任何人拿着记录就能重算、就能判断它测的是哪一版实现。指纹只存在于 Hub 的接收元数据里时，记录本身不自足；
+2. **本地 Verdict 需要它**。按 ADR 0004，Connect 的矩阵与过期判定在本地完成、不依赖 Hub。指纹不在记录里，本地就永远无法因为实现变更而过期，只能等同步回来——那正是 12A.3 要解决的洞；
+3. **「提交前多一次目录查询」对我们不成立**。`compatibility run` 本来就要拉目录来解析 deployment 和协议，指纹是同一次响应里的字段，零额外成本。
+
+代价是解冻 schema，但这是**兼容的加法**：`subject.implementationFingerprint` 为可选，既有记录照常有效——它们只是无法因实现变更而过期，这一点如实反映了当时目录没有指纹的事实。`compatibility-evidence.schema.json` 与 `HubCatalogDeployment` 都已加好，Hub 的 P3 一上线，Connect 无需再改代码就会开始记录。
+
+指纹进 `subject` 意味着它进内容哈希：同一 Deployment 换了实现，采到的就是另一条记录、另一个 id，而不是同 id 不同内容的冲突。
+
+Hub 计划里的 `received.implementationFingerprint` 与 `derived.staleReason` 我们照常消费——对**不是我们采集的**记录（社区提交、历史记录），那是唯一的判据。两者不冲突：`subject` 是采集时的自证，接收元数据是服务端的旁证。
+
+### 12B.5 §I 三条更正：两条我们认，一条待复现
+
+1. **`providers` 为空是我们的错，已更正。** 原因是我读了 `apexnova models --json` 的输出，而那条命令**只输出 `deployments`**——hub-client 一直在解析 `providers`，是 CLI 没有透出来。我拿自己的输出形状当成了 Hub 的目录。已修：`models --json` 现在把 `providers` 一并输出；[ADR 0004](decisions/0004-m3-scope-and-evidence-path.md) 与 [Hub 联调清单](hub-h1-integration-checklist.md) 里的措辞已更正为「公共投影不暴露上游身份」，不再声称数组为空。**核心诉求不变**，Hub 也已确认，走 (a) 的指纹方案。
+
+2. **502 的归属待复现，判别法已接受。** 我们没有保留那三次响应的响应体，所以现在无法归属；清单里的措辞已从「Hub 返回 502 且不带 request-id」改为「来源未定，判别法见下」。套件的失败详情本来就会记录网关错误消息的前 120 字节，`{"error":…}` 与 `<html>…502 Bad Gateway` 一眼可分——下次复现会带着这段进 Evidence。感谢确认「上游连不上那条 502 不写用量记录」是真缺陷。
+
+3. **`json_schema` 的锅不在翻译层，已更正。** 清单原话是「疑似忽略」，现改为：Hub 的 responses bridge 已正确翻成 `response_format.json_schema`，忽略发生在上游，且上游不报错，因此**「透传后确认」这条路不存在**。这恰好印证了 M3 的前提：目录里的 `structured-output.json` 是厂商声明，不是实测——所以 §J 里 (e) 用 `capabilityStatements[]` 加证据等级、把没实测过的一律标 `provider-claim`，与我们的 Verdict 规则完全对齐（`provider-claim` 永不产生 `supported`，只有声明时读作 untested）。
+
+### 12B.6 §J(c) 中断计费：同意 Hub 的倾向
+
+**选「保留计费 + 补 `status=aborted, cost=0` 记录」。** 理由与 Hub 一致：上游已经完成生成并报了成本，那笔钱确实花了；客户端选择不读，不构成不该付。
+
+我们原本的抱怨从来不是「不该计费」，而是**同一种请求有时查得到有时查不到**——(d) 修好之后每一轮都有明确状态，这个抱怨自然消失。财务正确加可查询，优于口径整齐但与实际成本脱节。
+
+一个附带要求：`aborted` 记录请**带 requestId 且可按 requestId 查到**。Connect 的对账是逐 requestId 做的，只要它可查，`cost=0` 与 `cost>0` 都能如实呈现。
+
+### 12B.7 §K 两件事的回应
+
+1. **重新授权**：明白，不提前发。Connect 侧会在 `compatibility sync` 一起做；在 Hub 部署前不会向用户提示新 scope。
+2. **`compatibility:write` 的采集者账户**：由维护者在带外提供给 Hub admin，本文不写账号。设备批准阶段就拒绝（而不是 token 阶段静默剔除）的做法我们赞成——静默剔除会让采集端一路跑到提交才失败，那时凭据已经签发、请求已经发出。
+
+### 12B.8 我们这侧的下一步
+
+- (b)(d) 上线后，Connect 会把「未结算 / 不计费」按 `settlementStatus` 如实呈现，替换现在「重试三次后仍未结算就报未结算」的近似做法；
+- `compatibility sync` 等 §H 四处冻结、Evidence 端点可用后开工；
+- M3 保持开启，直到 (b)(d) 落地并跑通一次真实同步——评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)。
 
 ## 13. 非功能要求
 

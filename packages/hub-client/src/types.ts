@@ -152,6 +152,9 @@ export interface HubCatalogDeployment {
   readonly inferenceAlias: string;
   readonly aliases: readonly string[];
   readonly protocols: readonly HubCatalogProtocol[];
+  /** Changes when the deployment's implementation does; absent until Hub ships it. */
+  readonly implementationFingerprint?: string;
+  readonly implementationChangedAt?: string;
   readonly limits?: {
     readonly contextWindow?: number;
     readonly maxOutputTokens?: number;

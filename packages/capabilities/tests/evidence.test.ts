@@ -95,7 +95,8 @@ describe("compatibility evidence", () => {
     expect(createEvidence(input()).id).not.toBe(
       createEvidence(input({ observedAt: "2026-09-08T10:00:01.000Z" })).id,
     );
-    expect(createEvidence(input()).id).toMatch(/^evidence\.[0-9a-f]{32}$/);
+    // The form is pinned with Hub so the server can recompute it (H-2).
+    expect(createEvidence(input()).id).toMatch(/^ev\.sha256\.[0-9a-f]{64}$/);
 
     // Identity has to cover the nested fields too: the same run against a
     // different deployment is a different record, not the same one.

@@ -6,7 +6,12 @@
   "required": ["schemaVersion", "id", "sourceType", "subject", "testSuite", "result", "observedAt", "expiresAt"],
   "properties": {
     "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
-    "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "id": {
+      "type": "string",
+      "description": "Content hash of the record. Canonical form ev.sha256.<64 lowercase hex>, computed over the record with id and signature removed, object keys sorted recursively by UTF-16 code unit, serialized without whitespace and hashed as UTF-8. Records written before this form was pinned use evidence.<32 hex>.",
+      "allOf": [{ "$ref": "common-definitions.schema.json#/$defs/stableId" }],
+      "pattern": "^(ev\\.sha256\\.[0-9a-f]{64}|evidence\\.[0-9a-f]{32})$"
+    },
     "sourceType": { "enum": ["provider-claim", "official-test", "maintainer-test", "community-test", "runtime-observation"] },
     "subject": {
       "type": "object",
@@ -19,6 +24,12 @@
         "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
         "protocol": { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
         "platform": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "implementationFingerprint": {
+          "description": "The deployment's implementation fingerprint at collection time. Optional because the catalog has not always exposed one; when present it enters the content hash, so evidence measured against a different implementation is a different record.",
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
+        },
         "scenarioId": { "$ref": "common-definitions.schema.json#/$defs/stableId" }
       },
       "additionalProperties": false
