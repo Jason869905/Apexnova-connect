@@ -21,6 +21,8 @@
     "packages/integration-testing/src/**/*.ts",
     "packages/core/tests/**/*.ts",
     "packages/integration-testing/tests/**/*.ts",
+    "packages/capabilities/src/**/*.ts",
+    "packages/capabilities/tests/**/*.ts",
     "packages/config-engine/src/**/*.ts",
     "packages/config-engine/tests/**/*.ts",
     "packages/credential-store/src/**/*.ts",

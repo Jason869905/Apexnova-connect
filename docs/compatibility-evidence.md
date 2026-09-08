@@ -28,6 +28,23 @@ Agent + Integration + Model Deployment + Platform + Test Suite + Time
 
 商业合作、赞助或 Hub 上架不能改变 Evidence 信任等级。
 
+## 命名对照
+
+本文用于说明语义，[`compatibility-evidence.schema.json`](../schemas/compatibility-evidence.schema.json) 是实现的权威来源。两者的枚举名尚未统一，实现按 Schema 为准：
+
+| 本文用语 | Schema 枚举 |
+| --- | --- |
+| `vendor-claimed` | `provider-claim` |
+| `apexnova-verified` | `official-test`（Apexnova 控制的环境）、`maintainer-test`（维护者实机） |
+| `community-verified` | `community-test` |
+| `runtime-observed` | `runtime-observation` |
+| `compatible` | `compatible`（单次运行全部通过记为 `verified`） |
+| `compatible-with-limits` | `partial` |
+| `incompatible` | `incompatible` |
+| `unverified` | `unknown` |
+
+统一措辞需要 Connect/Hub 跨仓评审，在那之前不单方面改动任一侧。
+
 ## 测试类别
 
 ### Protocol Conformance

@@ -196,6 +196,7 @@ Apexnova-connect/
 │   ├── hub-client/             # Apexnova AI Hub 公共 API 客户端
 │   ├── credential-store/       # 系统安全凭证存储
 │   ├── config-engine/          # 变更计划、备份、原子写入与恢复
+│   ├── capabilities/           # 能力定义、兼容性证据与 Verdict 计算
 │   ├── protocols/              # 模型协议和数据格式转换
 │   └── gateway/                # 可选本地 Gateway
 ├── schemas/                    # Manifest、配置与模型元数据 Schema

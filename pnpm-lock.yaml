@@ -116,6 +116,15 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/integration-testing
 
+  packages/capabilities:
+    dependencies:
+      '@apexnova-connect/schemas':
+        specifier: workspace:*
+        version: link:../../schemas
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+
   packages/config-engine:
     dependencies:
       '@apexnova-connect/integration-sdk':

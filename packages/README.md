@@ -8,5 +8,6 @@
 | `hub-client` | Apexnova AI Hub 公共 API、认证、余额和模型目录客户端 |
 | `credential-store` | 操作系统安全凭证存储抽象 |
 | `config-engine` | Change plan、差异预览、备份、原子写入和恢复 |
+| `capabilities` | Capability Definition Registry、Compatibility Evidence 的本地不可变存储与 Verdict 计算 |
 | `protocols` | OpenAI、Anthropic 等模型协议与元数据映射 |
 | `gateway` | 必要时使用的本地协议 Gateway，不承载产品特有逻辑 |
