@@ -589,18 +589,30 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
   }
   const executor = new FileConfigExecutor({ allowedRoots, backupRoot });
   const transactionId = parsed.operands[0];
+  const backups = await executor.listBackups();
   if (parsed.list || transactionId === undefined) {
-    const backups = await executor.listBackups();
     return {
       data: { backups },
       warnings: [] as readonly string[],
       human: backups.length === 0
         ? "No restorable transactions."
-        : backups.map((item) => `${item.transactionId}  ${item.integrationId}  ${item.state}  ${item.appliedAt}`).join("\n"),
+        : backups.map((item) => `${item.transactionId}  ${item.integrationId}  ${item.state}  ${item.appliedAt}${item.restorable ? "  restorable" : ""}`).join("\n"),
     };
   }
-  const summary = (await executor.listBackups()).find((item) => item.transactionId === transactionId);
+  const summary = backups.find((item) => item.transactionId === transactionId);
   const receipt = await executor.getReceipt(transactionId);
+  // The backup directory is what knows which transaction the files hold, so the
+  // ordering comes from there. Checking it before --dry-run keeps the preview
+  // honest, and before any credential work keeps a refusal free of side effects.
+  if (summary && !summary.restorable) {
+    const newest = backups.find((item) => item.integrationId === summary.integrationId && item.restorable);
+    throw new CliError({
+      code: "RESTORE_ORDER_CONFLICT",
+      message: `Restore ${newest?.transactionId ?? "the newer transaction"} before restoring ${transactionId}.`,
+      exitCode: EXIT_CODES.conflict,
+      details: { integrationId: summary.integrationId, ...(newest ? { restoreFirst: newest.transactionId } : {}) },
+    });
+  }
   if (parsed.dryRun) {
     return {
       data: { dryRun: true, transactionId, planId: receipt.planId },
@@ -623,12 +635,16 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
   const agentId = integration?.manifest.id;
   const bindings = agentId ? new RuntimeBindingStore(credentialStore(dependencies)) : undefined;
   const binding = bindings && agentId ? await bindings.load(agentId, parsed.profile) : null;
-  if (binding?.transactionId && binding.transactionId !== transactionId) {
-    throw new CliError({ code: "RESTORE_ORDER_CONFLICT", message: `Restore ${binding.transactionId} before restoring ${transactionId}.`, exitCode: EXIT_CODES.conflict });
+  // The binding only carries the credential chain. One that names a different
+  // transaction -- an older build could leave that behind -- no longer blocks the
+  // restore: the chain is dropped and the profile disconnects instead.
+  const bindingOwnsTransaction = binding?.transactionId === transactionId;
+  if (binding && !bindingOwnsTransaction && (binding.transactionId !== undefined || binding.restoreTarget !== undefined)) {
+    warnings.push(`The stored runtime credential does not belong to ${transactionId}; it was revoked and the profile disconnected. Run "apexnova connect ${agentId}" to reconnect.`);
   }
 
   let replacement: typeof binding = null;
-  if (binding?.restoreTarget && integration) {
+  if (binding?.restoreTarget && integration && bindingOwnsTransaction) {
     const service = hubService(parsed, dependencies);
     const target = binding.restoreTarget;
     const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
@@ -1374,7 +1390,7 @@ function normalizeError(error: unknown): CliError {
     return new CliError({ code: error.code, message, exitCode, cause: error });
   }
   if (error instanceof ConfigExecutionError) {
-    return new CliError({ code: error.code, message: error.message, exitCode: error.code === "ROLLBACK_FAILED" || error.code === "INVALID_RECEIPT" ? EXIT_CODES.recovery : error.code === "CONFLICT" ? EXIT_CODES.conflict : EXIT_CODES.runtime, cause: error });
+    return new CliError({ code: error.code, message: error.message, exitCode: error.code === "ROLLBACK_FAILED" || error.code === "INVALID_RECEIPT" ? EXIT_CODES.recovery : error.code === "CONFLICT" || error.code === "ROLLBACK_ORDER_CONFLICT" ? EXIT_CODES.conflict : EXIT_CODES.runtime, cause: error });
   }
   return new CliError({
     code: "UNEXPECTED_ERROR",

@@ -36,6 +36,7 @@ export type ConfigExecutionErrorCode =
   | "CONFLICT"
   | "INVALID_RECEIPT"
   | "APPLY_FAILED"
+  | "ROLLBACK_ORDER_CONFLICT"
   | "ROLLBACK_FAILED";
 
 export class ConfigExecutionError extends Error {
@@ -78,6 +79,11 @@ export interface FileBackupSummary {
   readonly appliedAt: string;
   readonly state: FileBackupState;
   readonly operationCount: number;
+  /**
+   * True for the newest transaction of an integration, which is the only one
+   * whose recorded file state still matches the disk.
+   */
+  readonly restorable: boolean;
 }
 
 interface FileTransaction {
@@ -694,22 +700,50 @@ export class FileConfigExecutor implements ChangeExecutor {
     }
   }
 
-  async listBackups(): Promise<readonly FileBackupSummary[]> {
+  /**
+   * The backup directory is what actually knows the state of the files, so
+   * ordering is derived from it and never from what a caller remembers. Only
+   * the newest transaction of an integration can be rolled back; the ones
+   * under it describe file states that no longer exist.
+   *
+   * `tolerateUnreadable` exists for that ordering decision alone: one damaged
+   * sibling must not make an unrelated transaction unrestorable, and the
+   * per-entry hash checks still refuse a rollback whose target moved on.
+   * `listBackups` stays strict so a damaged backup is reported, not hidden.
+   */
+  async #scanBackups(tolerateUnreadable: boolean): Promise<readonly FileBackupSummary[]> {
     const backupRoot = await this.#existingBackupRoot();
     if (backupRoot === null) return [];
     const entries = await readdir(backupRoot, { withFileTypes: true });
-    const summaries: FileBackupSummary[] = [];
+    const transactions: FileTransaction[] = [];
 
     for (const entry of entries) {
       if (!/^transaction-[0-9]+-[0-9a-f-]{36}$/.test(entry.name)) continue;
       if (!entry.isDirectory() || entry.isSymbolicLink()) {
+        if (tolerateUnreadable) continue;
         throw new ConfigExecutionError(
           "INVALID_RECEIPT",
           `Backup transaction path is not a regular directory: ${entry.name}.`,
         );
       }
-      const transaction = await this.#readTransaction(entry.name);
-      summaries.push({
+      try {
+        transactions.push(await this.#readTransaction(entry.name));
+      } catch (cause) {
+        if (!tolerateUnreadable) throw cause;
+      }
+    }
+
+    transactions.sort(
+      (left, right) =>
+        right.appliedAt.localeCompare(left.appliedAt) ||
+        right.transactionId.localeCompare(left.transactionId),
+    );
+
+    const covered = new Set<string>();
+    return transactions.map((transaction) => {
+      const restorable = !covered.has(transaction.integrationId);
+      covered.add(transaction.integrationId);
+      return {
         transactionId: transaction.transactionId,
         planId: transaction.planId,
         integrationId: transaction.integrationId,
@@ -717,10 +751,13 @@ export class FileConfigExecutor implements ChangeExecutor {
         appliedAt: transaction.appliedAt,
         state: transaction.state,
         operationCount: transaction.entries.length,
-      });
-    }
+        restorable,
+      };
+    });
+  }
 
-    return summaries.sort((left, right) => right.appliedAt.localeCompare(left.appliedAt));
+  async listBackups(): Promise<readonly FileBackupSummary[]> {
+    return this.#scanBackups(false);
   }
 
   async getReceipt(transactionId: string): Promise<ApplyReceipt> {
@@ -846,6 +883,16 @@ export class FileConfigExecutor implements ChangeExecutor {
       throw new ConfigExecutionError(
         "INVALID_RECEIPT",
         "Rollback receipt plan ID does not match its persisted transaction.",
+      );
+    }
+
+    const newest = (await this.#scanBackups(true)).find(
+      (item) => item.integrationId === transaction.integrationId && item.restorable,
+    );
+    if (newest && newest.transactionId !== transaction.transactionId) {
+      throw new ConfigExecutionError(
+        "ROLLBACK_ORDER_CONFLICT",
+        `Roll back ${newest.transactionId} before ${transaction.transactionId}.`,
       );
     }
 

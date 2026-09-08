@@ -267,6 +267,8 @@ apexnova restore <transaction-id>
 
 恢复只撤销 Connect 管理的变更，并执行并发哈希检查。恢复必须按事务逆序执行；尝试跳过较新的切换事务会返回 `RESTORE_ORDER_CONFLICT`，不修改配置或凭据。
 
+顺序的判定来源是备份目录本身：同一 integration 中只有最新的事务可恢复，`restore --list` 会标出它，`--dry-run` 走同一检查。凭据绑定只承载凭据链，不参与顺序判定——绑定指向别的事务时（旧版本可能留下这种状态）配置照样恢复，CLI 撤销当前凭据、删除绑定并以警告说明该 profile 已断开，需要重新 `connect`。
+
 恢复一次 `switch` 时，凭据库只保存上一个 Deployment/协议及事务链，不保存已撤销的旧 secret。CLI 会先为上一个目标签发并通过控制面确认一枚新 runtime credential，再回滚配置、原子保存新绑定并撤销当前凭据。恢复最初的 `connect` 则回到连接前配置、撤销当前凭据并删除本地绑定。若新凭据签发或验证失败，文件保持不变；若配置已经恢复但绑定保存失败，CLI 撤销相关凭据并进入安全断开状态。
 
 ### `apexnova doctor [agent]`

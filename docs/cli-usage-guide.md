@@ -182,7 +182,7 @@ apexnova restore <transaction-id> --dry-run
 apexnova restore <transaction-id> --yes
 ```
 
-**必须逆序恢复**：跳过较新的事务会返回 `RESTORE_ORDER_CONFLICT`。恢复只撤销 Connect 写入的字段，之后你自己加的配置不受影响；恢复 `switch` 时会为上一个目标重新签发凭据。文件在应用之后被改过时，恢复会以 `CONFLICT` 拒绝而不是覆盖你的改动。
+**必须逆序恢复**：跳过较新的事务会返回 `RESTORE_ORDER_CONFLICT`（`--list` 里标了 `restorable` 的那条才可恢复，`--dry-run` 的判断与实际执行一致）。恢复只撤销 Connect 写入的字段，之后你自己加的配置不受影响；恢复 `switch` 时会为上一个目标重新签发凭据。文件在应用之后被改过时，恢复会以 `CONFLICT` 拒绝而不是覆盖你的改动。
 
 ## 超时
 

@@ -526,6 +526,53 @@ describe("CLI", () => {
     expect(revokeRuntimeCredential.mock.calls.map((call) => call[1])).toEqual(["rtc_1", "rtc_2", "rtc_3"]);
   });
 
+  it("restores the transaction the backups name even when the stored binding disagrees", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-binding-drift-"));
+    const configPath = join(root, "opencode.jsonc");
+    const original = "{\n  \"theme\": \"dark\"\n}\n";
+    await writeFile(configPath, original, "utf8");
+    const credentials = memoryCredentials();
+    const bindings = new RuntimeBindingStore(credentials);
+    const revoke = vi.fn(async () => undefined);
+    const capture = captureIo();
+    const common = {
+      io: capture.io,
+      hubService: mockHub({ revokeRuntimeCredential: revoke }),
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      platform: "win32" as const,
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+      createRequestId: () => "local_binding_drift",
+    };
+    const connected = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--yes", "--json"], common);
+    expect(connected.exitCode).toBe(EXIT_CODES.success);
+    const transactionId = JSON.parse(capture.stdout()).data.transactionId as string;
+
+    // What an older build left behind: it wrote the configuration without
+    // updating the binding. While the binding decided the ordering, this state
+    // refused both directions and the CLI had no way out of it.
+    const stored = await bindings.load("opencode", "default");
+    await bindings.save("opencode", "default", {
+      ...stored!,
+      transactionId: "transaction-1757000000000-2b1de0f4-2f5c-4a0e-9d0f-1f9a0b6c7d8e",
+      restoreTarget: { protocol: "openai-responses", deploymentId: "deployment.nova" },
+    });
+
+    const restoreCapture = captureIo();
+    const restored = await runCli(["restore", transactionId, "--yes", "--json"], { ...common, io: restoreCapture.io });
+    expect(restored.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(restoreCapture.stdout());
+    // The chain is dropped rather than reissued from a binding that does not
+    // describe the restored files, so the profile disconnects with a warning.
+    expect(output.data).toMatchObject({ restored: true, runtimeCredentialRestored: false, runtimeCredentialRevoked: true });
+    expect(output.warnings.join(" ")).toContain("does not belong to");
+    expect(await readFile(configPath, "utf8")).toBe(original);
+    expect(await bindings.load("opencode", "default")).toBeNull();
+    expect(revoke).toHaveBeenCalledWith("default", "rtc_1", expect.any(AbortSignal));
+  });
+
   it("renews a runtime credential before launch and revokes the previous credential", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-renew-"));
     const credentials = memoryCredentials();

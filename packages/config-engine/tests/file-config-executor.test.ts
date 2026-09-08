@@ -47,6 +47,31 @@ async function fixture() {
   };
 }
 
+function update(path: string, from: string, to: string): WriteFileOperation {
+  return {
+    type: "write-file",
+    path,
+    mode: "update",
+    expectedContentHash: hash(from),
+    content: to,
+    containsSecrets: false,
+  };
+}
+
+function transactionId(receipt: ApplyReceipt): string {
+  return (receipt.rollbackToken as { transactionId: string }).transactionId;
+}
+
+/** Ordering comes from `appliedAt`, so transactions need a clock that moves. */
+function advancingExecutor(configRoot: string, backupRoot: string): FileConfigExecutor {
+  let elapsed = 0;
+  return new FileConfigExecutor({
+    allowedRoots: [configRoot],
+    backupRoot,
+    now: () => new Date(Date.parse("2026-09-02T20:00:00.000Z") + (elapsed += 1_000)),
+  });
+}
+
 function plan(operation: WriteFileOperation): ChangePlan {
   return {
     id: "config-plan-1",
@@ -391,5 +416,93 @@ describe("FileConfigExecutor", () => {
     await writeFile(configPath, '{"managed":true}\n', "utf8");
     await executor.rollback(receipt);
     await expect(readFile(configPath, "utf8")).rejects.toThrow();
+  });
+
+  it("takes restore ordering from the backups and refuses a superseded transaction", async () => {
+    const { backupRoot, configRoot } = await fixture();
+    const target = join(configRoot, "settings.json");
+    const original = '{"provider":"original"}\n';
+    const first = '{"provider":"apexnova"}\n';
+    const second = '{"provider":"apexnova-2"}\n';
+    await writeFile(target, original, "utf8");
+    const executor = advancingExecutor(configRoot, backupRoot);
+
+    const firstReceipt = await executor.apply(plan(update(target, original, first)));
+    const secondReceipt = await executor.apply({
+      ...plan(update(target, first, second)),
+      id: "config-plan-2",
+    });
+
+    expect((await executor.listBackups()).map((item) => [item.transactionId, item.restorable])).toEqual([
+      [transactionId(secondReceipt), true],
+      [transactionId(firstReceipt), false],
+    ]);
+
+    // Holding the older receipt is not permission to undo it: the newer
+    // transaction is what the file holds, and the backups are what say so.
+    await expect(executor.rollback(firstReceipt)).rejects.toMatchObject({
+      code: "ROLLBACK_ORDER_CONFLICT",
+    });
+    expect(await readFile(target, "utf8")).toBe(second);
+
+    // Undoing the newer one hands the position back, so there is always a way
+    // out rather than a transaction that no direction can restore.
+    await executor.rollback(secondReceipt);
+    expect(await readFile(target, "utf8")).toBe(first);
+    expect((await executor.listBackups()).map((item) => [item.transactionId, item.restorable])).toEqual([
+      [transactionId(firstReceipt), true],
+    ]);
+
+    await executor.rollback(firstReceipt);
+    expect(await readFile(target, "utf8")).toBe(original);
+  });
+
+  it("scopes restore ordering to the integration that wrote the backup", async () => {
+    const { backupRoot, configRoot } = await fixture();
+    const own = join(configRoot, "own.json");
+    const other = join(configRoot, "other.json");
+    await writeFile(own, "{}\n", "utf8");
+    await writeFile(other, "{}\n", "utf8");
+    const executor = advancingExecutor(configRoot, backupRoot);
+
+    const ownReceipt = await executor.apply(plan(update(own, "{}\n", '{"own":true}\n')));
+    await executor.apply({
+      ...plan(update(other, "{}\n", '{"other":true}\n')),
+      id: "config-plan-2",
+      integrationId: "other-agent",
+    });
+
+    // A newer transaction from another integration writes other files, so it
+    // says nothing about this one.
+    await executor.rollback(ownReceipt);
+    expect(await readFile(own, "utf8")).toBe("{}\n");
+    expect(await readFile(other, "utf8")).toBe('{"other":true}\n');
+  });
+
+  it("does not let a damaged sibling backup block an unrelated rollback", async () => {
+    const { backupRoot, configRoot } = await fixture();
+    const own = join(configRoot, "own.json");
+    const other = join(configRoot, "other.json");
+    await writeFile(own, "{}\n", "utf8");
+    await writeFile(other, "{}\n", "utf8");
+    const executor = advancingExecutor(configRoot, backupRoot);
+
+    const ownReceipt = await executor.apply(plan(update(own, "{}\n", '{"own":true}\n')));
+    const otherReceipt = await executor.apply({
+      ...plan(update(other, "{}\n", '{"other":true}\n')),
+      id: "config-plan-2",
+      integrationId: "other-agent",
+    });
+    await writeFile(
+      join(backupRoot, transactionId(otherReceipt), "transaction.json"),
+      "not json\n",
+      "utf8",
+    );
+
+    // Listing stays strict so damage is reported rather than hidden.
+    await expect(executor.listBackups()).rejects.toMatchObject({ code: "INVALID_RECEIPT" });
+
+    await executor.rollback(ownReceipt);
+    expect(await readFile(own, "utf8")).toBe("{}\n");
   });
 });

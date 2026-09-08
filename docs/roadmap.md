@@ -109,7 +109,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 范围：
 
-- **修复 `restore` 的顺序判定来源**（M2 遗留缺陷，见下）；
+- ~~修复 `restore` 的顺序判定来源~~（M2 遗留缺陷，已在 M3 开始前修复，见下）；
 - Capability Definition Registry；
 - 协议、流式、Tool Call、结构化输出、图片、缓存和上下文测试；
 - 不可变 Compatibility Evidence；
@@ -124,7 +124,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - 6～10 个 Model Deployment；
 - 8～12 项基础能力测试。
 
-### 遗留缺陷：`restore` 的顺序判定来源
+### 遗留缺陷：`restore` 的顺序判定来源（已修复）
 
 `apexnova restore` 用**凭据绑定里的 `transactionId`** 判断「这是不是最新的事务」，但磁盘状态的权威来源是备份目录本身（每个事务都记录了 `appliedAt`、`state` 和内容哈希）。两者一旦不一致，两个方向会同时被锁死：
 
@@ -135,7 +135,12 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 现行代码在保存绑定失败时会回滚 receipt，因此不应再产生这种状态；但**判定来源本身仍然是错的**，且没有针对不一致状态的恢复路径。
 
-修复方向：顺序从备份元数据推导（同一 integration 中最新的 `applied` 事务才可恢复），绑定只用于凭据链与重签发。因为会改动 `switch` 恢复时重新签发上一目标凭据的路径，需要连同该语义一起设计，不宜在补丁版本里仓促改。
+修复（2026-09-08）：
+
+- 顺序改由备份元数据推导。备份摘要新增 `restorable`，同一 integration 中只有最新的事务带这个标记；`FileConfigExecutor.rollback()` 自身也拒绝已被覆盖的事务（`ROLLBACK_ORDER_CONFLICT`），因此这条规则不依赖调用方记得什么。
+- 绑定退回到只承载凭据链。绑定指向别的事务时不再拒绝恢复：配置照备份恢复，当前凭据被撤销，绑定被删除，CLI 以警告说明 profile 已断开——不一致状态因此永远有出路，不需要手工删备份目录。
+- `restore --list` 标出可恢复的那条，`--dry-run` 与实际执行走同一顺序检查，预览不再与结果矛盾。
+- 顺序扫描容忍读不出的兄弟备份：一份损坏的备份不会连带锁死无关事务，逐条内容哈希检查仍是最后一道防线。
 
 退出条件：
 
