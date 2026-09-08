@@ -107,7 +107,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.3`。
 
-当前状态：进行中。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
+当前状态：进行中，**不宣布关闭**（评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)）。五条退出条件中四条已满足，「Provider 变化使 Evidence 过期」因目录不暴露上游身份而未满足；`Hub Evidence 查询接口`未交付。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
 
 已完成：`packages/capabilities`（8 项能力定义与版本化套件、Evidence 的不可变本地存储与过期语义、Verdict 计算、Vendor Claimed 与 Apexnova Verified 分离）、可运行的能力测试套件（`openai-responses` 与 `anthropic-messages`，离线 fixture 测试）、`compatibility run`（估价、预算上限、按 requestId 对账）、`compatibility explain`、`compatibility matrix` 与由它生成的[兼容性矩阵](compatibility-matrix.md)；首批 4 个 Deployment 已固定并完成真实采集（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。能力套件的运行可以 `--record` 录制并 `compatibility replay` 离线回放（仓库内保留了一份对现网 `qwen3.8-flash` 的真实录制作为回归夹具），过期后的重采集由 `compatibility refresh` 承担。剩余依赖：Hub 的 Evidence 查询接口，需求已写入 [Hub 对接需求 12A](apexnova-ai-hub-requirements.md)，其中 (b) 推理错误响应缺 Request ID 与 (d) 用量无法区分未结算/不计费两项是硬前置。
 
