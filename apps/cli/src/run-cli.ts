@@ -18,6 +18,7 @@ import {
   HubClientError,
   verifyHubInference,
   type HubCatalogDeployment,
+  type HubCatalogProtocol,
   type HubUsageRecord,
   type UsageQuery,
 } from "@apexnova-connect/hub-client";
@@ -34,7 +35,9 @@ import {
   parseRecording,
   renderCompatibilityMatrix,
   runCapabilitySuite,
+  type CapabilityOutcomeDetail,
   type EvidenceSubject,
+  type SubjectVerdict,
   type SuiteProtocol,
 } from "@apexnova-connect/capabilities";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
@@ -112,6 +115,7 @@ Usage:
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
   apexnova compatibility run <agent> --deployment <id> [--budget <amount>] [--yes]
+  apexnova compatibility refresh [--within <days>] [--budget <amount>] [--yes]
   apexnova compatibility replay <recording.json>
   apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
   apexnova compatibility matrix [--agent <id>] [--deployment <id>] [--protocol <id>]
@@ -133,6 +137,7 @@ Global options:
   --deployment <id>      Select a public model deployment
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
   --record <path>        Write a replayable recording of a suite run
+  --within <days>        Refresh evidence expiring within this many days (default 7)
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
   --api-key-helper       Let the Agent fetch the credential itself, where it supports one
@@ -188,6 +193,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let deployment: string | undefined;
   let budget: string | undefined;
   let recordPath: string | undefined;
+  let withinDays: number | undefined;
   let dryRun = false;
   let list = false;
   let live = false;
@@ -292,6 +298,19 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         deployment = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--within": {
+        const value = valueAfter(args, index, arg);
+        withinDays = Number(value);
+        if (!Number.isSafeInteger(withinDays) || withinDays < 0 || withinDays > 365) {
+          throw new CliError({
+            code: "INVALID_ARGUMENT",
+            message: "--within must be a whole number of days between 0 and 365.",
+            exitCode: EXIT_CODES.usage,
+          });
+        }
+        index += 1;
+        break;
+      }
       case "--record":
         recordPath = valueAfter(args, index, arg);
         index += 1;
@@ -365,6 +384,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(deployment ? { deployment } : {}),
     ...(budget ? { budget } : {}),
     ...(recordPath ? { recordPath } : {}),
+    ...(withinDays === undefined ? {} : { withinDays }),
     dryRun,
     list,
     live,
@@ -803,87 +823,43 @@ function suiteProtocol(hubProtocol: string): SuiteProtocol | undefined {
   return undefined;
 }
 
+interface CollectionTarget {
+  readonly integration: AgentIntegration;
+  readonly agentVersion: string;
+  readonly deployment: HubCatalogDeployment;
+  readonly hubProtocol: HubCatalogProtocol;
+  readonly protocol: SuiteProtocol;
+  readonly protocolId: string;
+  readonly currency: string;
+}
+
+interface CollectionResult {
+  readonly evidenceId: string;
+  readonly subject: EvidenceSubject;
+  readonly verdict: SubjectVerdict;
+  readonly outcomes: readonly CapabilityOutcomeDetail[];
+  readonly billedAmount: string;
+  readonly currency: string;
+  readonly settled: number;
+  readonly requestIds: readonly string[];
+  readonly unsettled: readonly string[];
+  readonly warnings: readonly string[];
+}
+
 /**
- * Runs the capability suite against one deployment and writes what it found.
- *
- * This is the billable half of M3: it mints a runtime credential scoped to the
- * one deployment under test, sends the probes, revokes the credential, and
- * reconciles every request it made against Hub usage. Nothing is sent before
- * the estimate has been shown and approved, and a local ceiling refuses a run
- * that would cost more than expected -- Hub has no per-request cap yet.
+ * Mints a credential scoped to the one deployment under test, runs the suite,
+ * revokes the credential whatever happened, reconciles what Hub billed and
+ * stores the record. Shared by `run` and `refresh` so a re-collection is the
+ * same measurement as the first one, not a second implementation of it.
  */
-async function executeCompatibilityRun(
+async function collectEvidence(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
-  operands: readonly string[],
-) {
-  const agentId = operands[0];
-  if (agentId === undefined || operands.length !== 1) {
-    throw new CliError({
-      code: "INVALID_ARGUMENT",
-      message: "compatibility run requires exactly one agent.",
-      exitCode: EXIT_CODES.usage,
-    });
-  }
-  const integration = resolveIntegration(agentId, dependencies);
-  const detection = requireAvailable(
-    await detectForCommand(parsed, dependencies, integration),
-    integration,
-  );
-  const agentVersion = "productVersion" in detection ? detection.productVersion : undefined;
-  if (agentVersion === undefined) {
-    throw new CliError({
-      code: "AGENT_VERSION_UNKNOWN",
-      message: `The installed ${integration.manifest.displayName} version could not be determined; evidence has to name the version it was collected against.`,
-      exitCode: EXIT_CODES.unavailable,
-    });
-  }
-
+  target: CollectionTarget,
+): Promise<CollectionResult> {
+  const { integration, agentVersion, deployment, hubProtocol, protocol, protocolId } = target;
   const service = hubService(parsed, dependencies);
   const signal = operationSignal(parsed);
-  const catalog = await service.catalog(parsed.profile, signal);
-  const deployment = await resolveDeployment(parsed, dependencies, integration, catalog);
-  const hubProtocol = selectProtocol(deployment, integration, parsed.protocol);
-  const protocol = suiteProtocol(hubProtocol.protocol);
-  const protocolId = toProtocolId(hubProtocol.protocol);
-  if (protocol === undefined || protocolId === undefined) {
-    throw new CliError({
-      code: "PROTOCOL_NOT_SUPPORTED",
-      message: `The first capability batch covers openai-responses and anthropic-messages; ${hubProtocol.protocol} is not in it yet.`,
-      exitCode: EXIT_CODES.unavailable,
-    });
-  }
-
-  const estimate = await service.estimatePricing(
-    parsed.profile,
-    deployment.id,
-    CAPABILITY_SUITE_ESTIMATE_USAGE,
-    signal,
-  );
-  const ceiling = parsed.budget === undefined ? CAPABILITY_SUITE_BUDGET : Number(parsed.budget);
-  if (Number(estimate.amount) > ceiling) {
-    throw new CliError({
-      code: "BUDGET_EXCEEDED",
-      message: `Hub estimates ${estimate.amount} ${estimate.currency} for the suite, above the ${ceiling} ceiling. Raise it with --budget if that is intended.`,
-      exitCode: EXIT_CODES.billing,
-      details: { estimate, estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE, ceiling },
-    });
-  }
-  if (!parsed.yes) {
-    throw new CliError({
-      code: "APPROVAL_REQUIRED",
-      message: `The suite sends seven requests to ${deployment.id} over ${hubProtocol.protocol}, five of them billable. Hub estimates ${estimate.amount} ${estimate.currency}, which is not a spending cap. Re-run with --yes to approve.`,
-      exitCode: EXIT_CODES.permission,
-      details: {
-        estimate,
-        estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
-        deploymentId: deployment.id,
-        protocol: hubProtocol.protocol,
-        capabilities: CAPABILITY_DEFINITIONS.map((definition) => definition.id),
-      },
-    });
-  }
-
   const environment = dependencies.environment ?? process.env;
   const created = await service.createRuntimeCredential(parsed.profile, {
     name: `${integration.manifest.displayName} capability suite (${parsed.profile})`,
@@ -919,7 +895,7 @@ async function executeCompatibilityRun(
   const warnings: string[] = [];
   const requestIds = [...new Set(suiteResult.requestIds)];
   let billed = 0;
-  let currency = estimate.currency;
+  let currency = target.currency;
   let unsettled = [...requestIds];
   // Hub settles a request a beat after it answers, so the first pass usually
   // misses some. Reporting an unsettled request as costing nothing would be the
@@ -1003,12 +979,119 @@ async function executeCompatibilityRun(
     now: new Date(currentTime(dependencies)),
   });
 
+
+  return {
+    evidenceId: stored.evidence.id,
+    subject,
+    verdict: verdict.verdict,
+    outcomes: suiteResult.outcomes,
+    billedAmount,
+    currency,
+    settled,
+    requestIds,
+    unsettled,
+    warnings,
+  };
+}
+
+/**
+ * Runs the capability suite against one deployment and writes what it found.
+ *
+ * This is the billable half of M3: it mints a runtime credential scoped to the
+ * one deployment under test, sends the probes, revokes the credential, and
+ * reconciles every request it made against Hub usage. Nothing is sent before
+ * the estimate has been shown and approved, and a local ceiling refuses a run
+ * that would cost more than expected -- Hub has no per-request cap yet.
+ */
+async function executeCompatibilityRun(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  operands: readonly string[],
+) {
+  const agentId = operands[0];
+  if (agentId === undefined || operands.length !== 1) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility run requires exactly one agent.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const integration = resolveIntegration(agentId, dependencies);
+  const detection = requireAvailable(
+    await detectForCommand(parsed, dependencies, integration),
+    integration,
+  );
+  const agentVersion = "productVersion" in detection ? detection.productVersion : undefined;
+  if (agentVersion === undefined) {
+    throw new CliError({
+      code: "AGENT_VERSION_UNKNOWN",
+      message: `The installed ${integration.manifest.displayName} version could not be determined; evidence has to name the version it was collected against.`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+
+  const service = hubService(parsed, dependencies);
+  const signal = operationSignal(parsed);
+  const catalog = await service.catalog(parsed.profile, signal);
+  const deployment = await resolveDeployment(parsed, dependencies, integration, catalog);
+  const hubProtocol = selectProtocol(deployment, integration, parsed.protocol);
+  const protocol = suiteProtocol(hubProtocol.protocol);
+  const protocolId = toProtocolId(hubProtocol.protocol);
+  if (protocol === undefined || protocolId === undefined) {
+    throw new CliError({
+      code: "PROTOCOL_NOT_SUPPORTED",
+      message: `The first capability batch covers openai-responses and anthropic-messages; ${hubProtocol.protocol} is not in it yet.`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+
+  const estimate = await service.estimatePricing(
+    parsed.profile,
+    deployment.id,
+    CAPABILITY_SUITE_ESTIMATE_USAGE,
+    signal,
+  );
+  const ceiling = parsed.budget === undefined ? CAPABILITY_SUITE_BUDGET : Number(parsed.budget);
+  if (Number(estimate.amount) > ceiling) {
+    throw new CliError({
+      code: "BUDGET_EXCEEDED",
+      message: `Hub estimates ${estimate.amount} ${estimate.currency} for the suite, above the ${ceiling} ceiling. Raise it with --budget if that is intended.`,
+      exitCode: EXIT_CODES.billing,
+      details: { estimate, estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE, ceiling },
+    });
+  }
+  if (!parsed.yes) {
+    throw new CliError({
+      code: "APPROVAL_REQUIRED",
+      message: `The suite sends seven requests to ${deployment.id} over ${hubProtocol.protocol}, five of them billable. Hub estimates ${estimate.amount} ${estimate.currency}, which is not a spending cap. Re-run with --yes to approve.`,
+      exitCode: EXIT_CODES.permission,
+      details: {
+        estimate,
+        estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
+        deploymentId: deployment.id,
+        protocol: hubProtocol.protocol,
+        capabilities: CAPABILITY_DEFINITIONS.map((definition) => definition.id),
+      },
+    });
+  }
+
+  const collected = await collectEvidence(parsed, dependencies, {
+    integration,
+    agentVersion,
+    deployment,
+    hubProtocol,
+    protocol,
+    protocolId,
+    currency: estimate.currency,
+  });
+  const { billedAmount, currency, settled, requestIds, unsettled, warnings } = collected;
+
   return {
     data: {
-      evidenceId: stored.evidence.id,
-      subject,
-      verdict: verdict.verdict,
-      outcomes: suiteResult.outcomes,
+      evidenceId: collected.evidenceId,
+      subject: collected.subject,
+      verdict: collected.verdict,
+      outcomes: collected.outcomes,
       estimate,
       estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
       billed: { amount: billedAmount, currency, settledRequests: settled, attributedRequests: requestIds.length },
@@ -1017,8 +1100,8 @@ async function executeCompatibilityRun(
     },
     warnings,
     human: [
-      `${integration.manifest.displayName} ${agentVersion} · ${deployment.id} · ${hubProtocol.protocol}: ${verdict.verdict}`,
-      ...suiteResult.outcomes.map(
+      `${integration.manifest.displayName} ${agentVersion} · ${deployment.id} · ${hubProtocol.protocol}: ${collected.verdict}`,
+      ...collected.outcomes.map(
         (outcome) =>
           `  ${outcome.capabilityId.padEnd(26)} ${outcome.support.padEnd(11)} ${outcome.detail}`,
       ),
@@ -1027,7 +1110,7 @@ async function executeCompatibilityRun(
         ? [`Not settled yet: ${unsettled.join(", ")} — reconcile with "apexnova usage --from"`]
         : []),
       `Requests: ${requestIds.join(", ")}`,
-      `Evidence: ${stored.evidence.id}`,
+      `Evidence: ${collected.evidenceId}`,
     ].join("\n"),
   };
 }
@@ -1035,6 +1118,282 @@ async function executeCompatibilityRun(
 /** The schema caps a summary at 1200 characters; a long request list must not lose the record. */
 function truncateSummary(summary: string): string {
   return summary.length <= 1_200 ? summary : `${summary.slice(0, 1_199)}…`;
+}
+
+interface RefreshCandidate {
+  readonly subject: EvidenceSubject;
+  readonly dueAt?: string;
+  readonly expired: boolean;
+}
+
+interface RefreshPlanEntry {
+  readonly subject: EvidenceSubject;
+  readonly dueAt?: string;
+  readonly expired: boolean;
+  readonly target?: CollectionTarget;
+  readonly estimate?: string;
+  readonly skipped?: string;
+  /** The installed Agent differs, so a re-collection lands on a new subject. */
+  readonly installedVersion?: string;
+}
+
+const DEFAULT_REFRESH_WINDOW_DAYS = 7;
+
+/**
+ * Re-collects what has aged out. Evidence expires on purpose -- a 30-day tool
+ * or streaming result stops standing for the present -- so something has to say
+ * which subjects need running again and what that will cost, rather than
+ * leaving a matrix to quietly decay into `unknown`.
+ *
+ * Nothing is sent before the plan and its estimate are approved, and a subject
+ * that cannot be re-collected (Agent gone, deployment withdrawn, protocol no
+ * longer offered) is reported as skipped with the reason instead of silently
+ * dropping off the list.
+ */
+async function executeCompatibilityRefresh(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  operands: readonly string[],
+) {
+  if (operands.length > 0) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility refresh takes no operands; filter with --agent, --deployment or --protocol.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+
+  const now = new Date(currentTime(dependencies));
+  const withinDays = parsed.withinDays ?? DEFAULT_REFRESH_WINDOW_DAYS;
+  const horizon = new Date(now.getTime() + withinDays * 86_400_000);
+  const store = evidenceStore(dependencies);
+  const evidence = await store.list({
+    ...(parsed.agent === undefined ? {} : { agentId: parsed.agent }),
+    ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+    ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
+  });
+
+  const candidates: RefreshCandidate[] = [];
+  for (const row of buildCompatibilityMatrix({ evidence, now }).rows) {
+    const expiries = row.capabilities
+      .map((capability) => capability.expiresAt)
+      .filter((at): at is string => at !== undefined)
+      .sort();
+    const dueAt = expiries[0];
+    const due = row.stale || (dueAt !== undefined && Date.parse(dueAt) <= horizon.getTime());
+    if (!due) continue;
+    candidates.push({
+      subject: row.subject,
+      ...(dueAt === undefined ? {} : { dueAt }),
+      expired: row.stale,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return {
+      data: { generatedAt: now.toISOString(), withinDays, due: [], refreshed: [] },
+      warnings: [] as readonly string[],
+      human: `No evidence expires within ${withinDays} days.`,
+    };
+  }
+
+  const service = hubService(parsed, dependencies);
+  const signal = operationSignal(parsed);
+  const catalog = await service.catalog(parsed.profile, signal);
+  const registry = integrationRegistry(dependencies);
+  const estimates = new Map<string, { readonly amount: string; readonly currency: string }>();
+  const plan: RefreshPlanEntry[] = [];
+
+  for (const candidate of candidates) {
+    const base = {
+      subject: candidate.subject,
+      ...(candidate.dueAt === undefined ? {} : { dueAt: candidate.dueAt }),
+      expired: candidate.expired,
+    };
+    if (!registry.has(candidate.subject.agentId)) {
+      plan.push({ ...base, skipped: "this build does not load that Agent's integration" });
+      continue;
+    }
+    const integration = registry.resolve(candidate.subject.agentId);
+    const agentVersion = await installedVersionOf(parsed, dependencies, integration);
+    if (agentVersion === undefined) {
+      plan.push({ ...base, skipped: `${integration.manifest.displayName} is not installed here` });
+      continue;
+    }
+    const deployment = catalog.deployments.find((item) => item.id === candidate.subject.deploymentId);
+    if (!deployment) {
+      plan.push({ ...base, skipped: "the deployment is no longer in the visible catalog" });
+      continue;
+    }
+    if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") {
+      plan.push({ ...base, skipped: `the deployment is ${deployment.availability.status}` });
+      continue;
+    }
+    const hubProtocol = deployment.protocols.find(
+      (item) => toProtocolId(item.protocol) === candidate.subject.protocol,
+    );
+    const protocol = hubProtocol ? suiteProtocol(hubProtocol.protocol) : undefined;
+    const protocolId = hubProtocol ? toProtocolId(hubProtocol.protocol) : undefined;
+    if (!hubProtocol || protocol === undefined || protocolId === undefined) {
+      plan.push({ ...base, skipped: `the deployment no longer offers ${candidate.subject.protocol}` });
+      continue;
+    }
+
+    let estimate = estimates.get(deployment.id);
+    if (estimate === undefined) {
+      const priced = await service.estimatePricing(
+        parsed.profile,
+        deployment.id,
+        CAPABILITY_SUITE_ESTIMATE_USAGE,
+        signal,
+      );
+      estimate = { amount: priced.amount, currency: priced.currency };
+      estimates.set(deployment.id, estimate);
+    }
+
+    plan.push({
+      ...base,
+      estimate: estimate.amount,
+      target: {
+        integration,
+        agentVersion,
+        deployment,
+        hubProtocol,
+        protocol,
+        protocolId,
+        currency: estimate.currency,
+      },
+      ...(agentVersion === candidate.subject.agentVersion ? {} : { installedVersion: agentVersion }),
+    });
+  }
+
+  const ready = plan.filter((entry) => entry.target !== undefined);
+  const skipped = plan.filter((entry) => entry.skipped !== undefined);
+  const total = ready.reduce((sum, entry) => sum + Number(entry.estimate ?? 0), 0);
+  const totalAmount = total.toFixed(6);
+  const estimateCurrency = [...estimates.values()][0]?.currency ?? "USD";
+  const ceiling = parsed.budget === undefined ? CAPABILITY_SUITE_BUDGET : Number(parsed.budget);
+
+  const planLines = [
+    ...ready.map(
+      (entry) =>
+        `  ${entry.subject.agentId} ${entry.subject.agentVersion} · ${entry.subject.deploymentId} · ${entry.subject.protocol}: ${entry.expired ? "expired" : `expires ${entry.dueAt}`}, estimate ${entry.estimate}${entry.installedVersion === undefined ? "" : ` (will be collected for the installed ${entry.installedVersion})`}`,
+    ),
+    ...skipped.map(
+      (entry) =>
+        `  ${entry.subject.agentId} ${entry.subject.agentVersion} · ${entry.subject.deploymentId} · ${entry.subject.protocol}: skipped, ${entry.skipped}`,
+    ),
+  ];
+
+  if (ready.length === 0) {
+    return {
+      data: { generatedAt: now.toISOString(), withinDays, due: plan.map(planEntryDocument), refreshed: [] },
+      warnings: ["Nothing could be re-collected; every due subject was skipped."],
+      human: [`${candidates.length} subjects are due, none can be re-collected:`, ...planLines].join("\n"),
+    };
+  }
+
+  if (total > ceiling) {
+    throw new CliError({
+      code: "BUDGET_EXCEEDED",
+      message: [
+        `Refreshing ${ready.length} subjects is estimated at ${totalAmount} ${estimateCurrency}, above the ${ceiling} ceiling. Raise it with --budget or narrow the run with --agent, --deployment or --within.`,
+        ...planLines,
+      ].join("\n"),
+      exitCode: EXIT_CODES.billing,
+      details: { estimatedTotal: totalAmount, currency: estimateCurrency, ceiling, due: plan.map(planEntryDocument) },
+    });
+  }
+
+  if (!parsed.yes) {
+    throw new CliError({
+      code: "APPROVAL_REQUIRED",
+      // The list is what someone approves, so it belongs in the message: only
+      // --json readers ever see `details`.
+      message: [
+        `${ready.length} subjects are due within ${withinDays} days, estimated at ${totalAmount} ${estimateCurrency} in total; this is not a spending cap. Re-run with --yes to approve.`,
+        ...planLines,
+      ].join("\n"),
+      exitCode: EXIT_CODES.permission,
+      details: {
+        estimatedTotal: totalAmount,
+        currency: estimateCurrency,
+        withinDays,
+        due: plan.map(planEntryDocument),
+      },
+    });
+  }
+
+  const warnings: string[] = [];
+  const refreshed = [];
+  const failures = [];
+  let billed = 0;
+  let currency = "USD";
+  for (const entry of ready) {
+    try {
+      const collected = await collectEvidence(parsed, dependencies, entry.target!);
+      billed += Number(collected.billedAmount);
+      currency = collected.currency;
+      warnings.push(...collected.warnings);
+      refreshed.push({
+        subject: collected.subject,
+        verdict: collected.verdict,
+        evidenceId: collected.evidenceId,
+        billed: collected.billedAmount,
+      });
+    } catch (error) {
+      const normalized = normalizeError(error);
+      failures.push({ subject: entry.subject, code: normalized.code, message: normalized.message });
+      warnings.push(
+        `${entry.subject.agentId} on ${entry.subject.deploymentId} could not be re-collected: ${normalized.code}.`,
+      );
+    }
+  }
+
+  if (refreshed.length === 0) {
+    throw new CliError({
+      code: "REFRESH_FAILED",
+      message: `None of the ${ready.length} due subjects could be re-collected.`,
+      exitCode: EXIT_CODES.runtime,
+      details: { failures },
+    });
+  }
+
+  const billedAmount = billed.toFixed(6);
+  return {
+    data: {
+      generatedAt: now.toISOString(),
+      withinDays,
+      due: plan.map(planEntryDocument),
+      refreshed,
+      ...(failures.length > 0 ? { failures } : {}),
+      billed: { amount: billedAmount, currency },
+      estimatedTotal: totalAmount,
+    },
+    warnings,
+    human: [
+      `Refreshed ${refreshed.length} of ${ready.length} due subjects, billed ${billedAmount} ${currency} (estimate was ${totalAmount} ${estimateCurrency}).`,
+      ...refreshed.map(
+        (item) =>
+          `  ${item.subject.agentId} ${item.subject.agentVersion} · ${item.subject.deploymentId} · ${item.subject.protocol}: ${item.verdict} (${item.evidenceId})`,
+      ),
+      ...failures.map((item) => `  ${item.subject.agentId} · ${item.subject.deploymentId}: failed, ${item.code}`),
+      ...skipped.map(
+        (entry) => `  ${entry.subject.agentId} · ${entry.subject.deploymentId}: skipped, ${entry.skipped}`,
+      ),
+    ].join("\n"),
+  };
+}
+
+function planEntryDocument(entry: RefreshPlanEntry) {
+  return {
+    subject: entry.subject,
+    expired: entry.expired,
+    ...(entry.dueAt === undefined ? {} : { dueAt: entry.dueAt }),
+    ...(entry.estimate === undefined ? {} : { estimate: entry.estimate }),
+    ...(entry.skipped === undefined ? {} : { skipped: entry.skipped }),
+    ...(entry.installedVersion === undefined ? {} : { installedVersion: entry.installedVersion }),
+  };
 }
 
 /**
@@ -1160,10 +1519,11 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
   if (subcommand === "run") return await executeCompatibilityRun(parsed, dependencies, rest);
   if (subcommand === "matrix") return await executeCompatibilityMatrix(parsed, dependencies, rest);
   if (subcommand === "replay") return await executeCompatibilityReplay(parsed, dependencies, rest);
+  if (subcommand === "refresh") return await executeCompatibilityRefresh(parsed, dependencies, rest);
   if (subcommand !== "explain") {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility accepts four subcommands: run, replay, explain and matrix.",
+      message: "compatibility accepts five subcommands: run, refresh, replay, explain and matrix.",
       exitCode: EXIT_CODES.usage,
     });
   }

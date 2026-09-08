@@ -216,6 +216,15 @@ apexnova compatibility explain opencode --deployment <id>
 
 过期的证据不会被删除，而是标记为 stale 并继续显示，因为它正是某项能力显示为 `unknown` 的原因。短时效的能力（流式、Tool Call）30 天过期，协议静态字段 90 天。
 
+到期要重跑时：
+
+```bash
+apexnova compatibility refresh --within 30        # 只看计划和总估价，不发请求
+apexnova compatibility refresh --within 30 --yes  # 批准后逐个重采
+```
+
+它会列出哪些 subject 到期、各自估价多少，以及哪些重采不了（Agent 没装、Deployment 下架了）。重采不会覆盖旧记录——新证据按时间序胜出，旧的留在库里。
+
 还没跑过 `compatibility run` 时，这条命令会直接告诉你尚未采集。
 
 ## 超时

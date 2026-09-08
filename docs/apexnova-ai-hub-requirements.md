@@ -485,7 +485,7 @@ X-Apexnova-Deployment-Id
 
 ### H2：兼容性
 
-提供 Agent/Scenario 注册表、不可变 Evidence、版本化测试套件和 Verdict 查询。Hub 当前端到端探针只能证明服务可调用，不能代替 Agent 工具调用、结构化输出和会话行为测试。
+提供 Agent/Scenario 注册表、不可变 Evidence、版本化测试套件和 Verdict 查询。Hub 当前端到端探针只能证明服务可调用，不能代替 Agent 工具调用、结构化输出和会话行为测试。具体接口需求见 [12A](#12a-h2-兼容性证据接口阻塞-m3-收口)。
 
 ### H3：推荐
 
@@ -498,6 +498,85 @@ X-Apexnova-Deployment-Id
 ### H5：托管 Agent
 
 托管代码执行需要独立的 Repository Authorization、Workspace Sandbox、任务队列、构建、测试、部署凭证和供应链安全设计。普通 OAuth access token 或 runtime credential 不得直接获得源码仓库和部署权限。
+
+## 12A. H2 兼容性证据接口（阻塞 M3 收口）
+
+Connect 已经在本地跑通了完整链路：版本化能力测试套件、不可变 Evidence、TTL 与过期、Verdict 计算、公开矩阵生成、录制回放。2026-09-08 已对现网 4 个 Deployment × 2 个 Agent 完成首批真实采集，记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。本节是把这批本地能力接到 Hub 所需的服务端交付，按 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)「本地先行、后同步」的顺序，接口需求由真实记录反推而来。
+
+数据形状已经冻结在 [`compatibility-evidence.schema.json`](../schemas/compatibility-evidence.schema.json)，Hub 不需要重新设计，只需要接收、存储、查询与发布。
+
+### 12A.1 端点
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `POST` | `/v1/compatibility/evidence` | 提交一条 Evidence |
+| `GET` | `/v1/compatibility/evidence` | 按 subject 维度查询，cursor 分页 |
+| `GET` | `/v1/compatibility/evidence/{evidenceId}` | 取单条 |
+| `POST` | `/v1/compatibility/evidence/{evidenceId}/revoke` | 撤回（不删除） |
+| `GET` | `/v1/compatibility/test-suites` | 已登记的测试套件与版本 |
+| `POST` | `/v1/compatibility/test-suites` | 登记一个套件版本 |
+
+查询参数：`agentId`、`agentVersion`、`integrationId`、`integrationVersion`、`deploymentId`、`protocol`、`platform`、`suiteId`、`suiteVersion`、`sourceType`、`includeExpired`（默认 `false`）、`includeRevoked`（默认 `false`）、`cursor`、`limit`。
+
+### 12A.2 不可变与更正
+
+- Evidence 的 `id` 是内容哈希，提交幂等：同 `id` 同内容返回 `200` 与既有记录，同 `id` 不同内容返回 `409 evidence_immutable`；
+- 记录一经接收**不可修改**。纠错只能提交新记录并填 `supersedes`，被指向的记录仍然可查；
+- 撤回写 `revokedAt` 与原因，不删除历史。撤回后不得支撑当前 Verdict，但仍可按 ID 查到；
+- Hub 不得改写提交内容中的任何字段（包括 `observedAt`、`expiresAt`），只能追加自己的接收元数据（`receivedAt`、提交主体、签名校验结果）。
+
+### 12A.3 过期与版本
+
+- 过期以记录自带的 `expiresAt` 为准，并且**逐条 capability statement 的 `expiresAt` 独立生效**——90 天的协议结论不因为同批 30 天的流式结论过期而作废；
+- 测试套件按 `id` + semver 登记，登记时附能力定义摘要与 TTL 表。**套件 major 变化使旧记录不再支撑当前 Verdict**（仍可查询）；
+- Agent 版本、Integration 版本、Deployment、协议、平台任一不同即为不同 subject，Hub 不得跨 subject 合并；
+- Deployment 的实现发生变化（模型版本、Endpoint、上游供应线路）必须能使相关 Evidence 过期——这依赖 12A.5(a) 的指纹。
+
+### 12A.4 Verdict 与发布
+
+- Hub 可以提供服务端 Verdict 查询，但每个 Verdict 必须列出其依据的 Evidence ID 与规则版本，允许调用方自行重算；
+- **`sourceType: provider-claim` 与实测记录必须分开存储且在 API 中可区分**。只有厂商声明时 Verdict 为 `unknown`，不得因为声明而变成 `compatible`；
+- 公开矩阵只能来自已发布且未撤回的 Evidence；
+- 社区提交（`community-test`）必须带签名与环境摘要，且默认不能单独让高风险能力达到最高置信度。
+
+### 12A.5 现场实测暴露的服务端缺口
+
+以下每条都来自 2026-09-08 的真实采集，是 M3 继续推进的实际阻塞项：
+
+**(a) 公共目录不暴露上游 Provider 身份。** 现网 46 个 Deployment 全部报告 `providerId: provider.apexnova-ai-hub`，且 catalog 的 `providers` 数组为空。后果是 Evidence 的 `subject` 只能记「Apexnova」，**同一个 Deployment 换了上游供应线路，既有 Evidence 不会因此过期**，公开的兼容性结论会静默失真。
+需求：公共投影暴露稳定的上游身份或不可逆的实现指纹（例如 `implementationFingerprint`，在模型版本、Endpoint 或上游线路变化时改变），并提供其变更时间点可查询。若上游身份属于商业机密，指纹方案即可满足需求。
+
+**(b) 推理错误响应缺少 Request ID。** 观测到 `401` 与 `502` 响应不带 `x-apexnova-request-id`（例：`anthropic-messages` 上三次 502 无 ID、无用量记录，无法追踪也无法对账）。
+需求：**所有**推理响应（含 4xx/5xx）都返回该响应头，与成功路径一致。
+
+**(c) 中断请求的计费口径不一致。** 12 轮采集中，客户端 abort 的流式请求有 11 轮在用量里查不到（数小时后仍然查不到，例如 `44c55922-3161-4620-881f-13cc514eeb98`），1 轮正常计费。
+需求：明确中断的计费语义（按已产出 token 计费 / 不计费），并一致执行。
+
+**(d) 用量查询无法区分「未结算」与「不计费」。** `GET /v1/billing/usage?requestId=` 对两者都返回空，客户端只能猜。Connect 因此一度把未结算显示成 `0.000000 USD`。
+需求：对 Hub 已知的 requestId 返回明确状态（`pending` / `settled` / `not-billable`），不要用空结果表达三种含义。
+
+**(e) `openai-responses` 路径静默忽略 `text.format.json_schema`。** 4 个 Deployment 全部如此，其中 `deepseek-v4-pro-0813` 与 `qwen3.8-flash` 在目录里明确声明了 `structured-output.json`。请求返回 `200`，内容是散文，不报任何字段错误；同批模型在 `anthropic-messages` 上用 tool 承载 schema 则 3/4 通过。
+需求：要么透传/翻译该字段，要么以 4xx 明确拒绝。**静默忽略最糟**——Agent 会以为自己拿到了结构化输出。
+
+**(f) 目录无法表达「支持 tools 但不支持强制 `tool_choice`」。** `qwen3.8-flash` 对 `tool_choice: required` 与 `tool_choice: {type:"tool"}` 一律返回 `400 litellm.BadRequestError`，但普通 tool 调用完全正常。
+需求：能力声明区分「可调用工具」与「可强制指定工具」，否则调用方只能靠试错发现。
+
+**(g) `discountRate` 的来源与有效期不透明。** 同一批 Deployment 的折扣率不同（`glm-5.2` 为 `0.5`，其余为 `1`），该字段目前只出现在估价响应里。
+需求：在目录或估价响应中明确其来源、适用范围与有效期。
+
+### 12A.6 Scope 与非功能
+
+- 新增 `compatibility:read`（查询）与 `compatibility:write`（提交）。采集者身份写入记录，`compatibility:write` 不得下放给普通用户 token；
+- 撤回需要单独权限，且写审计事件；
+- Evidence 不得包含 prompt/response 原文。Connect 侧只提交结构化描述与内容哈希，Hub 应对提交内容做同样的拒绝性校验（凭据模式、体积上限）；
+- 单条 Evidence 体积上限与提交速率限制需明确，超限返回明确错误码而非截断。
+
+### 12A.7 交付物与验收
+
+1. `POST/GET /v1/compatibility/*` 的 OpenAPI 3.1 定义与脱敏 fixtures；
+2. 幂等提交、`supersedes` 链、撤回、过期过滤、`provider-claim` 与实测分离的 contract test；
+3. 12A.5 中 (b)、(d) 两项作为 H2 的硬性前置——它们不修好，Evidence 的对账与追踪在服务端同样不成立；
+4. Connect 侧对应实现为 `apexnova compatibility sync`（尚未开工，等本节接口冻结）。
 
 ## 13. 非功能要求
 

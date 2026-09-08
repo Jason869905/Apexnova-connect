@@ -292,6 +292,24 @@ apexnova compatibility run opencode --deployment <id> --budget 0.20 --yes
 
 首批支持 `openai-responses` 与 `anthropic-messages`；其他协议返回 `PROTOCOL_NOT_SUPPORTED`。任何一项能力失败都是 Evidence 里的一条结论，不是命令失败。
 
+### `apexnova compatibility refresh`
+
+重新采集已经过期或即将过期的 subject。**会真实计费。**
+
+```text
+apexnova compatibility refresh                       # 默认看未来 7 天
+apexnova compatibility refresh --within 30
+apexnova compatibility refresh --within 30 --yes
+apexnova compatibility refresh --agent opencode --budget 0.20 --yes
+```
+
+Evidence 是按 TTL 主动过期的（协议静态字段 90 天、流式与 Tool Call 30 天），所以必须有东西回答「哪些结论要重跑、要花多少」，否则矩阵只会静静地烂成 `unknown`。
+
+- 没有 `--yes` 时返回 `APPROVAL_REQUIRED`，并**逐条列出**待重采的 subject、到期时间与估价，总估价超过 `--budget`（默认 `0.05`）时返回 `BUDGET_EXCEEDED`。两种情况都不发任何请求；
+- 无法重采的 subject 报为 skipped 并给出原因（Agent 未安装、本构建不含该 Integration、Deployment 已下架或不再提供该协议），不会从清单里悄悄消失；
+- 本机安装的 Agent 版本与旧证据不同时，重采会落到**新的 subject** 上，旧证据保持过期状态——这是正确的：版本变了就是另一个问题。命令会在计划里标出这一点；
+- 单个 subject 失败不终止整轮，失败逐条报出；全部失败时返回 `REFRESH_FAILED`。
+
 ### `apexnova compatibility replay <recording>`
 
 对一份录制回放能力套件。不调用 Hub、不需要凭据、不产生任何费用，**也不写入 Evidence**。

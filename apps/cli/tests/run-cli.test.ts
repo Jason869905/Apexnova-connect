@@ -1307,6 +1307,89 @@ describe("CLI", () => {
     expect(JSON.parse(badCapture.stdout()).error.code).toBe("RECORDING_NOT_READABLE");
   });
 
+  it("plans a refresh of what has expired and sends nothing until approved", async () => {
+    // Collected on 2026-09-08; 42 days later the 30-day statements have gone.
+    const { root } = await withEvidence();
+    const suite = vi.fn(async () => suiteResult());
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "refresh", "--json"], {
+      ...runDependencies(root, { now: () => new Date("2026-10-20T10:00:00.000Z") }),
+      io: capture.io,
+      hubService: mockHub(),
+      runCapabilitySuite: suite,
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.permission);
+    const error = JSON.parse(capture.stdout()).error;
+    expect(error.code).toBe("APPROVAL_REQUIRED");
+    expect(error.details.due).toHaveLength(1);
+    expect(error.details.due[0]).toMatchObject({ expired: true, estimate: "0.000060" });
+    expect(error.details.estimatedTotal).toBe("0.000060");
+    expect(suite).not.toHaveBeenCalled();
+  });
+
+  it("says nothing is due when the evidence is still fresh", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "refresh"], {
+      ...runDependencies(root, { now: () => new Date("2026-09-20T10:00:00.000Z") }),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(capture.stdout()).toContain("No evidence expires within 7 days.");
+  });
+
+  it("re-collects the due subjects and reports what each one now says", async () => {
+    const { root } = await withEvidence();
+    const revoke = vi.fn(async () => undefined);
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "refresh", "--yes", "--json"], {
+      ...runDependencies(root, { now: () => new Date("2026-10-20T10:00:00.000Z") }),
+      io: capture.io,
+      hubService: mockHub({ revokeRuntimeCredential: revoke }),
+      runCapabilitySuite: async () => suiteResult({ "protocol.cancellation": "partial" }),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.refreshed).toHaveLength(1);
+    expect(output.data.refreshed[0]).toMatchObject({ verdict: "partial" });
+    expect(revoke).toHaveBeenCalledTimes(1);
+
+    // The fresh record joins the old one; nothing is overwritten.
+    const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
+    expect(await store.list()).toHaveLength(2);
+  });
+
+  it("skips a subject it cannot re-collect instead of dropping it from the list", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "refresh", "--yes", "--json"], {
+      ...runDependencies(root, { now: () => new Date("2026-10-20T10:00:00.000Z") }),
+      io: capture.io,
+      // The deployment the evidence was collected against is gone.
+      hubService: mockHub({
+        catalog: async () => {
+          const base = await mockHub().catalog("default", new AbortController().signal);
+          return { ...base, deployments: [] };
+        },
+      }),
+      runCapabilitySuite: async () => suiteResult(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.refreshed).toEqual([]);
+    expect(output.data.due[0].skipped).toContain("no longer in the visible catalog");
+    expect(output.warnings.join(" ")).toContain("every due subject was skipped");
+  });
+
   it("rejects a subcommand it does not have", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-usage-"));
     const capture = captureIo();

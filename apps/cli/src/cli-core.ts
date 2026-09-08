@@ -121,6 +121,7 @@ export interface ParsedArguments {
   readonly force: boolean;
   readonly budget?: string;
   readonly recordPath?: string;
+  readonly withinDays?: number;
 }
 
 export interface CliErrorShape {
