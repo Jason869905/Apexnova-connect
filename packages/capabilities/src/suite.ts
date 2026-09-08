@@ -410,6 +410,14 @@ function outputText(body: Record<string, unknown> | undefined): string | undefin
   return undefined;
 }
 
+/** The gateway's own error text, which is not model output, capped and trimmed. */
+function apiMessage(probe: Probe): string {
+  const error = probe.body?.error;
+  if (typeof error !== "object" || error === null) return "";
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" ? `: ${truncate(message.slice(0, 120))}` : "";
+}
+
 function outcome(
   capabilityId: string,
   support: CapabilitySupport,
@@ -463,7 +471,7 @@ export async function runCapabilitySuite(
       ? outcome(
           "auth.endpoint-reachable",
           "unsupported",
-          `the runtime credential was refused: HTTP ${minimal.status}${minimal.failure ? ` (${minimal.failure})` : ""}`,
+          `the runtime credential was refused: HTTP ${minimal.status}${minimal.failure ? ` (${minimal.failure})` : apiMessage(minimal)}`,
           [minimal.requestId],
         )
       : rejected.status === 401 || rejected.status === 403
@@ -506,7 +514,7 @@ export async function runCapabilitySuite(
   const shapeOk = bodyShapeOk(options.protocol, minimal.body);
   outcomes.push(
     !minimal.ok
-      ? outcome("protocol.non-streaming", "unsupported", `HTTP ${minimal.status}${minimal.failure ? ` (${minimal.failure})` : ""}`, [minimal.requestId])
+      ? outcome("protocol.non-streaming", "unsupported", `HTTP ${minimal.status}${minimal.failure ? ` (${minimal.failure})` : apiMessage(minimal)}`, [minimal.requestId])
       : shapeOk && usageNumbers(minimal.body)
         ? outcome("protocol.non-streaming", "supported", "response matched the protocol shape and reported usage", [minimal.requestId])
         : outcome(
@@ -522,7 +530,7 @@ export async function runCapabilitySuite(
   const events = streamed.events ?? [];
   outcomes.push(
     !streamed.ok
-      ? outcome("protocol.streaming-order", "unsupported", `HTTP ${streamed.status}${streamed.failure ? ` (${streamed.failure})` : ""}`, [streamed.requestId])
+      ? outcome("protocol.streaming-order", "unsupported", `HTTP ${streamed.status}${streamed.failure ? ` (${streamed.failure})` : apiMessage(streamed)}`, [streamed.requestId])
       : events[0] === order.first && events[events.length - 1] === order.last
         ? outcome("protocol.streaming-order", "supported", `${events.length} events, ${order.first} first and ${order.last} last`, [streamed.requestId])
         : outcome(
@@ -538,7 +546,7 @@ export async function runCapabilitySuite(
     cancelled.aborted === true
       ? outcome("protocol.cancellation", "supported", "the stream closed when the client aborted", [cancelled.requestId])
       : !cancelled.ok
-        ? outcome("protocol.cancellation", "unsupported", `HTTP ${cancelled.status}${cancelled.failure ? ` (${cancelled.failure})` : ""}`, [cancelled.requestId])
+        ? outcome("protocol.cancellation", "unsupported", `HTTP ${cancelled.status}${cancelled.failure ? ` (${cancelled.failure})` : apiMessage(cancelled)}`, [cancelled.requestId])
         : outcome(
             "protocol.cancellation",
             "partial",
@@ -565,7 +573,7 @@ export async function runCapabilitySuite(
         : outcome(
             "protocol.error-semantics",
             "unsupported",
-            `an invalid request returned HTTP ${invalid.status}${invalid.failure ? ` (${invalid.failure})` : ""}`,
+            `an invalid request returned HTTP ${invalid.status}${invalid.failure ? ` (${invalid.failure})` : apiMessage(invalid)}`,
             [invalid.requestId],
           ),
   );
@@ -574,7 +582,7 @@ export async function runCapabilitySuite(
   const toolArgs = toolArguments(options.protocol, tool.body);
   outcomes.push(
     !tool.ok
-      ? outcome("agent.single-tool-call", "unsupported", `HTTP ${tool.status}${tool.failure ? ` (${tool.failure})` : ""}`, [tool.requestId])
+      ? outcome("agent.single-tool-call", "unsupported", `HTTP ${tool.status}${tool.failure ? ` (${tool.failure})` : apiMessage(tool)}`, [tool.requestId])
       : toolArgs === undefined
         ? outcome("agent.single-tool-call", "unsupported", "the response carried no tool call", [tool.requestId])
         : typeof toolArgs.city === "string"
@@ -593,7 +601,7 @@ export async function runCapabilitySuite(
     typeof structuredValue.degrees === "number";
   outcomes.push(
     !structured.ok
-      ? outcome("agent.structured-output", "unsupported", `HTTP ${structured.status}${structured.failure ? ` (${structured.failure})` : ""}`, [structured.requestId])
+      ? outcome("agent.structured-output", "unsupported", `HTTP ${structured.status}${structured.failure ? ` (${structured.failure})` : apiMessage(structured)}`, [structured.requestId])
       : schemaHonoured
         ? outcome(
             "agent.structured-output",
@@ -603,7 +611,16 @@ export async function runCapabilitySuite(
               : "the response followed the requested JSON schema",
             [structured.requestId],
           )
-        : outcome("agent.structured-output", "unsupported", "the response did not follow the requested schema", [structured.requestId]),
+        : outcome(
+            "agent.structured-output",
+            "unsupported",
+            structuredValue === undefined
+              ? options.protocol === "anthropic-messages"
+                ? "the response carried no tool call to hold the schema"
+                : "the response body did not parse as JSON at all"
+              : "the response parsed as JSON but did not match the requested fields",
+            [structured.requestId],
+          ),
   );
 
   return {

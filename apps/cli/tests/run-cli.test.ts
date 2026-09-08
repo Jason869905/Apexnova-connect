@@ -1217,6 +1217,8 @@ describe("CLI", () => {
       cwd: root,
       now: () => new Date("2026-09-08T10:00:00.000Z"),
       createRequestId: () => "local_compat_run",
+      // Reconciliation waits for Hub to settle; no test should wait with it.
+      sleep: async () => undefined,
       ...overrides,
     };
   }
@@ -1323,6 +1325,34 @@ describe("CLI", () => {
     expect(stored[0]?.result.summary).toContain("billed 0.000200 USD");
     expect(stored[0]?.result.capabilities?.find((item) => item.capabilityId === "protocol.cancellation"))
       .toMatchObject({ support: "partial", value: "probe answered as expected" });
+  });
+
+  it("reports what Hub has not settled instead of reporting it as free", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-run-unsettled-"));
+    const sleep = vi.fn(async () => undefined);
+    const capture = captureIo();
+
+    const result = await runCli(
+      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      {
+        ...runDependencies(root),
+        io: capture.io,
+        // The Hub answers before it settles, which is what a run sees in practice.
+        hubService: mockHub({ usage: async () => undefined }),
+        runCapabilitySuite: async () => suiteResult(),
+        sleep,
+      },
+    );
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.billed).toMatchObject({ amount: "0.000000", settledRequests: 0, attributedRequests: 2 });
+    expect(output.warnings.join(" ")).toContain("has not settled 2 of 2 requests");
+    expect(sleep).toHaveBeenCalled();
+
+    const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
+    const stored = await store.list();
+    expect(stored[0]?.result.summary).toContain("over 0 settled of 2 attributed requests");
   });
 
   it("revokes the run credential even when the suite itself fails", async () => {

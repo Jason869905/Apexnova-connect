@@ -899,23 +899,33 @@ async function executeCompatibilityRun(
   const requestIds = [...new Set(suiteResult.requestIds)];
   let billed = 0;
   let currency = estimate.currency;
-  const unsettled: string[] = [];
-  for (const requestId of requestIds) {
-    try {
-      const usage = await service.usage(parsed.profile, requestId, signal);
-      if (usage) {
-        billed += Number(usage.amount);
-        currency = usage.currency;
-      } else {
-        unsettled.push(requestId);
+  let unsettled = [...requestIds];
+  // Hub settles a request a beat after it answers, so the first pass usually
+  // misses some. Reporting an unsettled request as costing nothing would be the
+  // local number presented as the real one, which is what M1 established must
+  // never happen -- so wait a little, then say plainly what is still open.
+  for (let attempt = 0; attempt < 3 && unsettled.length > 0; attempt += 1) {
+    if (attempt > 0) await (dependencies.sleep ?? defaultSleep)(5_000, signal);
+    const stillOpen: string[] = [];
+    for (const requestId of unsettled) {
+      try {
+        const usage = await service.usage(parsed.profile, requestId, signal);
+        if (usage) {
+          billed += Number(usage.amount);
+          currency = usage.currency;
+        } else {
+          stillOpen.push(requestId);
+        }
+      } catch {
+        stillOpen.push(requestId);
       }
-    } catch {
-      unsettled.push(requestId);
     }
+    unsettled = stillOpen;
   }
+  const settled = requestIds.length - unsettled.length;
   if (unsettled.length > 0) {
     warnings.push(
-      `Hub has not settled ${unsettled.length} of ${requestIds.length} requests yet; reconcile them later with the request IDs below.`,
+      `Hub has not settled ${unsettled.length} of ${requestIds.length} requests yet; the billed figure covers ${settled} of them. Reconcile the rest with "apexnova usage --from".`,
     );
   }
 
@@ -945,7 +955,7 @@ async function executeCompatibilityRun(
       value: outcome.detail,
     })),
     summary: truncateSummary(
-      `${supported}/${suiteResult.outcomes.length} supported; ${suiteResult.billableRequests} billable requests; billed ${billedAmount} ${currency}; requests ${requestIds.join(" ")}`,
+      `${supported}/${suiteResult.outcomes.length} supported; billed ${billedAmount} ${currency} over ${settled} settled of ${requestIds.length} attributed requests; requests ${requestIds.join(" ")}`,
     ),
   });
 
@@ -965,7 +975,7 @@ async function executeCompatibilityRun(
       outcomes: suiteResult.outcomes,
       estimate,
       estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
-      billed: { amount: billedAmount, currency },
+      billed: { amount: billedAmount, currency, settledRequests: settled, attributedRequests: requestIds.length },
       requestIds,
       ...(unsettled.length > 0 ? { unsettledRequestIds: unsettled } : {}),
     },
@@ -976,7 +986,10 @@ async function executeCompatibilityRun(
         (outcome) =>
           `  ${outcome.capabilityId.padEnd(26)} ${outcome.support.padEnd(11)} ${outcome.detail}`,
       ),
-      `Billed: ${billedAmount} ${currency} over ${requestIds.length} requests (non-binding estimate was ${estimate.amount} ${estimate.currency})`,
+      `Billed: ${billedAmount} ${currency} over ${settled} of ${requestIds.length} attributed requests (non-binding estimate was ${estimate.amount} ${estimate.currency})`,
+      ...(unsettled.length > 0
+        ? [`Not settled yet: ${unsettled.join(", ")} — reconcile with "apexnova usage --from"`]
+        : []),
       `Requests: ${requestIds.join(", ")}`,
       `Evidence: ${stored.evidence.id}`,
     ].join("\n"),
