@@ -139,6 +139,9 @@ async function jsonProbe(
   try {
     response = await post(options, body, overrides);
   } catch (cause) {
+    // A broken transport -- a replay with no recording for this request, say --
+    // is a problem with the harness, not a finding about the deployment.
+    if (cause instanceof CapabilityError) throw cause;
     return { ok: false, status: 0, failure: truncate(`request failed: ${(cause as Error).name}`) };
   }
   const parsed = await readJson(response);
@@ -164,6 +167,7 @@ async function streamProbe(
   try {
     response = await post(options, body, { signal: controller.signal });
   } catch (cause) {
+    if (cause instanceof CapabilityError) throw cause;
     return { ok: false, status: 0, failure: truncate(`request failed: ${(cause as Error).name}`) };
   }
   if (!response.ok || !response.body) {

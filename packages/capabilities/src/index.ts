@@ -79,3 +79,19 @@ export type {
   CompatibilityMatrixRow,
   MatrixOptions,
 } from "./matrix.js";
+
+export {
+  REPLAY_CREDENTIAL,
+  buildRecording,
+  createRecordingFetch,
+  createReplayFetch,
+  interactionKey,
+  parseRecording,
+  redact,
+} from "./recording.js";
+
+export type {
+  CapabilityRecording,
+  RecordedInteraction,
+  RecordingFetch,
+} from "./recording.js";

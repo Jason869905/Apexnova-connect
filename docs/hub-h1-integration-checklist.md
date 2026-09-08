@@ -84,7 +84,7 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 
 - `[finding]` **`openai-responses` 路径疑似忽略 `text.format.json_schema`：4 个 Deployment 全部不通过**，其中 `deepseek-v4-pro-0813` 与 `qwen3.8-flash` 在目录里明确声明了 `structured-output.json`。请求带 `text.format.json_schema` 且 `max_output_tokens: 256`，返回 HTTP 200 但内容是散文，未报任何字段错误——上游代理静默丢弃未知字段的典型表现。同一批模型在 `anthropic-messages` 上用 tool 机制承载 schema 则 3/4 通过，因此这不是模型能力问题；
 - `[finding]` **`qwen3.8-flash` 拒绝一切形式的强制 `tool_choice`**：`litellm.BadRequestError: OpenAIException - The tool_choice parameter does not support being set to required or object`。它自身的 Tool Call 完全正常（不强制时两条协议都通过），但 `anthropic-messages` 的结构化输出必须靠强制指定 tool 承载 schema，因此该组合不可用；
-- `[finding]` **被客户端 abort 的流式请求在 Hub 用量里永远没有记录**：11 轮里每一轮都恰好有一个请求查不到（即那条被中断的长流式）。中断请求是否计费、按什么口径计费，需要 Hub 明确语义；
+- `[finding]` **被客户端 abort 的流式请求计费不一致**：12 轮采集里 11 轮的那条中断请求在用量里查不到，且数小时后仍然查不到（例如 `44c55922-3161-4620-881f-13cc514eeb98`、`0d14fcf7-eb31-4c82-88d2-20ea38eb9847`）；余下 1 轮该请求正常计费。不是「一律不计费」而是**同一种请求有时计费有时消失**，需要 Hub 明确中断的计费口径；
 - `[finding]` **目录不暴露上游 Provider 身份**：46 个 Deployment 全部报告 `provider.apexnova-ai-hub`，`providers` 数组为空。Evidence 的 `subject` 因此只能记「Apexnova」，同一 Deployment 换了上游不会让既有 Evidence 过期；
 - `[observed]` `discountRate` 逐 Deployment 不同：`glm-5.2` 为 `0.5`，其余为 `1`；
 - `[corrected]` 首轮（17:55）`glm-5.2` 在 `anthropic-messages` 上的 Tool Call、结构化输出和无效请求全部返回 HTTP 502（无 requestId、无用量记录），当时记为该组合不可用。**同一组合在 18:12 重跑得到 `compatible`（8/8 通过）**，因此那三次 502 是瞬时故障而非该 Deployment 的属性。两条 Evidence 都保留在库中，Verdict 取较新的一条——这正是不可变记录加时间序的意义。仍需 Hub 侧确认那批 502 的来源；

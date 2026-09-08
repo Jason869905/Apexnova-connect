@@ -195,6 +195,15 @@ apexnova compatibility run opencode --deployment glm-5.2 --yes    # 批准后真
 
 一次运行发七个请求、其中五个计费，跑完按 requestId 与 Hub 用量对账。估价超过本地上限（默认 `0.05`）会直接拒绝，确实要跑更贵的模型时用 `--budget` 显式抬高。测试用的 runtime credential 只作用于被测 Deployment，跑完立即撤销。
 
+采集时可以顺便录一份，之后离线回放：
+
+```bash
+apexnova compatibility run opencode --deployment glm-5.2 --yes --record run.json
+apexnova compatibility replay run.json      # 不花钱、不需要凭据、不写证据
+```
+
+回放说明的是套件对那批响应的判定，不是模型现在的行为，所以它不会生成证据。录制里不含凭据，请求头一概不记录。
+
 查看本地已采集的兼容性证据说明了什么：
 
 ```bash

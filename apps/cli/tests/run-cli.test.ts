@@ -10,6 +10,8 @@ import { HubClientError } from "@apexnova-connect/hub-client";
 import { createIntegrationRegistry } from "@apexnova-connect/core";
 import {
   CAPABILITY_DEFINITIONS,
+  CAPABILITY_SUITE_ID,
+  CAPABILITY_SUITE_VERSION,
   FileEvidenceStore,
   createEvidence,
   type CapabilitySuiteResult,
@@ -1260,6 +1262,51 @@ describe("CLI", () => {
     expect(output.warnings).toContain("No evidence has been collected yet.");
   });
 
+  it("replays a recording without storing evidence, and says so", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-replay-"));
+    const recordingPath = join(root, "run.recording.json");
+    await writeFile(
+      recordingPath,
+      JSON.stringify({
+        version: 1,
+        recordedAt: "2026-09-08T10:00:00.000Z",
+        suite: { id: "apexnova.capability-suite", version: "0.1.0" },
+        endpoint: "https://api.example.test/v1/responses",
+        protocol: "openai-responses",
+        model: "nova",
+        deploymentId: "deployment.nova",
+        interactions: [],
+      }),
+      "utf8",
+    );
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "replay", recordingPath, "--json"], {
+      ...runDependencies(root),
+      io: capture.io,
+      runCapabilitySuite: async () => suiteResult({ "agent.structured-output": "unsupported" }),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data).toMatchObject({ replayed: true, deploymentId: "deployment.nova" });
+    expect(output.warnings[0]).toContain("A replay is not evidence");
+    // The recording came from an older suite, which the reader has to be told.
+    expect(output.warnings.join(" ")).toContain("recording came from suite 0.1.0");
+
+    // A replay is a check of the suite, not a measurement, so nothing is stored.
+    const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
+    expect(await store.list()).toEqual([]);
+
+    const badCapture = captureIo();
+    const refused = await runCli(["compatibility", "replay", join(root, "missing.json"), "--json"], {
+      ...runDependencies(root),
+      io: badCapture.io,
+    });
+    expect(refused.exitCode).toBe(EXIT_CODES.usage);
+    expect(JSON.parse(badCapture.stdout()).error.code).toBe("RECORDING_NOT_READABLE");
+  });
+
   it("rejects a subcommand it does not have", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-usage-"));
     const capture = captureIo();
@@ -1275,7 +1322,7 @@ describe("CLI", () => {
 
   function suiteResult(overrides: Readonly<Record<string, CapabilitySupport>> = {}): CapabilitySuiteResult {
     return {
-      suite: { id: "apexnova.capability-suite", version: "0.1.0" },
+      suite: { id: CAPABILITY_SUITE_ID, version: CAPABILITY_SUITE_VERSION },
       outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({
         capabilityId: definition.id,
         support: overrides[definition.id] ?? "supported",

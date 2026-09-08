@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { input } from "@inquirer/prompts";
@@ -24,9 +24,14 @@ import {
 import {
   CAPABILITY_DEFINITIONS,
   FileEvidenceStore,
+  REPLAY_CREDENTIAL,
   buildCompatibilityMatrix,
+  buildRecording,
   computeVerdict,
   createEvidence,
+  createRecordingFetch,
+  createReplayFetch,
+  parseRecording,
   renderCompatibilityMatrix,
   runCapabilitySuite,
   type EvidenceSubject,
@@ -107,6 +112,7 @@ Usage:
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
   apexnova compatibility run <agent> --deployment <id> [--budget <amount>] [--yes]
+  apexnova compatibility replay <recording.json>
   apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
   apexnova compatibility matrix [--agent <id>] [--deployment <id>] [--protocol <id>]
   apexnova credential print <agent>
@@ -126,6 +132,7 @@ Global options:
   --compatible-only      Hide unavailable or unsupported deployments
   --deployment <id>      Select a public model deployment
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
+  --record <path>        Write a replayable recording of a suite run
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
   --api-key-helper       Let the Agent fetch the credential itself, where it supports one
@@ -180,6 +187,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let compatibleOnly = false;
   let deployment: string | undefined;
   let budget: string | undefined;
+  let recordPath: string | undefined;
   let dryRun = false;
   let list = false;
   let live = false;
@@ -284,6 +292,10 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         deployment = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--record":
+        recordPath = valueAfter(args, index, arg);
+        index += 1;
+        break;
       case "--budget": {
         budget = valueAfter(args, index, arg);
         if (!/^[0-9]+(?:\.[0-9]+)?$/.test(budget)) {
@@ -352,6 +364,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     compatibleOnly,
     ...(deployment ? { deployment } : {}),
     ...(budget ? { budget } : {}),
+    ...(recordPath ? { recordPath } : {}),
     dryRun,
     list,
     live,
@@ -879,6 +892,10 @@ async function executeCompatibilityRun(
     expiresIn: 86_400,
   }, signal);
 
+  const recorder = parsed.recordPath === undefined
+    ? undefined
+    : createRecordingFetch({ credential: created.secret.reveal() });
+
   let suiteResult;
   try {
     suiteResult = await (dependencies.runCapabilitySuite ?? runCapabilitySuite)({
@@ -890,6 +907,7 @@ async function executeCompatibilityRun(
       requestTimeoutMs: parsed.timeoutSeconds * 1_000,
       allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
       signal,
+      ...(recorder ? { fetch: recorder.fetch } : {}),
     });
   } finally {
     // The credential exists only for this run, whatever the run found.
@@ -930,6 +948,21 @@ async function executeCompatibilityRun(
     warnings.push(
       `Hub has not settled ${unsettled.length} of ${requestIds.length} requests yet; the billed figure covers ${settled} of them. Reconcile the rest with "apexnova usage --from".`,
     );
+  }
+
+  if (recorder && parsed.recordPath !== undefined) {
+    const recording = buildRecording({
+      endpoint: hubProtocol.baseUrl,
+      protocol,
+      model: deployment.inferenceAlias,
+      deploymentId: deployment.id,
+      recordedAt: new Date(currentTime(dependencies)).toISOString(),
+      interactions: recorder.interactions(),
+    });
+    await writeFile(parsed.recordPath, `${JSON.stringify(recording, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
 
   const supported = suiteResult.outcomes.filter((outcome) => outcome.support === "supported").length;
@@ -1005,6 +1038,75 @@ function truncateSummary(summary: string): string {
 }
 
 /**
+ * Runs the suite against a recorded run. It costs nothing, needs no Hub and no
+ * credential, and it writes no evidence: replaying a recording says what the
+ * suite decides about those responses, not what a deployment does now. Evidence
+ * only ever comes from a real run.
+ */
+async function executeCompatibilityReplay(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  operands: readonly string[],
+) {
+  const path = operands[0];
+  if (path === undefined || operands.length !== 1) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility replay requires exactly one recording path.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+
+  let parsedRecording: unknown;
+  try {
+    parsedRecording = JSON.parse(await readFile(resolve(path), "utf8"));
+  } catch (cause) {
+    throw new CliError({
+      code: "RECORDING_NOT_READABLE",
+      message: `The recording at ${path} could not be read.`,
+      exitCode: EXIT_CODES.usage,
+      cause,
+    });
+  }
+  const recording = parseRecording(parsedRecording);
+
+  const result = await (dependencies.runCapabilitySuite ?? runCapabilitySuite)({
+    endpoint: recording.endpoint,
+    protocol: recording.protocol,
+    model: recording.model,
+    deploymentId: recording.deploymentId,
+    credential: SecretValue.from(REPLAY_CREDENTIAL),
+    fetch: createReplayFetch(recording),
+  });
+
+  const supported = result.outcomes.filter((outcome) => outcome.support === "supported").length;
+  return {
+    data: {
+      replayed: true,
+      recordedAt: recording.recordedAt,
+      recordingSuite: recording.suite,
+      suite: result.suite,
+      deploymentId: recording.deploymentId,
+      protocol: recording.protocol,
+      outcomes: result.outcomes,
+    },
+    warnings: [
+      "A replay is not evidence: it reports what the suite decides about recorded responses, not what the deployment does now.",
+      ...(recording.suite.version === result.suite.version
+        ? []
+        : [`The recording came from suite ${recording.suite.version}; this build runs ${result.suite.version}.`]),
+    ],
+    human: [
+      `Replay of ${recording.deploymentId} · ${recording.protocol} recorded ${recording.recordedAt}: ${supported}/${result.outcomes.length} supported`,
+      ...result.outcomes.map(
+        (outcome) => `  ${outcome.capabilityId.padEnd(26)} ${outcome.support.padEnd(11)} ${outcome.detail}`,
+      ),
+      "This is a replay, not evidence; nothing was stored.",
+    ].join("\n"),
+  };
+}
+
+/**
  * Renders the published matrix from the evidence on hand. It is generated, not
  * maintained: a hand-written matrix is a claim nobody can trace, which is the
  * thing M3 exists to stop. Reads the local store only, so it costs nothing.
@@ -1057,10 +1159,11 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
   const [subcommand, ...rest] = parsed.operands;
   if (subcommand === "run") return await executeCompatibilityRun(parsed, dependencies, rest);
   if (subcommand === "matrix") return await executeCompatibilityMatrix(parsed, dependencies, rest);
+  if (subcommand === "replay") return await executeCompatibilityReplay(parsed, dependencies, rest);
   if (subcommand !== "explain") {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility accepts three subcommands: run, explain and matrix.",
+      message: "compatibility accepts four subcommands: run, replay, explain and matrix.",
       exitCode: EXIT_CODES.usage,
     });
   }

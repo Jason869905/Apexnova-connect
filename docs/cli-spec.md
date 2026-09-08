@@ -292,6 +292,19 @@ apexnova compatibility run opencode --deployment <id> --budget 0.20 --yes
 
 首批支持 `openai-responses` 与 `anthropic-messages`；其他协议返回 `PROTOCOL_NOT_SUPPORTED`。任何一项能力失败都是 Evidence 里的一条结论，不是命令失败。
 
+### `apexnova compatibility replay <recording>`
+
+对一份录制回放能力套件。不调用 Hub、不需要凭据、不产生任何费用，**也不写入 Evidence**。
+
+```text
+apexnova compatibility run opencode --deployment <id> --yes --record run.json
+apexnova compatibility replay run.json
+```
+
+`--record` 会把该轮的真实交互写成可回放的录制：请求头一律不记录（凭据在那里），响应头只保留探针会读的白名单字段，响应体与保留的头都经过与 Evidence 相同的脱敏。
+
+回放报告的是**套件对这些响应的判定**，不是该 Deployment 当下的行为，因此它不产出 Evidence——Evidence 只来自真实运行。录制里缺少某个请求时命令直接报 `RECORDING_INCOMPLETE` 而不是把缺口记成失败：用陈旧的录制生成「结论」正是必须避免的事。录制的套件版本与当前构建不同时会给出警告。
+
 ### `apexnova compatibility matrix`
 
 把本地证据渲染成公开的兼容性矩阵（Markdown）。只读，不调用 Hub。

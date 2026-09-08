@@ -120,6 +120,7 @@ export interface ParsedArguments {
   readonly pathPrefix?: string;
   readonly force: boolean;
   readonly budget?: string;
+  readonly recordPath?: string;
 }
 
 export interface CliErrorShape {

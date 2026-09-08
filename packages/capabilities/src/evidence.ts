@@ -80,7 +80,8 @@ export type CapabilityErrorCode =
   | "INVALID_EVIDENCE"
   | "UNKNOWN_CAPABILITY"
   | "EVIDENCE_IMMUTABLE"
-  | "EVIDENCE_REDACTION_FAILED";
+  | "EVIDENCE_REDACTION_FAILED"
+  | "RECORDING_INCOMPLETE";
 
 export class CapabilityError extends Error {
   readonly code: CapabilityErrorCode;
