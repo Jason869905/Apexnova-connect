@@ -211,3 +211,21 @@ describe("runCapabilitySuite", () => {
     ).rejects.toMatchObject({ code: "INVALID_EVIDENCE" });
   });
 });
+
+describe("stream event names", () => {
+  it("reads the frame type when the server sends no event lines", async () => {
+    const dataOnly = () =>
+      new Response(
+        ['{"type":"response.created"}', '{"type":"response.output_text.delta"}', '{"type":"response.completed"}']
+          .map((payload) => `data: ${payload}\n\n`)
+          .join(""),
+        { status: 200, headers: { ...hubHeaders(), "content-type": "text/event-stream" } },
+      );
+
+    const result = await runCapabilitySuite(
+      options("openai-responses", healthyHub("openai-responses", { stream: dataOnly })),
+    );
+
+    expect(support(result)["protocol.streaming-order"]).toBe("supported");
+  });
+});

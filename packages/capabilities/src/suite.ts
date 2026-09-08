@@ -183,6 +183,7 @@ async function streamProbe(
   let buffer = "";
   let bytes = 0;
   let aborted = false;
+  let named = false;
   try {
     for (;;) {
       const chunk = await reader.read();
@@ -194,12 +195,16 @@ async function streamProbe(
       while (newline !== -1) {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
-        if (line.startsWith("event:")) events.push(line.slice("event:".length).trim());
-        else if (line.startsWith("data:")) {
-          // The Responses API carries the event name in the data payload too;
-          // Anthropic repeats it. Either way only the name is read.
+        if (line.startsWith("event:")) {
+          named = true;
+          events.push(line.slice("event:".length).trim());
+        } else if (!named && line.startsWith("data:")) {
+          // Both protocols name their frames in an `event:` line, but a server
+          // that only sends `data:` frames still carries the name in the
+          // payload -- reading it there keeps a terse stream from being
+          // reported as a stream with no events at all.
           const payload = line.slice("data:".length).trim();
-          if (payload.startsWith("{") && events.length === 0) {
+          if (payload.startsWith("{")) {
             try {
               const parsed = JSON.parse(payload) as { type?: unknown };
               if (typeof parsed.type === "string") events.push(parsed.type);
