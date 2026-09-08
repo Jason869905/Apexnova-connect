@@ -139,6 +139,33 @@ export function selectProtocol(
   return protocol;
 }
 
+/**
+ * Accepts what the catalog shows a user. IDs are matched first and exactly, so a
+ * deployment can never be shadowed by another one's alias; aliases resolve only
+ * when they name exactly one deployment, because guessing which of several the
+ * user meant is how a request ends up served by a model they did not pick.
+ */
+function selectDeploymentByReference(
+  catalog: HubCatalogSnapshot,
+  reference: string,
+): HubCatalogDeployment | undefined {
+  const byId = catalog.deployments.find((item) => item.id === reference);
+  if (byId) return byId;
+  const byAlias = catalog.deployments.filter(
+    (item) => item.inferenceAlias === reference || (item.aliases ?? []).includes(reference),
+  );
+  if (byAlias.length === 1) return byAlias[0];
+  if (byAlias.length > 1) {
+    throw new CliError({
+      code: "DEPLOYMENT_AMBIGUOUS",
+      message: `${reference} names ${byAlias.length} deployments; use one of their IDs instead.`,
+      exitCode: EXIT_CODES.usage,
+      details: { deploymentIds: byAlias.map((item) => item.id) },
+    });
+  }
+  return undefined;
+}
+
 export async function resolveDeployment(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
@@ -152,7 +179,7 @@ export async function resolveDeployment(
     deployment.protocols.some((protocol) => usable.has(protocol.protocol)),
   );
   if (parsed.deployment) {
-    const deployment = catalog.deployments.find((item) => item.id === parsed.deployment);
+    const deployment = selectDeploymentByReference(catalog, parsed.deployment);
     if (!deployment) {
       throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "The selected deployment is not present in the visible Hub catalog.", exitCode: EXIT_CODES.unavailable });
     }

@@ -1301,13 +1301,9 @@ async function createAgentPlan(
   rejectUnusableConfig(inspection, integration);
 
   const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
-  const deployment = catalog.deployments.find((item) => item.id === parsed.deployment);
-  if (!deployment) {
-    throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "The selected deployment is not present in the visible Hub catalog.", exitCode: EXIT_CODES.unavailable });
-  }
-  if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") {
-    throw new CliError({ code: "DEPLOYMENT_UNAVAILABLE", message: `Deployment ${deployment.id} is ${deployment.availability.status}.`, exitCode: EXIT_CODES.unavailable });
-  }
+  // --deployment is required above, so this takes the explicit branch and the
+  // reference is resolved the one way, rather than a second copy of the rules.
+  const deployment = await resolveDeployment(parsed, dependencies, integration, catalog);
   const protocol = selectProtocol(deployment, integration, parsed.protocol);
   const intent = connectionIntent(parsed, dependencies, integration, deployment, protocol, catalog);
   const plan = await integration.plan(context, detection, inspection, intent);

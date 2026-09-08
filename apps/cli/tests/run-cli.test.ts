@@ -371,6 +371,54 @@ describe("CLI", () => {
     expect(await readFile(configPath, "utf8")).toBe(original);
   });
 
+  it("accepts the alias the catalog shows, and refuses an ambiguous one", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-alias-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{}\n", "utf8");
+    const common = {
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      createRequestId: () => "local_alias",
+    };
+
+    // "nova" is the inference alias of deployment.nova; a user reads it off
+    // `apexnova models`, not the long catalog ID.
+    const capture = captureIo();
+    const byAlias = await runCli(
+      ["connect", "opencode", "--deployment", "nova", "--dry-run", "--json"],
+      { ...common, io: capture.io, hubService: mockHub() },
+    );
+    expect(byAlias.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(capture.stdout()).data).toMatchObject({ deploymentId: "deployment.nova" });
+
+    // Two deployments answering to one alias is not something to guess at.
+    const base = await mockHub().catalog("default", new AbortController().signal);
+    const first = base.deployments[0]!;
+    const ambiguous = mockHub({
+      catalog: async () => ({
+        ...base,
+        deployments: [first, { ...first, id: "deployment.nova-eu" }],
+      }),
+    });
+    const ambiguousCapture = captureIo();
+    const refused = await runCli(
+      ["connect", "opencode", "--deployment", "nova", "--dry-run", "--json"],
+      { ...common, io: ambiguousCapture.io, hubService: ambiguous },
+    );
+    expect(refused.exitCode).toBe(EXIT_CODES.usage);
+    const error = JSON.parse(ambiguousCapture.stdout()).error;
+    expect(error.code).toBe("DEPLOYMENT_AMBIGUOUS");
+    expect(error.details.deploymentIds).toEqual(["deployment.nova", "deployment.nova-eu"]);
+
+    // An ID still wins outright, so an alias cannot shadow another deployment.
+    const idCapture = captureIo();
+    const byId = await runCli(
+      ["connect", "opencode", "--deployment", "deployment.nova-eu", "--dry-run", "--json"],
+      { ...common, io: idCapture.io, hubService: ambiguous },
+    );
+    expect(byId.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(idCapture.stdout()).data).toMatchObject({ deploymentId: "deployment.nova-eu" });
+  });
+
   it("requires explicit approval before issuing a runtime credential", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-approval-"));
     const configPath = join(root, "opencode.jsonc");
