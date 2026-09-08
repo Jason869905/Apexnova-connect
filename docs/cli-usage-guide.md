@@ -184,6 +184,22 @@ apexnova restore <transaction-id> --yes
 
 **必须逆序恢复**：跳过较新的事务会返回 `RESTORE_ORDER_CONFLICT`（`--list` 里标了 `restorable` 的那条才可恢复，`--dry-run` 的判断与实际执行一致）。恢复只撤销 Connect 写入的字段，之后你自己加的配置不受影响；恢复 `switch` 时会为上一个目标重新签发凭据。文件在应用之后被改过时，恢复会以 `CONFLICT` 拒绝而不是覆盖你的改动。
 
+## 兼容性
+
+查看本地已采集的兼容性证据说明了什么：
+
+```bash
+apexnova compatibility explain                 # 所有 Agent
+apexnova compatibility explain opencode        # 单个 Agent
+apexnova compatibility explain opencode --deployment <id>
+```
+
+这条命令完全离线：只读本地证据，不调用 Hub，不花钱。结果按「Agent 版本 + Integration 版本 + Deployment + 协议 + 平台」分组，任一项不同都算另一个问题——升级 Agent 之后旧证据不会顺延，命令会直接告诉你它不适用于当前安装的版本。
+
+过期的证据不会被删除，而是标记为 stale 并继续显示，因为它正是某项能力显示为 `unknown` 的原因。短时效的能力（流式、Tool Call）30 天过期，协议静态字段 90 天。
+
+采集证据的 `compatibility run` 还未提供，因此现在这条命令通常会告诉你尚未采集。
+
 ## 超时
 
 `--timeout <秒>` 是**整条命令**的期限（默认 120 秒），不是单次 HTTP 请求的期限——一条命令会串行发多个 Hub 请求，共享同一期限。失败后撤销刚签发凭据的补偿操作使用独立期限，不会因为主操作超时而被跳过。

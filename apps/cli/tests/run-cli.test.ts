@@ -9,6 +9,13 @@ import { EXIT_CODES, RuntimeBindingStore, runCli, type CliIo, type HubCommandSer
 import { HubClientError } from "@apexnova-connect/hub-client";
 import { createIntegrationRegistry } from "@apexnova-connect/core";
 import {
+  CAPABILITY_DEFINITIONS,
+  FileEvidenceStore,
+  createEvidence,
+  type CapabilitySupport,
+  type EvidenceSubject,
+} from "@apexnova-connect/capabilities";
+import {
   openCodeIntegration,
   resolveOpenCodeExecutable,
 } from "@apexnova-connect/integration-opencode";
@@ -1020,5 +1027,169 @@ describe("CLI", () => {
     expect(result.exitCode).toBe(EXIT_CODES.billing);
     expect(balance).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
+  });
+  const evidenceSubject: EvidenceSubject = {
+    agentId: "opencode",
+    agentVersion: "1.18.29",
+    integrationId: "opencode",
+    integrationVersion: "0.1.0",
+    deploymentId: "deployment.nova",
+    protocol: "openai-responses",
+    platform: `windows-${process.arch}`,
+  };
+
+  async function withEvidence(
+    overrides: Readonly<Record<string, CapabilitySupport>> = {},
+    subject: EvidenceSubject = evidenceSubject,
+  ) {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-"));
+    const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
+    const record = await store.append(
+      createEvidence({
+        sourceType: "maintainer-test",
+        subject,
+        observedAt: "2026-09-08T10:00:00.000Z",
+        outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({
+          capabilityId: definition.id,
+          support: overrides[definition.id] ?? "supported",
+        })),
+      }),
+    );
+    return { root, store, record: record.evidence };
+  }
+
+  /** No hubService is injected on purpose: explain must answer offline. */
+  function explainDependencies(root: string, now: string, detection: DetectionResult = installed) {
+    return {
+      registry: registryWith({ detect: async () => detection }),
+      platform: "win32" as const,
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+      now: () => new Date(now),
+      createRequestId: () => "local_compat",
+    };
+  }
+
+  it("explains what the stored evidence adds up to without calling the Hub", async () => {
+    const { root, record } = await withEvidence();
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "explain", "opencode", "--json"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.agents).toHaveLength(1);
+    const explained = output.data.agents[0];
+    expect(explained).toMatchObject({ agentId: "opencode", installedVersion: "1.18.29" });
+    expect(explained.subjects[0]).toMatchObject({
+      verdict: "compatible",
+      appliesToInstalled: true,
+      collectedOnThisPlatform: true,
+      subject: { deploymentId: "deployment.nova", protocol: "openai-responses" },
+    });
+    expect(explained.subjects[0].capabilities).toHaveLength(CAPABILITY_DEFINITIONS.length);
+    expect(explained.subjects[0].capabilities[0].evidenceId).toBe(record.id);
+    expect(output.warnings).toEqual([]);
+  });
+
+  it("reads incompatible when a required capability failed, and names it", async () => {
+    const { root } = await withEvidence({ "agent.single-tool-call": "unsupported" });
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "explain", "opencode"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(capture.stdout()).toContain("openai-responses");
+    expect(capture.stdout()).toContain("incompatible");
+    expect(capture.stdout()).toContain("agent.single-tool-call");
+  });
+
+  it("falls back to unknown once the short-lived evidence expires", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    // 42 days on: the 30-day streaming and tool-call statements have expired.
+    await runCli(["compatibility", "explain", "opencode", "--json"], {
+      ...explainDependencies(root, "2026-10-20T10:00:00.000Z"),
+      io: capture.io,
+    });
+
+    const subject = JSON.parse(capture.stdout()).data.agents[0].subjects[0];
+    expect(subject.verdict).toBe("unknown");
+    expect(
+      subject.capabilities.find((item: { capabilityId: string }) => item.capabilityId === "protocol.streaming-order"),
+    ).toMatchObject({ support: "unknown", stale: true });
+    expect(
+      subject.capabilities.find((item: { capabilityId: string }) => item.capabilityId === "auth.endpoint-reachable"),
+    ).toMatchObject({ support: "supported", stale: false });
+  });
+
+  it("says the evidence does not apply when a different version is installed", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "explain", "opencode", "--json"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z", {
+        ...installed,
+        productVersion: "1.19.0",
+      }),
+      io: capture.io,
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.agents[0].subjects[0].appliesToInstalled).toBe(false);
+    expect(output.warnings.join(" ")).toContain("covers 1.18.29, but 1.19.0 is installed");
+  });
+
+  it("filters by deployment and answers plainly when nothing was collected", async () => {
+    const { root, store } = await withEvidence();
+    await store.append(
+      createEvidence({
+        sourceType: "maintainer-test",
+        subject: { ...evidenceSubject, deploymentId: "deployment.other" },
+        observedAt: "2026-09-08T10:00:00.000Z",
+        outcomes: [{ capabilityId: "auth.endpoint-reachable", support: "supported" }],
+      }),
+    );
+    const capture = captureIo();
+
+    await runCli(["compatibility", "explain", "opencode", "--deployment", "deployment.other", "--json"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+    });
+    const filtered = JSON.parse(capture.stdout()).data.agents[0].subjects;
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].subject.deploymentId).toBe("deployment.other");
+
+    const emptyCapture = captureIo();
+    const empty = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-empty-"));
+    const result = await runCli(["compatibility", "explain", "opencode"], {
+      ...explainDependencies(empty, "2026-09-20T10:00:00.000Z"),
+      io: emptyCapture.io,
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(emptyCapture.stdout()).toContain("no compatibility evidence has been collected");
+  });
+
+  it("rejects a subcommand it does not have", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-usage-"));
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "run", "opencode", "--json"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.usage);
+    expect(JSON.parse(capture.stdout()).error.code).toBe("INVALID_ARGUMENT");
   });
 });

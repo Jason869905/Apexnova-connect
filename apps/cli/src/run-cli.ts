@@ -21,6 +21,11 @@ import {
   type HubUsageRecord,
   type UsageQuery,
 } from "@apexnova-connect/hub-client";
+import {
+  FileEvidenceStore,
+  computeVerdict,
+  type EvidenceSubject,
+} from "@apexnova-connect/capabilities";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
 import { CredentialStoreError, SecretValue } from "@apexnova-connect/credential-store";
 
@@ -32,6 +37,7 @@ import {
   defaultSleep,
   hubConfigContext,
   currentPlatform,
+  currentTime,
   hubService,
   integrationContext,
   integrationRegistry,
@@ -87,6 +93,7 @@ Usage:
   apexnova switch <agent> --deployment <id> (--dry-run | --yes)
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
+  apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
   apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
   apexnova inspect <agent> [--config <path>]
@@ -711,6 +718,158 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
     warnings,
     human: `Restored transaction ${transactionId}.${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? " Runtime credential requires manual revocation." : ""}`,
   };
+}
+
+function evidenceStore(dependencies: CliDependencies): FileEvidenceStore {
+  return new FileEvidenceStore({ root: join(localStateRoot(dependencies), "evidence") });
+}
+
+function subjectKey(subject: EvidenceSubject): string {
+  return [
+    subject.agentId,
+    subject.agentVersion,
+    subject.integrationId,
+    subject.integrationVersion,
+    subject.deploymentId,
+    subject.protocol,
+    subject.platform,
+  ].join("\u0000");
+}
+
+function platformTag(dependencies: CliDependencies): string {
+  return `${currentPlatform(dependencies) ?? dependencies.platform ?? process.platform}-${process.arch}`;
+}
+
+/** A probe failure must not stop the command: it only costs the version note. */
+async function installedVersionOf(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  integration: AgentIntegration,
+): Promise<string | undefined> {
+  try {
+    const detection = await detectForCommand(parsed, dependencies, integration);
+    return "productVersion" in detection ? detection.productVersion : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads what has been collected locally and says what it adds up to. It answers
+ * from stored evidence only -- no Hub call, no billing -- so "nothing has been
+ * collected" is an answer it gives rather than an error, and a subject whose
+ * Agent version no longer matches what is installed is reported as not applying
+ * instead of being quietly counted.
+ */
+/** The full sentence stays in the JSON `reason`; a terminal row needs the fact. */
+function capabilityNote(capability: {
+  readonly evidenceId?: string;
+  readonly observedAt?: string;
+  readonly expiresAt?: string;
+  readonly stale: boolean;
+}): string {
+  if (capability.evidenceId === undefined) return "not collected";
+  if (capability.stale) return `expired ${capability.expiresAt ?? ""}`.trimEnd();
+  return `observed ${capability.observedAt ?? ""}`.trimEnd();
+}
+
+async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDependencies) {
+  const [subcommand, ...rest] = parsed.operands;
+  if (subcommand !== "explain") {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility accepts one subcommand: explain.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  if (rest.length > 1) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility explain accepts at most one agent.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+
+  const requestedAgent = rest[0];
+  const targets = requestedAgent === undefined
+    ? integrationRegistry(dependencies).list()
+    : [resolveIntegration(requestedAgent, dependencies)];
+  const store = evidenceStore(dependencies);
+  const now = new Date(currentTime(dependencies));
+  const runningOn = platformTag(dependencies);
+  const warnings: string[] = [];
+
+  const agents = [];
+  for (const integration of targets) {
+    const records = await store.list({
+      agentId: integration.manifest.id,
+      ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+      ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
+    });
+    const installedVersion = await installedVersionOf(parsed, dependencies, integration);
+
+    const subjects = new Map<string, EvidenceSubject>();
+    for (const record of records) subjects.set(subjectKey(record.subject), record.subject);
+
+    const explained = [...subjects.values()].map((subject) => {
+      const verdict = computeVerdict({ subject, evidence: records, now });
+      const appliesToInstalled =
+        installedVersion === undefined || installedVersion === subject.agentVersion;
+      if (!appliesToInstalled) {
+        warnings.push(
+          `Evidence for ${integration.manifest.displayName} covers ${subject.agentVersion}, but ${installedVersion} is installed; a version change expires it.`,
+        );
+      }
+      return {
+        ...verdict,
+        appliesToInstalled,
+        collectedOnThisPlatform: subject.platform === runningOn,
+      };
+    });
+
+    agents.push({
+      agentId: integration.manifest.id,
+      displayName: integration.manifest.displayName,
+      ...(installedVersion === undefined ? {} : { installedVersion }),
+      subjects: explained,
+    });
+  }
+
+  const human = agents
+    .map((agent) => {
+      if (agent.subjects.length === 0) {
+        return `${agent.displayName}: no compatibility evidence has been collected.`;
+      }
+      return agent.subjects
+        .map((entry) => {
+          const subject = entry.subject;
+          const cited = [
+            ...new Set(
+              entry.capabilities
+                .map((capability) => capability.evidenceId)
+                .filter((id): id is string => id !== undefined),
+            ),
+          ];
+          return [
+            `${agent.displayName} ${subject.agentVersion} · ${subject.deploymentId} · ${subject.protocol} · ${subject.platform}: ${entry.verdict}`,
+            ...entry.capabilities.map(
+              (capability) =>
+                `  ${capability.capabilityId.padEnd(26)} ${capability.level.padEnd(9)} ${capability.support.padEnd(11)} ${capabilityNote(capability)}`,
+            ),
+            ...(cited.length === 0 ? [] : [`  Evidence: ${cited.join(", ")}`]),
+            ...(entry.appliesToInstalled
+              ? []
+              : [`  Note: ${agent.installedVersion} is installed, so this evidence does not apply to it.`]),
+            ...(entry.collectedOnThisPlatform
+              ? []
+              : [`  Note: collected on ${subject.platform}, running on ${runningOn}.`]),
+          ].join("\n");
+        })
+        .join("\n\n");
+    })
+    .join("\n\n");
+
+  return { data: { generatedAt: now.toISOString(), agents }, warnings, human };
 }
 
 function agentPlanSummary(plan: ChangePlan) {
@@ -1470,6 +1629,9 @@ export async function runCli(
         break;
       case "restore":
         result = await executeRestore(parsed, dependencies);
+        break;
+      case "compatibility":
+        result = await executeCompatibility(parsed, dependencies);
         break;
       case "run":
         result = await executeRun(parsed, dependencies);

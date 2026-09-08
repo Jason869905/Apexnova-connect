@@ -23,6 +23,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@apexnova-connect/capabilities": "workspace:*",
     "@apexnova-connect/core": "workspace:*",
     "@apexnova-connect/credential-store": "workspace:*",
     "@apexnova-connect/config-engine": "workspace:*",

@@ -23,6 +23,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@apexnova-connect/capabilities':
+        specifier: workspace:*
+        version: link:../../packages/capabilities
       '@apexnova-connect/config-engine':
         specifier: workspace:*
         version: link:../../packages/config-engine

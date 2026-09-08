@@ -271,6 +271,24 @@ apexnova restore <transaction-id>
 
 恢复一次 `switch` 时，凭据库只保存上一个 Deployment/协议及事务链，不保存已撤销的旧 secret。CLI 会先为上一个目标签发并通过控制面确认一枚新 runtime credential，再回滚配置、原子保存新绑定并撤销当前凭据。恢复最初的 `connect` 则回到连接前配置、撤销当前凭据并删除本地绑定。若新凭据签发或验证失败，文件保持不变；若配置已经恢复但绑定保存失败，CLI 撤销相关凭据并进入安全断开状态。
 
+### `apexnova compatibility explain [agent]`
+
+只读地解释本地已采集的 Compatibility Evidence。不调用 Hub，不产生计费。
+
+```text
+apexnova compatibility explain
+apexnova compatibility explain opencode
+apexnova compatibility explain opencode --deployment <id> --protocol <id>
+```
+
+结果按 subject 分组——Agent 与版本、Integration 与版本、Deployment、协议、平台，任一不同都是另一个问题——每组给出 Verdict（`compatible`、`partial`、`incompatible`、`unknown`）以及逐项能力的支持程度、级别和所依据的记录。
+
+- 过期的 Evidence 仍然显示并标记为 stale：它正是「为什么是 unknown」的解释；
+- 完全没有采集过时命令成功返回并说明未采集，不作为错误；
+- 当前安装的 Agent 版本与 Evidence 的版本不同时，该 subject 标记为不适用于当前安装并给出警告。
+
+采集命令 `compatibility run` 随首批能力测试套件提供，见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)。
+
 ### `apexnova doctor [agent]`
 
 执行只读诊断，省略 agent 时诊断全部已注册 Integration。每项检查符合 [`diagnostic-result.schema.json`](../schemas/diagnostic-result.schema.json) 的 `checks[]` 形状：

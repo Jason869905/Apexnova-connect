@@ -107,7 +107,9 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.3`。
 
-当前状态：已开启。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
+当前状态：进行中。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
+
+已完成：`packages/capabilities`（8 项能力定义与版本化套件、Evidence 的不可变本地存储与过期语义、Verdict 计算）和只读的 `compatibility explain`。进行中：可运行的能力测试套件（真实调用，需固定 4 个 Deployment）与 `compatibility run`。
 
 范围：
 
