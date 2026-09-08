@@ -69,6 +69,20 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 
 未覆盖：macOS 全部流程（无实机，Keychain 后端只有 mock command runner 测试）；Hermes 的 `chat_completions` 模式未做真实推理。
 
+## M3 首次能力采集记录（2026-09-08，Linux/WSL2，`api.apexnova-consulting.com`）
+
+对 GLM-5.2（`deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw`，inference alias `glm-5.2`，`available`）跑了首批能力套件的两条协议。目录声明该 deployment 同时支持 `openai-responses`、`openai-chat` 与 `anthropic-messages`。
+
+- `[passed]` **OpenCode 1.18.29 / `openai-responses`：8 项中 7 项 supported，Verdict `partial`**（Evidence `evidence.f1e9a0dd5a089281d39c6d950402eeab`）。鉴权、模型映射、非流式形状与用量、流式顺序（50 个事件，`response.created` 开头 `response.completed` 结尾）、中断、错误语义（无效请求返回 400 + 结构化错误 + requestId）、单 Tool Call（参数符合声明的 JSON Schema）全部通过；
+- `[failed]` 同一条运行里 `agent.structured-output` 不通过：请求带 `text.format.json_schema` 且 `max_output_tokens: 256`，实际返回 24 input / 495 output tokens 的散文，既不遵循 schema 也超出 max token 设定（请求 `6cd45909-cb95-49d6-a8d4-ac8325048feb`）；
+- `[failed]` **Claude Code 2.1.261 / `anthropic-messages`：Verdict `incompatible`**（Evidence `evidence.7da34dd0c2d96231718823959bfc285d`）。鉴权、模型映射、非流式、流式顺序（`message_start` → `message_stop`）、中断均通过，但**带 `tools` 的请求、带 `tool_choice` 的结构化输出请求、以及故意写坏的请求全部返回 HTTP 502**，且这三个 502 响应不带 `x-apexnova-request-id`，在 Hub 用量里也没有对应记录；
+- `[finding]` 因此**目录对该 deployment 的协议声明与真实可用并不等价**：`anthropic-messages` 可以做基础对话与流式，但 Tool Call 走不通，而无效请求得到的是 502 而不是可诊断的 4xx。这正是 M3 不采信目录声明的理由；需要 Hub 侧确认 502 来自网关翻译还是上游模型；
+- `[passed]` 计费对账：OpenCode 一轮 6 个归因请求实扣 `0.001645 USD`（含一条 400 计 0），Claude Code 一轮 3 个归因请求实扣 `0.000330 USD`，两轮合计 `0.001975 USD`，非约束估价为每轮 `0.001820 USD`；
+- `[finding]` 被客户端 abort 的长流式请求（`44c55922-3161-4620-881f-13cc514eeb98`）在 Hub 用量里**没有任何记录**。中断是否计费、如何计费需要 Hub 明确语义；
+- `[fixed]` Connect 侧缺陷：运行结束时立即对账，Hub 尚未结算，CLI 把未结算报成 `Billed: 0.000000 USD`——本地数字被当成实际费用。已修正为重试若干次后如实区分「已结算/未结算」，并在人类可读输出里点名未结算的 requestId；非 `--json` 模式下 warnings 本来就不显示，因此这条必须进正文。
+
+两轮各自的 runtime credential 只作用于该 deployment，跑完即撤销。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：
