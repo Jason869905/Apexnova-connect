@@ -65,6 +65,21 @@ describe("buildCompatibilityMatrix", () => {
     expect(buildCompatibilityMatrix({ evidence, now: NOW }).rows).toHaveLength(2);
   });
 
+  it("splits a deployment by the implementation each record tested, and names it", () => {
+    const before = { ...subject, implementationFingerprint: "impl-a1b2c3d4e5f6" };
+    const after = { ...subject, implementationFingerprint: "impl-999999999999" };
+    const evidence = [record({ subject: before }), record({ subject: after })];
+
+    const matrix = buildCompatibilityMatrix({ evidence, now: NOW });
+
+    expect(matrix.rows).toHaveLength(2);
+    // Two rows on one deployment are indistinguishable unless the render says
+    // which implementation each one tested.
+    const rendered = renderCompatibilityMatrix(matrix);
+    expect(rendered).toContain("`deployment.nova` (impl `impl-a1b2c3d`)");
+    expect(rendered).toContain("`deployment.nova` (impl `impl-9999999`)");
+  });
+
   it("marks a row whose evidence has expired, and still shows what it said", () => {
     // 42 days on, the 30-day statements have gone stale.
     const matrix = buildCompatibilityMatrix({

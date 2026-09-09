@@ -93,6 +93,23 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 
 计费对账：当日 11 轮合计实扣 `0.008724 USD`，Hub 用量记录逐条吻合（成功请求计费，4xx/5xx 计 0，被中断的流式无记录）。每轮的 runtime credential 只作用于被测 Deployment，跑完即撤销。
 
+## M3 服务端缺口的关闭记录（2026-09-09，Hub §H–§Y 回执）
+
+12A.5 的七条缺口 Hub 已全部上线，六个 Evidence 端点可用，处置详见[需求 12C](apexnova-ai-hub-requirements.md)。逐条对照上一节的 finding：
+
+- `[closed]` **(a) 实现指纹**：目录新增 `implementationFingerprint` 与 `implementationChangedAt`，`null` 为合法状态（未接上游），LB 权重/优先级变化不改指纹。Connect 侧同时修掉自己的一个洞：指纹此前进了 `subject` 和内容哈希，却没进本地的 subject 身份比较，换实现前后的记录仍会并成一行；现已参与身份，矩阵按实现分行。指纹回退到旧值的情形由 `implementationChangedAt` 兜住，`compatibility refresh` 因此每次都要读一次目录；
+- `[closed]` **(b) request-id**：九个推理端点、BYOK 与边缘（nginx）全部带该头。边缘错误带 `source:"edge"` 与 `edge_` 前缀的 id，**那个 id 不在计费台账里**，对账阶段不再去查它，单列为「未进台账」。上一节那三次 502 的归属仍无法回溯（未留响应体），判别法照旧；
+- `[closed]` **(c) 中断计费**：保留计费并补 `abortedAt`，requestId 可查——上一节「同一种请求有时查得到有时查不到」的抱怨随 (d) 一并消解；
+- `[closed]` **(d) 结算状态**：`settlementStatus: pending/settled/not-billable/failed`，未结算时金额为 `null` 而非 `"0.000000"`。CLI 的「重试三次仍为空就报未结算」的近似做法已被替换：只有 `pending` 会再问，`not-billable` 与 `failed` 各自成列；
+- `[closed]` **(e) 证据等级**：目录新增 `capabilityStatements[]`，目前全部为 `provider-claim`——`deepseek-v4-pro-0813` 与 `qwen3.8-flash` 那条 `structured-output.json` 声明因此如实降为厂商声明。**缺席即未知，不是 unsupported**；已核对 Connect 没有「目录说没有 → 判 incompatible」的分支；
+- `[closed]` **(f) 强制工具选择**：新能力位 `tool.choice.forced`，目前存量模型无人勾选，短期内「没有」仍读作未知。`qwen3.8-flash` 的那条结论目前只来自我们自己的实测；把它变成一条可发布的能力结论需要新增 Capability Definition 与探针，排在 `compatibility sync` 之后；
+- `[closed]` **(g) 折扣**：估价响应新增 `discount{rate,source,appliesTo,expiresAt}`，按时段促销的 `expiresAt` 是本时段结束而非活动期结束。
+
+待办两项（Hub 要求，见需求 12C.4）：
+
+- `[pending]` **重新授权**：`compatibility:read/:write/:revoke` 已加进 CLI 的可选 scope，授权服务器宣告后才会请求，因此不会提前向用户弹权限；Hub 部署后需要用户重新 `apexnova login` 才拿得到；
+- `[pending]` **采集者账号**：`compatibility:write` / `:revoke` 需 Hub admin 服务端授予，由维护者带外提供，本清单不写账号。未开通时用户在批准页会看到明确的「采集者权限未授予」而非「码无效」。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：

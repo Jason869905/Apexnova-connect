@@ -179,6 +179,8 @@ devices:read devices:revoke runtime-credentials:write
 api-keys:write api-keys:read api-keys:revoke
 ```
 
+H2 追加 `compatibility:read`、`compatibility:write`、`compatibility:revoke`（见 12A.6 与 12C.4）。Connect 把它们放在**可选 scope**里：授权服务器的 `scopes_supported` 没有宣告时不请求，因此不会提前向用户弹出一个还不存在的权限。
+
 设备批准页面必须展示请求 scope、设备名称、平台和将使用的账号。未知 scope 必须拒绝，不能静默忽略。
 
 ### 7.3 安全要求
@@ -520,7 +522,7 @@ Connect 已经在本地跑通了完整链路：版本化能力测试套件、不
 
 ### 12A.2 不可变与更正
 
-- Evidence 的 `id` 是内容哈希，提交幂等：同 `id` 同内容返回 `200` 与既有记录，同 `id` 不同内容返回 `409 evidence_immutable`；
+- Evidence 的 `id` 是内容哈希，提交幂等：同 `id` 同内容返回 `200` 与既有记录。**「同 `id` 不同内容」在实现里拿到的是 `400 evidence_hash_mismatch`，不是 `409 evidence_immutable`**——id 就是内容哈希，内容一变哈希必变，Hub 在校验阶段就拒了；`409` 只作为重放兜底存在（见 12C.3）；
 - 记录一经接收**不可修改**。纠错只能提交新记录并填 `supersedes`，被指向的记录仍然可查；
 - 撤回写 `revokedAt` 与原因，不删除历史。撤回后不得支撑当前 Verdict，但仍可按 ID 查到；
 - Hub 不得改写提交内容中的任何字段（包括 `observedAt`、`expiresAt`），只能追加自己的接收元数据（`receivedAt`、提交主体、签名校验结果）。
@@ -567,7 +569,7 @@ Hub 已核实**翻译层无误**（已翻成 `response_format.json_schema` 并�
 ### 12A.6 Scope 与非功能
 
 - 新增 `compatibility:read`（查询）与 `compatibility:write`（提交）。采集者身份写入记录，`compatibility:write` 不得下放给普通用户 token；
-- 撤回需要单独权限，且写审计事件；
+- 撤回需要单独权限（Hub 已实现为 `compatibility:revoke`），且写审计事件；
 - Evidence 不得包含 prompt/response 原文。Connect 侧只提交结构化描述与内容哈希，Hub 应对提交内容做同样的拒绝性校验（凭据模式、体积上限）；
 - 单条 Evidence 体积上限与提交速率限制需明确，超限返回明确错误码而非截断。
 
@@ -646,6 +648,61 @@ Hub 计划里的 `received.implementationFingerprint` 与 `derived.staleReason` 
 - (b)(d) 上线后，Connect 会把「未结算 / 不计费」按 `settlementStatus` 如实呈现，替换现在「重试三次后仍未结算就报未结算」的近似做法；
 - `compatibility sync` 等 §H 四处冻结、Evidence 端点可用后开工；
 - M3 保持开启，直到 (b)(d) 落地并跑通一次真实同步——评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)。
+
+## 12C. Hub 第二次回执的处置（2026-09-09）
+
+针对 Hub 在 `infra/docs/hub-h1-connect-handoff.md` §H–§Y 的回复：§H 四处 Hub 全部接受（与 12B 一致，无需再改），12A.5 的七条缺口全部上线，六个 Evidence 端点可用。本节只记两件事——**Hub 的实现与本文哪里不一致**，以及 **Connect 这侧因此改了什么**。
+
+### 12C.1 三处与本文不一致，以 Hub 的实现为准
+
+1. **冲突码是 `400 evidence_hash_mismatch`，不是 `409 evidence_immutable`。** 理由成立：`id` 就是内容哈希，内容一变哈希必变，「同 id 不同内容」在校验阶段就被拒，走不到不可变性检查。12A.2 已改；`409` 留作重放兜底。`compatibility sync` 的冲突分支挂在 400 上。
+2. **`evidence.<32hex>` 返回 `400 evidence_legacy_id`。** 与 12B.2 一致（我们说过可以拒收）。那 12 条本地记录不上行，只在本地被识别；sync 不得重试这个错误码。
+3. **撤回必须带 `reason`**，否则 `400`；重复撤回幂等返 `200` 且不覆盖第一次的理由。撤回入口按此实现，重复撤回不算失败。
+
+响应的 `payload` / `received` / `derived` 三块严格分开，正合 12A.2 「Hub 不得改写提交内容」的要求：Connect 只把 `payload` 落进本地存储（那是我们自己的原文，逐字节可校验），`received` 与 `derived` 只用于展示和判断，不回写进 Evidence。`supportsCurrentVerdict` 我们自己重算——按 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)，本地矩阵本来就不依赖服务端 Verdict，本轮 Hub 没做服务端 Verdict 也不构成阻塞。
+
+「被 supersede 的记录默认不从列表过滤掉」与我们一致（12A.2：被指向的记录仍然可查）；「带签名的记成 `unverified` 而不是 `valid`」也与 12A.4 的社区证据口径一致。
+
+### 12C.2 七条缺口的消费方式
+
+| 缺口 | Hub 交付 | Connect 这侧 |
+| --- | --- | --- |
+| (a) 实现指纹 | `implementationFingerprint` + `implementationChangedAt`，`null` 合法 | 指纹参与 subject 身份；`compatibility refresh` 另按 `implementationChangedAt` 判断 |
+| (b) request-id | 九个推理端点 + BYOK + 边缘全带；边缘错误 `source:"edge"`、`edge_` 前缀且查不到 | 对账阶段不查 `edge_` 开头的 id，单独列出 |
+| (c) 中断计费 | 保留计费 + `abortedAt`，requestId 可查 | 我们要的可查询性到位，(c) 的抱怨消解 |
+| (d) 结算状态 | `settlementStatus` + 未结算金额为 `null` | 替换「重试三次仍为空就报未结算」的近似做法 |
+| (e) 证据等级 | `capabilityStatements[]`，目前全是 `provider-claim` | 无需改动，已核对：缺席读作 unknown |
+| (f) 强制工具选择 | 新能力位 `tool.choice.forced`，目前为空 | 不读目录能力位下结论；探针另排 |
+| (g) 折扣 | `discount{rate,source,appliesTo,expiresAt}` | 估价响应已解析 |
+
+几条要展开的：
+
+**(a) 我们这侧原本有个洞，已修。** 12B.4 把指纹放进了 `subject`，也就进了内容哈希，但本地的 `sameSubject` 与矩阵的 `subjectKey` 并不比较这个字段——结果是同一个 Deployment 换实现前后采到的两条记录仍会并成一行，指纹等于白记。现在指纹参与 subject 身份：换了实现就是另一个 subject，旧记录不再支撑新实现的 Verdict，矩阵里也按实现分行并显示指纹前 12 位。没有指纹的历史记录只代表它自己，不会被读成「覆盖了某个已知实现」——这正是 12B.4 说的「它们只是无法因实现变更而过期」。
+
+Hub 提醒的另外两点都已落地：LB 权重/优先级变化不改指纹（那本来就不该使证据过期）；**同一个值可能再次出现但 `changedAt` 是新的**——实现回退到旧版本时指纹会和旧记录重新相等，所以 `refresh` 除了比指纹，还比 `implementationChangedAt` 是否晚于该 subject 的最近观测时间，晚于就判到期。为此 `compatibility refresh` 现在总要读一次目录（此前只在有记录临近过期时才读），因为「实现有没有变」只有目录能回答。
+
+**(b) 边缘错误的 id 不进台账。** 采集跑完后逐 requestId 对账，`edge_` 开头的直接不查——问了也是三次超时加一条永远不消失的警告——改为单列一条「未进台账、无法对账」。鉴权前失败的请求同理带 id 但查不到，我们不做特殊识别（没有前缀可依），它会停在「未结算」，那是如实的。
+
+**(d) 三义合一的空结果没有了。** 只有 `pending` 值得再问一次；`not-billable` 与 `failed` 各自成列，不再计入「未结算」；金额 `null` 不读成 `0.000000`。Hub 没有返回 `settlementStatus` 的旧路径仍按金额判断，行为与从前一致。
+
+**(e) 我们没有「目录说没有 → 判 incompatible」的分支。** 已核对：`provider-claim` 只进 claims 桶，永不产生 `supported`；任何能力缺席读作 `unknown`。(f) 同理，我们不拿目录能力位下支持与否的结论。要把「能否强制指定工具」变成结论，需要一条新的 Capability Definition 加一个探针，那是套件版本的事，排在 sync 之后。
+
+**(g)** 按时段促销的 `expiresAt` 是本时段结束而非活动期结束，估价缓存不得跨过它。
+
+### 12C.3 非功能
+
+单条 64KB（超限 `413`，不截断）、60 次/分钟（`429` + `Retry-After`）、凭据模式扫描（命中 `400` 并指出字段路径）。sync 实现时：不截断、不重试 `400`、按 `Retry-After` 退避。契约向量按 12B.3 的原话执行——对不上一律按契约问题处理，不更新快照。
+
+### 12C.4 Hub 要求我们做的两件事
+
+1. **重新授权。** `compatibility:read`、`compatibility:write`、`compatibility:revoke` 已加进 CLI 的可选 scope。可选 scope 只在授权服务器 `scopes_supported` 里宣告时才请求，所以 Hub 部署前不会向任何用户提示新权限，部署后也不需要为此再发一版。
+2. **采集者账号。** 由维护者带外报给 Hub admin，本文不写账号。Hub 已补上开通入口，未开通时批准页会明说「该应用请求了采集者权限，而你的账号没有被授予」，而不是笼统的「码无效」——这正是 12B.7 赞成的做法。
+
+### 12C.5 尚未开工
+
+- `compatibility sync`：§H 已冻结、端点已上线、非功能已明确，不再有阻塞项；
+- `tool.choice.forced` 的探针与对应 Capability Definition（套件 minor 版本）；
+- M3 保持开启，直到跑通一次真实同步——评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)。
 
 ## 13. 非功能要求
 

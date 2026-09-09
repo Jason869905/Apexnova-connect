@@ -837,6 +837,12 @@ interface CollectionTarget {
   readonly currency: string;
 }
 
+/**
+ * Hub stamps an edge failure (nginx, ahead of the data plane) with this prefix
+ * and `source: "edge"`. Such an ID is not a ledger key and cannot be looked up.
+ */
+const EDGE_REQUEST_ID_PREFIX = "edge_";
+
 interface CollectionResult {
   readonly evidenceId: string;
   readonly subject: EvidenceSubject;
@@ -845,8 +851,15 @@ interface CollectionResult {
   readonly billedAmount: string;
   readonly currency: string;
   readonly settled: number;
+  /** Every request ID the suite saw, edge failures included. */
   readonly requestIds: readonly string[];
   readonly unsettled: readonly string[];
+  /** Known to Hub and deliberately free, which is not the same as unsettled. */
+  readonly notBillable: readonly string[];
+  /** Hub gave up settling these; they will never turn into a cost. */
+  readonly unsettleable: readonly string[];
+  /** Rejected before the data plane, so never in the ledger. */
+  readonly edgeIds: readonly string[];
   readonly warnings: readonly string[];
 }
 
@@ -897,23 +910,42 @@ async function collectEvidence(
   }
 
   const warnings: string[] = [];
-  const requestIds = [...new Set(suiteResult.requestIds)];
+  const attributed = [...new Set(suiteResult.requestIds)];
+  // An edge failure carries `source: "edge"` and an `edge_` prefixed ID that
+  // never reaches the billing ledger -- Hub says so outright, so asking for it
+  // would spend three attempts to learn what we already know.
+  const edgeIds = attributed.filter((id) => id.startsWith(EDGE_REQUEST_ID_PREFIX));
+  const requestIds = attributed.filter((id) => !id.startsWith(EDGE_REQUEST_ID_PREFIX));
   let billed = 0;
   let currency = target.currency;
-  let unsettled = [...requestIds];
+  const notBillable: string[] = [];
+  const unsettleable: string[] = [];
+  let pending = [...requestIds];
   // Hub settles a request a beat after it answers, so the first pass usually
   // misses some. Reporting an unsettled request as costing nothing would be the
   // local number presented as the real one, which is what M1 established must
   // never happen -- so wait a little, then say plainly what is still open.
-  for (let attempt = 0; attempt < 3 && unsettled.length > 0; attempt += 1) {
+  // `settlementStatus` now separates the three things an empty answer used to
+  // mean, and only `pending` is worth asking about again.
+  for (let attempt = 0; attempt < 3 && pending.length > 0; attempt += 1) {
     if (attempt > 0) await (dependencies.sleep ?? defaultSleep)(5_000, signal);
     const stillOpen: string[] = [];
-    for (const requestId of unsettled) {
+    for (const requestId of pending) {
       try {
         const usage = await service.usage(parsed.profile, requestId, signal);
-        if (usage) {
+        // A request Hub has never heard of is indistinguishable from one it has
+        // not written yet, so both stay pending. An older Hub that answers
+        // without a status is read from the amount, as before.
+        const status = usage === undefined
+          ? "pending"
+          : usage.settlementStatus ?? (usage.amount === undefined ? "pending" : "settled");
+        if (status === "settled" && usage?.amount !== undefined) {
           billed += Number(usage.amount);
           currency = usage.currency;
+        } else if (status === "not-billable") {
+          notBillable.push(requestId);
+        } else if (status === "failed") {
+          unsettleable.push(requestId);
         } else {
           stillOpen.push(requestId);
         }
@@ -921,12 +953,23 @@ async function collectEvidence(
         stillOpen.push(requestId);
       }
     }
-    unsettled = stillOpen;
+    pending = stillOpen;
   }
-  const settled = requestIds.length - unsettled.length;
+  const unsettled = pending;
+  const settled = requestIds.length - unsettled.length - notBillable.length - unsettleable.length;
   if (unsettled.length > 0) {
     warnings.push(
       `Hub has not settled ${unsettled.length} of ${requestIds.length} requests yet; the billed figure covers ${settled} of them. Reconcile the rest with "apexnova usage --from".`,
+    );
+  }
+  if (unsettleable.length > 0) {
+    warnings.push(
+      `Hub reported settlement as failed for ${unsettleable.length} of ${requestIds.length} requests (${unsettleable.join(", ")}); the billed figure does not include them and they will not settle later.`,
+    );
+  }
+  if (edgeIds.length > 0) {
+    warnings.push(
+      `${edgeIds.length} requests failed at the edge (${edgeIds.join(", ")}); those IDs are not in the billing ledger and cannot be reconciled.`,
     );
   }
 
@@ -976,7 +1019,14 @@ async function collectEvidence(
       value: outcome.detail,
     })),
     summary: truncateSummary(
-      `${supported}/${suiteResult.outcomes.length} supported; billed ${billedAmount} ${currency} over ${settled} settled of ${requestIds.length} attributed requests; requests ${requestIds.join(" ")}`,
+      [
+        `${supported}/${suiteResult.outcomes.length} supported`,
+        `billed ${billedAmount} ${currency} over ${settled} settled of ${attributed.length} attributed requests`,
+        ...(notBillable.length === 0 ? [] : [`${notBillable.length} not billable`]),
+        ...(unsettleable.length === 0 ? [] : [`${unsettleable.length} failed to settle`]),
+        ...(edgeIds.length === 0 ? [] : [`${edgeIds.length} failed at the edge`]),
+        `requests ${attributed.join(" ")}`,
+      ].join("; "),
     ),
   });
 
@@ -997,8 +1047,11 @@ async function collectEvidence(
     billedAmount,
     currency,
     settled,
-    requestIds,
+    requestIds: attributed,
     unsettled,
+    notBillable,
+    unsettleable,
+    edgeIds,
     warnings,
   };
 }
@@ -1095,7 +1148,7 @@ async function executeCompatibilityRun(
     protocolId,
     currency: estimate.currency,
   });
-  const { billedAmount, currency, settled, requestIds, unsettled, warnings } = collected;
+  const { billedAmount, currency, settled, requestIds, unsettled, notBillable, unsettleable, edgeIds, warnings } = collected;
 
   return {
     data: {
@@ -1105,9 +1158,20 @@ async function executeCompatibilityRun(
       outcomes: collected.outcomes,
       estimate,
       estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
-      billed: { amount: billedAmount, currency, settledRequests: settled, attributedRequests: requestIds.length },
+      billed: {
+        amount: billedAmount,
+        currency,
+        settledRequests: settled,
+        attributedRequests: requestIds.length,
+        ...(notBillable.length > 0 ? { notBillableRequests: notBillable.length } : {}),
+        ...(unsettleable.length > 0 ? { failedToSettleRequests: unsettleable.length } : {}),
+        ...(edgeIds.length > 0 ? { edgeRequests: edgeIds.length } : {}),
+      },
       requestIds,
       ...(unsettled.length > 0 ? { unsettledRequestIds: unsettled } : {}),
+      ...(notBillable.length > 0 ? { notBillableRequestIds: notBillable } : {}),
+      ...(unsettleable.length > 0 ? { failedToSettleRequestIds: unsettleable } : {}),
+      ...(edgeIds.length > 0 ? { edgeRequestIds: edgeIds } : {}),
     },
     warnings,
     human: [
@@ -1120,6 +1184,9 @@ async function executeCompatibilityRun(
       ...(unsettled.length > 0
         ? [`Not settled yet: ${unsettled.join(", ")} — reconcile with "apexnova usage --from"`]
         : []),
+      ...(notBillable.length > 0 ? [`Not billable: ${notBillable.join(", ")}`] : []),
+      ...(unsettleable.length > 0 ? [`Settlement failed: ${unsettleable.join(", ")}`] : []),
+      ...(edgeIds.length > 0 ? [`Failed at the edge, not in the ledger: ${edgeIds.join(", ")}`] : []),
       `Requests: ${requestIds.join(", ")}`,
       `Evidence: ${collected.evidenceId}`,
     ].join("\n"),
@@ -1134,13 +1201,49 @@ function truncateSummary(summary: string): string {
 interface RefreshCandidate {
   readonly subject: EvidenceSubject;
   readonly dueAt?: string;
+  /** The newest observation behind the row, to compare against the catalog. */
+  readonly observedAt?: string;
   readonly expired: boolean;
+  /** Due because a statement has expired or is about to. */
+  readonly ttlDue: boolean;
+}
+
+/**
+ * Says whether the deployment is no longer the one that was tested. Two things
+ * can say so, and Hub warned about both: the fingerprint differs, or the
+ * catalog reports a change after the observation -- an implementation that
+ * reverts to an earlier one carries the earlier fingerprint again but a newer
+ * `implementationChangedAt`. A record collected before the catalog had
+ * fingerprints has none of its own, which is not evidence of a change, so only
+ * the timestamp can speak for it.
+ */
+function implementationChange(
+  candidate: RefreshCandidate,
+  deployment: HubCatalogDeployment,
+): string | undefined {
+  const collected = candidate.subject.implementationFingerprint;
+  const current = deployment.implementationFingerprint;
+  if (collected !== undefined && current !== undefined && collected !== current) {
+    return `the implementation changed from ${collected.slice(0, 12)} to ${current.slice(0, 12)}`;
+  }
+  const changedAt = deployment.implementationChangedAt;
+  if (changedAt !== undefined && candidate.observedAt !== undefined && Date.parse(changedAt) > Date.parse(candidate.observedAt)) {
+    return `the deployment changed its implementation on ${changedAt}, after this was collected`;
+  }
+  return undefined;
+}
+
+function refreshReason(entry: RefreshPlanEntry): string {
+  if (entry.implementationChanged !== undefined) return entry.implementationChanged;
+  return entry.expired ? "expired" : `expires ${entry.dueAt}`;
 }
 
 interface RefreshPlanEntry {
   readonly subject: EvidenceSubject;
   readonly dueAt?: string;
   readonly expired: boolean;
+  /** Why the implementation no longer matches what was tested, when it does not. */
+  readonly implementationChanged?: string;
   readonly target?: CollectionTarget;
   readonly estimate?: string;
   readonly skipped?: string;
@@ -1184,27 +1287,27 @@ async function executeCompatibilityRefresh(
     ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
   });
 
-  const candidates: RefreshCandidate[] = [];
+  const tracked: RefreshCandidate[] = [];
   for (const row of buildCompatibilityMatrix({ evidence, now }).rows) {
     const expiries = row.capabilities
       .map((capability) => capability.expiresAt)
       .filter((at): at is string => at !== undefined)
       .sort();
     const dueAt = expiries[0];
-    const due = row.stale || (dueAt !== undefined && Date.parse(dueAt) <= horizon.getTime());
-    if (!due) continue;
-    candidates.push({
+    tracked.push({
       subject: row.subject,
       ...(dueAt === undefined ? {} : { dueAt }),
+      ...(row.observedAt === undefined ? {} : { observedAt: row.observedAt }),
       expired: row.stale,
+      ttlDue: row.stale || (dueAt !== undefined && Date.parse(dueAt) <= horizon.getTime()),
     });
   }
 
-  if (candidates.length === 0) {
+  if (tracked.length === 0) {
     return {
       data: { generatedAt: now.toISOString(), withinDays, due: [], refreshed: [] },
       warnings: [] as readonly string[],
-      human: `No evidence expires within ${withinDays} days.`,
+      human: "No compatibility evidence has been collected yet.",
     };
   }
 
@@ -1215,11 +1318,18 @@ async function executeCompatibilityRefresh(
   const estimates = new Map<string, { readonly amount: string; readonly currency: string }>();
   const plan: RefreshPlanEntry[] = [];
 
-  for (const candidate of candidates) {
+  for (const candidate of tracked) {
+    const deployment = catalog.deployments.find((item) => item.id === candidate.subject.deploymentId);
+    // Evidence also stops standing when the thing it tested changed underneath
+    // it -- 12A.3, and the reason the fingerprint was worth putting in the
+    // subject at all. TTL is only the other half.
+    const changed = deployment === undefined ? undefined : implementationChange(candidate, deployment);
+    if (!candidate.ttlDue && changed === undefined) continue;
     const base = {
       subject: candidate.subject,
       ...(candidate.dueAt === undefined ? {} : { dueAt: candidate.dueAt }),
       expired: candidate.expired,
+      ...(changed === undefined ? {} : { implementationChanged: changed }),
     };
     if (!registry.has(candidate.subject.agentId)) {
       plan.push({ ...base, skipped: "this build does not load that Agent's integration" });
@@ -1231,7 +1341,6 @@ async function executeCompatibilityRefresh(
       plan.push({ ...base, skipped: `${integration.manifest.displayName} is not installed here` });
       continue;
     }
-    const deployment = catalog.deployments.find((item) => item.id === candidate.subject.deploymentId);
     if (!deployment) {
       plan.push({ ...base, skipped: "the deployment is no longer in the visible catalog" });
       continue;
@@ -1292,19 +1401,27 @@ async function executeCompatibilityRefresh(
   const planLines = [
     ...ready.map(
       (entry) =>
-        `  ${entry.subject.agentId} ${entry.subject.agentVersion} · ${entry.subject.deploymentId} · ${entry.subject.protocol}: ${entry.expired ? "expired" : `expires ${entry.dueAt}`}, estimate ${entry.estimate}${entry.installedVersion === undefined ? "" : ` (will be collected for the installed ${entry.installedVersion})`}`,
+        `  ${entry.subject.agentId} ${entry.subject.agentVersion} · ${entry.subject.deploymentId} · ${entry.subject.protocol}: ${refreshReason(entry)}, estimate ${entry.estimate}${entry.installedVersion === undefined ? "" : ` (will be collected for the installed ${entry.installedVersion})`}`,
     ),
     ...skipped.map(
       (entry) =>
-        `  ${entry.subject.agentId} ${entry.subject.agentVersion} · ${entry.subject.deploymentId} · ${entry.subject.protocol}: skipped, ${entry.skipped}`,
+        `  ${entry.subject.agentId} ${entry.subject.agentVersion} · ${entry.subject.deploymentId} · ${entry.subject.protocol}: ${refreshReason(entry)}, skipped, ${entry.skipped}`,
     ),
   ];
+
+  if (plan.length === 0) {
+    return {
+      data: { generatedAt: now.toISOString(), withinDays, due: [], refreshed: [] },
+      warnings: [] as readonly string[],
+      human: `No evidence expires within ${withinDays} days. No deployment has changed its implementation either.`,
+    };
+  }
 
   if (ready.length === 0) {
     return {
       data: { generatedAt: now.toISOString(), withinDays, due: plan.map(planEntryDocument), refreshed: [] },
       warnings: ["Nothing could be re-collected; every due subject was skipped."],
-      human: [`${candidates.length} subjects are due, none can be re-collected:`, ...planLines].join("\n"),
+      human: [`${plan.length} subjects are due, none can be re-collected:`, ...planLines].join("\n"),
     };
   }
 
@@ -1405,6 +1522,7 @@ function planEntryDocument(entry: RefreshPlanEntry) {
     subject: entry.subject,
     expired: entry.expired,
     ...(entry.dueAt === undefined ? {} : { dueAt: entry.dueAt }),
+    ...(entry.implementationChanged === undefined ? {} : { implementationChanged: entry.implementationChanged }),
     ...(entry.estimate === undefined ? {} : { estimate: entry.estimate }),
     ...(entry.skipped === undefined ? {} : { skipped: entry.skipped }),
     ...(entry.installedVersion === undefined ? {} : { installedVersion: entry.installedVersion }),
@@ -2077,12 +2195,19 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   try {
     usage = await service.usage(parsed.profile, inference.requestId, operationSignal(parsed));
     if (!usage) usageWarning = "The Hub has not settled this request yet; reconcile the billed cost later with the requestId below.";
+    else if (usage.settlementStatus === "pending") usageWarning = "The Hub has not settled this request yet; reconcile the billed cost later with the requestId below.";
+    else if (usage.settlementStatus === "failed") usageWarning = "The Hub could not settle this request; it will not turn into a cost later.";
   } catch (error) {
     usageWarning = `Billing reconciliation skipped: ${normalizeError(error).code}. The requestId below is the source of truth for the real cost.`;
   }
-  const billedLine = usage
-    ? `Billed: ${usage.amount} ${usage.currency} (${usage.usage.inputTokens ?? 0} input + ${usage.usage.outputTokens ?? 0} output tokens)`
-    : `Billed: not yet available`;
+  const billedLine = usage === undefined
+    ? "Billed: not yet available"
+    : usage.amount === undefined
+      // `pending`, `not-billable` and `failed` all arrive without an amount, and
+      // printing 0.000000 for any of them would be the local number presented
+      // as the real one.
+      ? `Billed: ${usage.settlementStatus ?? "not settled"}, no amount yet`
+      : `Billed: ${usage.amount} ${usage.currency} (${usage.usage.inputTokens ?? 0} input + ${usage.usage.outputTokens ?? 0} output tokens)`;
   return {
     data: { valid: true, level: "live", ...configuration, estimate, estimateAssumptions: LIVE_VERIFY_ESTIMATE_USAGE, inference, ...(usage ? { usage } : {}) },
     warnings: usageWarning ? [usageWarning] : [] as readonly string[],
@@ -2239,7 +2364,7 @@ async function executeUsage(parsed: ParsedArguments, dependencies: CliDependenci
     };
   }
   const rows = result.items.map((item) =>
-    `${item.at}  ${item.apiKeyId ?? "-"}  ${item.resolvedModel}  ${item.amount} ${item.currency}`,
+    `${item.at}  ${item.apiKeyId ?? "-"}  ${item.resolvedModel}  ${item.amount === undefined ? `— (${item.settlementStatus ?? "not settled"})` : `${item.amount} ${item.currency}`}${item.abortedAt === undefined ? "" : "  aborted"}`,
   );
   return {
     data: result,

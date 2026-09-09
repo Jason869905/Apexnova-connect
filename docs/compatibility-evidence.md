@@ -149,7 +149,7 @@ Evidence 创建后不可修改。纠错通过新 Evidence 指向 `supersedes`，
 
 - Agent 主版本或相关协议实现变化；
 - Integration 解析或 Gateway 实现变化；
-- Model Deployment 的模型版本、Endpoint 或 Provider 实现变化；
+- Model Deployment 的模型版本、Endpoint 或 Provider 实现变化——判据是目录的 `implementationFingerprint` 与 `implementationChangedAt`：指纹进 `subject`（[需求 12B.4](apexnova-ai-hub-requirements.md)），因此换了实现就是另一个 subject，旧记录不会被读成新实现的结论；指纹回退到旧值时用 `implementationChangedAt` 判断（同一个值可能再次出现，但变更时间是新的）；
 - Test Suite 的破坏性变化；
 - 到达 Evidence 类型的 TTL；
 - Provider 通知弃用或能力回退。

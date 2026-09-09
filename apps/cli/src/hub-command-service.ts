@@ -32,8 +32,13 @@ const CORE_SCOPE = [
   "devices:read", "devices:revoke", "runtime-credentials:write",
 ].join(" ");
 
+// Optional scopes are dropped unless the authorization server advertises them,
+// so a build never asks for a permission Hub has not deployed. That is how the
+// compatibility scopes ship ahead of `compatibility sync` without showing users
+// a consent screen for something that does not exist yet.
 const OPTIONAL_SCOPE = [
   "api-keys:write", "api-keys:read", "api-keys:revoke",
+  "compatibility:read", "compatibility:write", "compatibility:revoke",
 ].join(" ");
 
 export interface HubCommandService {

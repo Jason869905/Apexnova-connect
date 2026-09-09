@@ -1343,6 +1343,42 @@ describe("CLI", () => {
     expect(capture.stdout()).toContain("No evidence expires within 7 days.");
   });
 
+  it("re-collects a subject whose deployment changed implementation, expiry or not", async () => {
+    const { root } = await withEvidence({}, {
+      ...evidenceSubject,
+      implementationFingerprint: "impl-a1b2c3d4e5f6",
+    });
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "refresh", "--json"], {
+      // Twelve days on: nothing has expired, and nothing is due within 7 days.
+      ...runDependencies(root, { now: () => new Date("2026-09-20T10:00:00.000Z") }),
+      io: capture.io,
+      hubService: mockHub({
+        catalog: async () => {
+          const base = await mockHub().catalog("default", new AbortController().signal);
+          return {
+            ...base,
+            deployments: base.deployments.map((deployment) => ({
+              ...deployment,
+              implementationFingerprint: "impl-999999999999",
+              implementationChangedAt: "2026-09-15T10:00:00.000Z",
+            })),
+          };
+        },
+      }),
+      runCapabilitySuite: async () => suiteResult(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.permission);
+    const error = JSON.parse(capture.stdout()).error;
+    expect(error.code).toBe("APPROVAL_REQUIRED");
+    expect(error.details.due).toHaveLength(1);
+    expect(error.details.due[0]).toMatchObject({ expired: false });
+    expect(error.details.due[0].implementationChanged).toContain("impl-a1b2c3d4e5f6".slice(0, 12));
+    expect(error.message).toContain("the implementation changed from");
+  });
+
   it("re-collects the due subjects and reports what each one now says", async () => {
     const { root } = await withEvidence();
     const revoke = vi.fn(async () => undefined);
@@ -1562,6 +1598,54 @@ describe("CLI", () => {
     const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
     const stored = await store.list();
     expect(stored[0]?.result.summary).toContain("over 0 settled of 2 attributed requests");
+  });
+
+  it("tells apart what is unsettled, what is not billable and what never reached the ledger", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-run-settlement-"));
+    const capture = captureIo();
+    const usage: HubCommandService["usage"] = async (_profile, requestId) => {
+      const base = {
+        id: `usage_${requestId}`,
+        requestId,
+        at: "2026-09-08T10:00:00.000Z",
+        status: "success" as const,
+        resolvedModel: "nova",
+        source: "capability-suite",
+        usage: { inputTokens: 17, outputTokens: 70 },
+        currency: "USD",
+      };
+      if (requestId === "req_capability_1") return { ...base, settlementStatus: "settled" as const, amount: "0.000100" };
+      // Billed nothing on purpose is not the same as not billed yet, and the
+      // run has to stop conflating them.
+      return { ...base, settlementStatus: "not-billable" as const };
+    };
+
+    const result = await runCli(
+      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      {
+        ...runDependencies(root),
+        io: capture.io,
+        hubService: mockHub({ usage }),
+        runCapabilitySuite: async () => ({
+          ...suiteResult(),
+          // The third failed at the edge: the ID is not a ledger key.
+          requestIds: ["req_capability_1", "req_capability_2", "edge_7f3a"],
+        }),
+      },
+    );
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.billed).toMatchObject({
+      amount: "0.000100",
+      settledRequests: 1,
+      notBillableRequests: 1,
+      edgeRequests: 1,
+    });
+    expect(output.data.unsettledRequestIds).toBeUndefined();
+    expect(output.data.edgeRequestIds).toEqual(["edge_7f3a"]);
+    expect(output.warnings.join(" ")).toContain("failed at the edge");
+    expect(output.warnings.join(" ")).not.toContain("has not settled");
   });
 
   it("revokes the run credential even when the suite itself fails", async () => {

@@ -133,6 +133,23 @@ describe("computeVerdict", () => {
     }
   });
 
+  it("does not carry evidence across an implementation change", () => {
+    const collected = { ...subject, implementationFingerprint: "impl-a1b2c3d4e5f6" };
+    const evidence = [run({}, { subject: collected })];
+    const now = new Date("2026-09-20T10:00:00.000Z");
+
+    expect(computeVerdict({ subject: collected, evidence, now }).verdict).toBe("compatible");
+
+    // The deployment ID is the same and the record has not expired, but it
+    // tested a different implementation, which is the drift 12A.5(a) was about.
+    const rebuilt = { ...subject, implementationFingerprint: "impl-999999999999" };
+    expect(computeVerdict({ subject: rebuilt, evidence, now }).verdict).toBe("unknown");
+
+    // A record collected before the catalog had fingerprints stands only for
+    // itself; it is not silently read as covering a known implementation.
+    expect(computeVerdict({ subject, evidence, now }).verdict).toBe("unknown");
+  });
+
   it("takes the level from the Agent's requirements when they are supplied", () => {
     const evidence = [run({ "protocol.streaming-order": "unsupported" })];
     const now = new Date("2026-09-20T10:00:00.000Z");

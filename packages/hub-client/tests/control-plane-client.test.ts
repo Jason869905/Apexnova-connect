@@ -134,6 +134,35 @@ describe("HubControlPlaneClient", () => {
     );
   });
 
+  it("reads where a discount comes from and when it lapses", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      deploymentId: "deployment.nova",
+      model: "nova",
+      currency: "USD",
+      billingMode: "token",
+      listAmount: "0.000120",
+      discountRate: "0.5",
+      discount: {
+        rate: "0.5",
+        source: "campaign.launch",
+        appliesTo: "deployment.nova",
+        // A time-of-day promotion expires at the end of this window, not of the campaign.
+        expiresAt: "2026-09-09T18:00:00Z",
+      },
+      amount: "0.000060",
+      estimateOnly: true,
+    }));
+
+    const result = await client(fetch).estimatePricing("deployment.nova", { inputTokens: 64, outputTokens: 256 });
+
+    expect(result.discount).toEqual({
+      rate: "0.5",
+      source: "campaign.launch",
+      appliesTo: "deployment.nova",
+      expiresAt: "2026-09-09T18:00:00Z",
+    });
+  });
+
   it("rejects an estimate for a different deployment", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
       deploymentId: "deployment.other",
@@ -211,6 +240,42 @@ describe("HubControlPlaneClient", () => {
       new URL("https://hub.example.test/v1/billing/usage?requestId=55978fdf-a840-4673-b6a5-8f3e237cae6f"),
       expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer oauth-secret" }) }),
     );
+  });
+
+  it("keeps an unsettled request unpriced instead of reading it as free", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      items: [{
+        id: "use_00000000000000000000000002",
+        requestId: "44c55922-3161-4620-881f-13cc514eeb98",
+        at: "2026-09-08T23:00:00Z",
+        status: "success",
+        resolvedModel: "glm-5.2",
+        source: "api",
+        usage: { inputTokens: 12, outputTokens: 0 },
+        currency: "USD",
+        amount: null,
+        settlementStatus: "pending",
+        abortedAt: "2026-09-08T23:00:01Z",
+      }],
+      nextCursor: null,
+    }));
+
+    const result = await client(fetch).usage("44c55922-3161-4620-881f-13cc514eeb98");
+
+    expect(result).toMatchObject({ settlementStatus: "pending", abortedAt: "2026-09-08T23:00:01Z" });
+    expect(result?.amount).toBeUndefined();
+  });
+
+  it("rejects a settlement status it does not know", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      items: [{
+        id: "use_1", requestId: "req_1", at: "2026-09-08T23:00:00Z", status: "success",
+        resolvedModel: "glm-5.2", source: "api", usage: {}, currency: "USD", amount: null,
+        settlementStatus: "maybe",
+      }],
+      nextCursor: null,
+    }));
+    await expect(client(fetch).usage("req_1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
   it("returns undefined when the usage record is not found or not visible", async () => {

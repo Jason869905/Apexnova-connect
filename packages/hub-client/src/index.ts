@@ -32,6 +32,7 @@ export type {
   HubCatalogProvider,
   HubCatalogSnapshot,
   HubPromoCredit,
+  HubPricingDiscount,
   HubPricingEstimate,
   HubPricingUsage,
   HubInferenceVerification,
@@ -42,4 +43,5 @@ export type {
   UsageAggregateRecord,
   UsageAggregateResult,
   UsageListResult,
+  UsageSettlementStatus,
 } from "./types.js";

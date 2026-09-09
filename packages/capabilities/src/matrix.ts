@@ -38,6 +38,7 @@ function subjectKey(subject: EvidenceSubject): string {
     subject.deploymentId,
     subject.protocol,
     subject.platform,
+    subject.implementationFingerprint ?? "-",
   ].join(" ");
 }
 
@@ -94,6 +95,17 @@ export function buildCompatibilityMatrix(options: MatrixOptions): CompatibilityM
   };
 }
 
+/**
+ * Two rows can share a deployment and differ only in the implementation tested,
+ * so the implementation is named wherever the deployment is.
+ */
+function deploymentCell(subject: EvidenceSubject): string {
+  const fingerprint = subject.implementationFingerprint;
+  return fingerprint === undefined
+    ? `\`${subject.deploymentId}\``
+    : `\`${subject.deploymentId}\` (impl \`${fingerprint.slice(0, 12)}\`)`;
+}
+
 const SUPPORT_MARK: Readonly<Record<string, string>> = {
   supported: "yes",
   partial: "partial",
@@ -144,7 +156,7 @@ export function renderCompatibilityMatrix(matrix: CompatibilityMatrix): string {
   for (const row of matrix.rows) {
     const verdict = `\`${row.verdict}\`${row.stale ? " (has expired evidence)" : ""}`;
     lines.push(
-      `| ${row.subject.agentId} | ${row.subject.agentVersion} | \`${row.subject.deploymentId}\` | ${row.subject.protocol} | ${row.subject.platform} | ${verdict} | ${row.observedAt ?? "not observed"} |`,
+      `| ${row.subject.agentId} | ${row.subject.agentVersion} | ${deploymentCell(row.subject)} | ${row.subject.protocol} | ${row.subject.platform} | ${verdict} | ${row.observedAt ?? "not observed"} |`,
     );
   }
   lines.push("");
@@ -157,7 +169,7 @@ export function renderCompatibilityMatrix(matrix: CompatibilityMatrix): string {
       cell(row.capabilities.find((capability) => capability.capabilityId === definition.id)),
     );
     lines.push(
-      `| ${row.subject.agentId} | \`${row.subject.deploymentId}\` | ${row.subject.protocol} | ${cells.join(" | ")} |`,
+      `| ${row.subject.agentId} | ${deploymentCell(row.subject)} | ${row.subject.protocol} | ${cells.join(" | ")} |`,
     );
   }
   lines.push("");
@@ -166,7 +178,7 @@ export function renderCompatibilityMatrix(matrix: CompatibilityMatrix): string {
   for (const row of matrix.rows) {
     const ids = row.evidenceIds.map((id) => `\`${id}\``).join(", ");
     lines.push(
-      `- ${row.subject.agentId} ${row.subject.agentVersion}, \`${row.subject.deploymentId}\`, ${row.subject.protocol}: ${ids || "none"}`,
+      `- ${row.subject.agentId} ${row.subject.agentVersion}, ${deploymentCell(row.subject)}, ${row.subject.protocol}: ${ids || "none"}`,
     );
   }
   lines.push("");

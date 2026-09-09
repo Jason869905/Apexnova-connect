@@ -101,6 +101,19 @@ export interface HubPricingUsage {
   readonly itemAttrs?: Readonly<Record<string, string | boolean>>;
 }
 
+/**
+ * Where a discount comes from and how long it lasts. Hub answered gap (g) with
+ * this block; `discountRate` stays as the bare rate it used to be. For a
+ * time-of-day promotion `expiresAt` is the end of the current window, not the
+ * end of the campaign.
+ */
+export interface HubPricingDiscount {
+  readonly rate: string;
+  readonly source?: string;
+  readonly appliesTo?: string;
+  readonly expiresAt?: string;
+}
+
 export interface HubPricingEstimate {
   readonly deploymentId: string;
   readonly model: string;
@@ -108,6 +121,7 @@ export interface HubPricingEstimate {
   readonly billingMode: string;
   readonly listAmount: string;
   readonly discountRate?: string;
+  readonly discount?: HubPricingDiscount;
   readonly amount: string;
   readonly priceVersion?: string;
   readonly estimateOnly: true;
@@ -206,6 +220,13 @@ export interface RuntimeCredentialSummary {
   readonly lastUsedAt?: string;
 }
 
+/**
+ * Hub's answer to gap (d): the three meanings an empty result used to carry are
+ * now distinct. `pending` and `failed` leave `amount` null rather than zero --
+ * an unsettled request is not a free one.
+ */
+export type UsageSettlementStatus = "pending" | "settled" | "not-billable" | "failed";
+
 export interface HubUsageRecord {
   readonly id: string;
   readonly requestId: string;
@@ -226,7 +247,11 @@ export interface HubUsageRecord {
     readonly items?: number;
   };
   readonly currency: string;
-  readonly amount: string;
+  /** Absent until the request settles; `not-billable` and `failed` never carry one. */
+  readonly amount?: string;
+  readonly settlementStatus?: UsageSettlementStatus;
+  /** Set when the client aborted; the request is still billed for what was produced. */
+  readonly abortedAt?: string;
   readonly promoCovered?: string;
   readonly balanceCovered?: string;
   readonly discountRate?: string;

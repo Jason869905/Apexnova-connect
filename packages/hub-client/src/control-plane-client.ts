@@ -23,6 +23,7 @@ import type {
   UsageAggregateResult,
   UsageListResult,
   UsageQuery,
+  UsageSettlementStatus,
 } from "./types.js";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -175,6 +176,14 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
   };
 }
 
+const SETTLEMENT_STATUSES: readonly UsageSettlementStatus[] = ["pending", "settled", "not-billable", "failed"];
+
+function settlementStatus(value: unknown): UsageSettlementStatus {
+  const status = string(value, "usage record.settlementStatus", 32);
+  if (!SETTLEMENT_STATUSES.includes(status as UsageSettlementStatus)) throw invalid("usage record.settlementStatus");
+  return status as UsageSettlementStatus;
+}
+
 function parseUsageRecord(value: unknown): HubUsageRecord {
   const item = object(value, "usage record");
   const status = string(item.status, "usage record.status", 32);
@@ -210,7 +219,11 @@ function parseUsageRecord(value: unknown): HubUsageRecord {
       ...(usageItems === undefined ? {} : { items: usageItems }),
     },
     currency: string(item.currency, "usage record.currency", 3),
-    amount: money(item.amount, "usage record.amount"),
+    // Null means unsettled, not free. Reading it as "0.000000" is exactly the
+    // ambiguity gap (d) removed, so an absent amount stays absent here.
+    ...(item.amount === null || item.amount === undefined ? {} : { amount: money(item.amount, "usage record.amount") }),
+    ...(item.settlementStatus === null || item.settlementStatus === undefined ? {} : { settlementStatus: settlementStatus(item.settlementStatus) }),
+    ...(item.abortedAt === null || item.abortedAt === undefined ? {} : { abortedAt: timestamp(item.abortedAt, "usage record.abortedAt") }),
     ...(item.promoCovered === undefined ? {} : { promoCovered: money(item.promoCovered, "usage record.promoCovered") }),
     ...(item.balanceCovered === undefined ? {} : { balanceCovered: money(item.balanceCovered, "usage record.balanceCovered") }),
     ...(item.discountRate === null || item.discountRate === undefined ? {} : { discountRate: money(item.discountRate, "usage record.discountRate") }),
@@ -411,6 +424,17 @@ export class HubControlPlaneClient {
       billingMode: string(item.billingMode, "pricing estimate.billingMode", 64),
       listAmount: money(item.listAmount, "pricing estimate.listAmount"),
       ...(item.discountRate === undefined ? {} : { discountRate: money(item.discountRate, "pricing estimate.discountRate") }),
+      ...(item.discount === undefined || item.discount === null ? {} : (() => {
+        const discount = object(item.discount, "pricing estimate.discount");
+        return {
+          discount: {
+            rate: money(discount.rate, "pricing estimate.discount.rate"),
+            ...(discount.source === undefined || discount.source === null ? {} : { source: string(discount.source, "pricing estimate.discount.source", 256) }),
+            ...(discount.appliesTo === undefined || discount.appliesTo === null ? {} : { appliesTo: string(discount.appliesTo, "pricing estimate.discount.appliesTo", 256) }),
+            ...(discount.expiresAt === undefined || discount.expiresAt === null ? {} : { expiresAt: timestamp(discount.expiresAt, "pricing estimate.discount.expiresAt") }),
+          },
+        };
+      })()),
       amount: money(item.amount, "pricing estimate.amount"),
       ...(item.priceVersion === undefined ? {} : { priceVersion: timestamp(item.priceVersion, "pricing estimate.priceVersion") }),
       estimateOnly: true,
