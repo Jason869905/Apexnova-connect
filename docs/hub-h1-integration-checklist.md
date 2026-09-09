@@ -148,6 +148,16 @@ M3 的最后一条退出条件（跑通一次真实同步）**已满足**。
 
 公开矩阵现在有 16 行：8 条带指纹的新记录，加上 8 条 9 月 8 日采集、目录当时还没有指纹的旧记录。两者是不同的 subject（不同实现），不能合并显示——成对的行逐条给出同样的 Verdict，这本身就是一次跨日复现。
 
+## 能力套件 0.3.0：强制工具选择（2026-09-09）
+
+新增 `agent.forced-tool-choice` 探针，详见[需求 12G](apexnova-ai-hub-requirements.md)。一次运行从七个请求变成八个（六个计费）。
+
+- `[passed]` **首次实测即复现 2026-09-08 的 finding**：`qwen3.8-flash` × `openai-responses` 对按名字强制的 `tool_choice` 返回 `400 litellm.BadRequestError`，同一轮的 `agent.single-tool-call` 仍是 `supported`。两个问题现在分开发布；
+- `[passed]` 回放录制已按新套件重录（旧录制遇到新探针报 `RECORDING_INCOMPLETE`，是失效而不是降级），因此这条判定离线可复算；
+- `[passed]` 套件 `0.3.0` 在 Hub 登记返回 `201`，新记录上行 `created: true` —— 顺带确认了 Hub 那次登记幂等性修复在**新版本**路径上同样正确；
+- `[observed]` 这一轮的对账首次出现**零条未结算**：中断的流式请求正常读到 `not-billable`（`promoCovered` 的 `null` 修复之后），另加 1 条鉴权前失败、2 条不计费；
+- `[pending]` 其余 8 条 subject 仍是 `0.2.0` 采的，这一项在矩阵里读作 `untested`（缺席即未知，不是不支持）。要让这一列有完整数据需要按 `0.3.0` 再采一轮。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：

@@ -842,6 +842,28 @@ Hub 同时修了 `abortedAt` 恒为 `null` 的问题（客户端 abort 与「上
 
 两条是同一件事的两面：验证手段本身要能失败，否则它证明的只是自己没被触发。
 
+## 12G. `(f)` 强制工具选择：探针已落地（2026-09-09）
+
+12A.5(f) 提的是「目录无法表达『支持 tools 但不支持强制 `tool_choice`』」。Hub 那侧加了能力位 `tool.choice.forced`（目前无人勾选，缺席读作未知）；**这一节记我们这侧的部分：把它变成一条可发布的实测结论，而不是等目录声明。**
+
+能力套件升到 `0.3.0`（minor：加一条能力不使旧记录失效，0.2.0 的记录照常有效，只是对这一项什么也没说），新增：
+
+| | |
+| --- | --- |
+| 能力 | `agent.forced-tool-choice`，`agent-interaction`，默认 `preferred`，TTL 30 天 |
+| 探针 | 与 `agent.single-tool-call` 同一个工具，但**按名字强制**（`openai-responses` 用 `tool_choice:{type:"function",name}`，`anthropic-messages` 用 `{type:"tool",name}`） |
+| `supported` | 强制生效，工具被调用 |
+| `partial` | **参数被接受然后被忽略**——返回 200 和一段散文，调用方不会收到任何错误 |
+| `unsupported` | 请求被拒（qwen3.8-flash 的 `400`） |
+
+为什么单列一条而不是并进 `agent.single-tool-call`：Agent 循环日常是「给出工具、让模型决定」，把强制写进那条探针会让一个工具调用完全正常的模型被记成不支持（这正是 2026-09-08 那次误判，见清单 `[fixed]` 一条）。但「强制指定某个 tool」在没有独立结构化输出模式的协议上就是承载 schema 的机制，因此它必须被单独测、单独发布。
+
+**首次实测即复现了那条 finding**：`qwen3.8-flash` × `openai-responses` 返回 `400 litellm.BadRequestError: The tool_choice parameter does not support being set to required or object`，而同一轮里 `agent.single-tool-call` 是 `supported`。这条结论现在在公开矩阵里有自己的一列，不再是脚注。
+
+一次运行因此从七个请求变成八个（六个计费）。回放录制随之重录——加一个探针会让旧录制**失效而不是降级**：回放遇到录制里没有的请求直接报 `RECORDING_INCOMPLETE`，不会把缺口记成失败。新录制来自 `qwen3.8-flash` 的真实运行，因此这条能力的判定在没有 Hub、没有凭据、不花钱的情况下也可复算。
+
+套件 `0.3.0` 已在 Hub 登记（`201`），新记录已上行。**12A.5 的 (f) 到此在 Connect 侧收口**；目录能力位那一半在 Hub，等存量模型被勾选。
+
 ## 13. 非功能要求
 
 - 上游密钥进入现有加密 Credential/secret 管理链路，绝不进入公共目录；

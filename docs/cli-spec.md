@@ -270,7 +270,7 @@ apexnova compatibility run opencode --deployment <id> --yes
 apexnova compatibility run opencode --deployment <id> --budget 0.20 --yes
 ```
 
-一次运行发七个请求，其中五个进入推理面计费（另外两个是被拒的无效凭据与无效请求）。流程：
+一次运行发八个请求，其中六个进入推理面计费（另外两个是被拒的无效凭据与无效请求）。流程：
 
 1. 探测本机 Agent 版本——Evidence 必须写明它是对哪个版本采集的，取不到版本就拒绝运行；
 2. 向 Hub 取估价。估价高于本地上限（默认 `0.05`，用 `--budget` 显式抬高）时返回 `BUDGET_EXCEEDED` 并且不发任何请求；

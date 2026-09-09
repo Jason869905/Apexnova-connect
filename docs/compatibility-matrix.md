@@ -1,7 +1,7 @@
 # Compatibility Matrix
 
-- Generated: 2026-09-09T15:30:13.776Z
-- Test suite: `apexnova.capability-suite` 0.2.0
+- Generated: 2026-09-09T17:11:12.727Z
+- Test suite: `apexnova.capability-suite` 0.3.0
 - Source: Apexnova-verified test runs. A provider claim is shown as claimed and never counted as verified.
 
 Generated from the evidence store by `apexnova compatibility matrix`. Do not edit by hand.
@@ -24,29 +24,29 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 | opencode | 1.18.29 | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` | openai-responses | linux-x64 | `partial` | 2026-09-08T17:55:06.990Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | openai-responses | linux-x64 | `partial` | 2026-09-09T15:24:51.626Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` | openai-responses | linux-x64 | `partial` | 2026-09-08T18:09:23.615Z |
-| opencode | 1.18.29 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-responses | linux-x64 | `partial` | 2026-09-09T15:25:20.444Z |
+| opencode | 1.18.29 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-responses | linux-x64 | `partial` | 2026-09-09T17:10:15.630Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` | openai-responses | linux-x64 | `partial` | 2026-09-08T18:39:20.314Z |
 
 ## Capabilities
 
-| Agent | Deployment | Protocol | auth.endpoint-reachable | protocol.model-id-mapping | protocol.non-streaming | protocol.streaming-order | protocol.cancellation | protocol.error-semantics | agent.single-tool-call | agent.structured-output |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| claude-code | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | yes |
-| claude-code | `deployment.apexnova.cmq4770nr0000edzis38w378a` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | yes |
-| claude-code | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | yes |
-| claude-code | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | yes |
-| claude-code | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | yes |
-| claude-code | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | yes |
-| claude-code | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | no |
-| claude-code | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmq4770nr0000edzis38w378a` | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
-| opencode | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` | openai-responses | yes | yes | yes | yes | yes | yes | yes | no |
+| Agent | Deployment | Protocol | auth.endpoint-reachable | protocol.model-id-mapping | protocol.non-streaming | protocol.streaming-order | protocol.cancellation | protocol.error-semantics | agent.single-tool-call | agent.forced-tool-choice | agent.structured-output |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| claude-code | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | yes |
+| claude-code | `deployment.apexnova.cmq4770nr0000edzis38w378a` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | yes |
+| claude-code | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | yes |
+| claude-code | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | yes |
+| claude-code | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | yes |
+| claude-code | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | yes |
+| claude-code | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| claude-code | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` | anthropic-messages | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| opencode | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| opencode | `deployment.apexnova.cmq4770nr0000edzis38w378a` | openai-responses | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| opencode | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| opencode | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` | openai-responses | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| opencode | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| opencode | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` | openai-responses | yes | yes | yes | yes | yes | yes | yes | untested | no |
+| opencode | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-responses | yes | yes | yes | yes | yes | yes | yes | no | no |
+| opencode | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` | openai-responses | yes | yes | yes | yes | yes | yes | yes | untested | no |
 
 ## Evidence
 
@@ -64,6 +64,6 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 - opencode 1.18.29, `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw`, openai-responses: `evidence.f1e9a0dd5a089281d39c6d950402eeab`
 - opencode 1.18.29, `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`), openai-responses: `ev.sha256.b0de3407869ec7c901562487faa38a40ca1ea948eabcfe98f27a470cc402b3cb`
 - opencode 1.18.29, `deployment.apexnova.cmt0bub5d0042139w2xobpghn`, openai-responses: `evidence.552607de7fdf3203ead94a6c65f0ad99`
-- opencode 1.18.29, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), openai-responses: `ev.sha256.f83f86616c6116b0dcf586ce78509d68ba4546a4c0c1f77acd5c92f1c7c8ab6a`
+- opencode 1.18.29, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), openai-responses: `ev.sha256.8ae3df111d7c61b696acd3bfd701183f81fd9b66932c78087b945131dd9dfe0c`
 - opencode 1.18.29, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3`, openai-responses: `evidence.9edde81e07637920b6ce5d709afadc17`
 

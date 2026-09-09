@@ -37,6 +37,7 @@ interface RequestShape {
   readonly body: Record<string, unknown>;
   readonly stream: boolean;
   readonly tools: boolean;
+  readonly forced: boolean;
   readonly structured: boolean;
   readonly invalid: boolean;
 }
@@ -52,6 +53,7 @@ function shape(init: RequestInit | undefined): RequestShape {
     body,
     stream: body.stream === true,
     tools: toolNames.includes("get_weather"),
+    forced: body.tool_choice !== undefined && toolNames.includes("get_weather"),
     structured: toolNames.includes("report_weather") || body.text !== undefined,
     invalid: body.max_output_tokens === -1 || body.max_tokens === -1,
   };
@@ -72,6 +74,7 @@ function healthyHub(protocol: SuiteProtocol, overrides: Partial<Record<string, (
         : ["message_start", "content_block_delta", "content_block_delta", "message_stop"];
       return overrides.stream?.() ?? sse(events);
     }
+    if (request.forced) return overrides.forced?.() ?? json(toolResponse(protocol, { city: "Oslo" }));
     if (request.tools) return overrides.tools?.() ?? json(toolResponse(protocol, { city: "Oslo" }));
     if (request.structured) return overrides.structured?.() ?? structuredResponse(protocol);
     return overrides.minimal?.() ?? json(messageResponse(protocol, "OK"));
@@ -128,9 +131,10 @@ describe("runCapabilitySuite", () => {
         "protocol.cancellation": "supported",
         "protocol.error-semantics": "supported",
         "agent.single-tool-call": "supported",
+        "agent.forced-tool-choice": "supported",
         "agent.structured-output": "supported",
       });
-      expect(result.billableRequests).toBe(5);
+      expect(result.billableRequests).toBe(6);
       expect(result.requestIds).toContain("req_1");
     });
   }
@@ -171,6 +175,38 @@ describe("runCapabilitySuite", () => {
     expect(support(result)["agent.structured-output"]).toBe("unsupported");
     // The rest of the run still stands: one failure is a finding, not a crash.
     expect(support(result)["protocol.non-streaming"]).toBe("supported");
+  });
+
+  it("tells a refused forced tool_choice apart from tools not working", async () => {
+    const protocol = "openai-responses";
+    const result = await runCapabilitySuite(
+      options(
+        protocol,
+        healthyHub(protocol, {
+          // What qwen3.8-flash does: ordinary tool calls are fine, forcing one
+          // is refused outright.
+          forced: () =>
+            json({ error: { message: "litellm.BadRequestError - The tool_choice parameter does not support being set to required or object" } }, 400),
+        }),
+      ),
+    );
+
+    expect(support(result)["agent.single-tool-call"]).toBe("supported");
+    const forced = result.outcomes.find((outcome) => outcome.capabilityId === "agent.forced-tool-choice");
+    expect(forced).toMatchObject({ support: "unsupported" });
+    expect(forced?.detail).toContain("400");
+  });
+
+  it("separates a forced tool_choice that is accepted and then ignored", async () => {
+    const protocol = "anthropic-messages";
+    const result = await runCapabilitySuite(
+      options(protocol, healthyHub(protocol, { forced: () => json(messageResponse(protocol, "It is 7 degrees in Oslo.")) })),
+    );
+
+    // A 200 with prose is worse than a refusal for a caller relying on the
+    // call, because nothing reports an error.
+    expect(support(result)["agent.forced-tool-choice"]).toBe("partial");
+    expect(support(result)["agent.single-tool-call"]).toBe("supported");
   });
 
   it("reports a mismatched deployment rather than trusting the request", async () => {

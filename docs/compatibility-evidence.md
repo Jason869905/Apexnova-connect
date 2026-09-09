@@ -60,6 +60,7 @@ Agent + Integration + Model Deployment + Platform + Test Suite + Time
 ### Agent Interaction
 
 - 单 Tool Call；
+- 强制 Tool 选择（能否强制指定某个 tool，与「能不能调用 tool」是两个问题）；
 - 并行 Tool Call；
 - Tool 参数 Schema；
 - 多轮 Tool Loop；

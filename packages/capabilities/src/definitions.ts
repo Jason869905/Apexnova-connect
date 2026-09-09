@@ -29,9 +29,14 @@ export const CAPABILITY_SUITE_ID = "apexnova.capability-suite";
  * suite changed in a way that invalidates earlier results, so verdicts stop
  * accepting evidence from an older major (see `isEvidenceLive`).
  */
-export const CAPABILITY_SUITE_VERSION = "0.2.0";
+export const CAPABILITY_SUITE_VERSION = "0.3.0";
 
-/** The M3 first batch fixed by ADR 0004: six protocol tests and two interaction tests. */
+/**
+ * The M3 first batch fixed by ADR 0004 -- six protocol tests and two
+ * interaction tests -- plus `agent.forced-tool-choice`, added in suite 0.3.0
+ * once the catalog could express it. Adding a capability is a minor bump:
+ * records written under 0.2.0 stay valid and simply say nothing about it.
+ */
 export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
   {
     id: "auth.endpoint-reachable",
@@ -97,6 +102,15 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
     ttlDays: 30,
   },
   {
+    id: "agent.forced-tool-choice",
+    category: "agent-interaction",
+    title: "Forced tool choice",
+    intent:
+      "A named tool can be forced rather than merely offered. Protocols with no separate structured-output mode carry a schema this way, so an endpoint that takes tools but refuses to force one cannot be used for that -- and today the only way to find out is to try it in production.",
+    defaultLevel: "preferred",
+    ttlDays: 30,
+  },
+  {
     id: "agent.structured-output",
     category: "agent-interaction",
     title: "Structured output",
@@ -136,4 +150,4 @@ export function capabilityDefinitionsDigest(): string {
 }
 
 export const CAPABILITY_DEFINITIONS_DIGEST =
-  "sha256:632b0e9b9c6c7e9fd8a2972513a2a3c42e03a35daed9e3de96883c45d89af482";
+  "sha256:d4c44caefa045b0aaed45c8022412bfc060fdcaa5d60c075725b14a121d3764e";

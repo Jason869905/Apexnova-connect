@@ -332,6 +332,47 @@ function toolBody(options: CapabilitySuiteOptions): unknown {
   };
 }
 
+/**
+ * The same tool, forced by name. This is a different question from offering it:
+ * an endpoint can call tools perfectly well and still refuse `tool_choice`, and
+ * because a forced named tool is how a schema is carried on protocols with no
+ * structured-output mode, the two failures look identical from the outside
+ * until they are asked separately.
+ */
+function forcedToolBody(options: CapabilitySuiteOptions): unknown {
+  if (options.protocol === "openai-responses") {
+    return {
+      model: options.model,
+      input: "What is the weather in Oslo?",
+      max_output_tokens: 256,
+      store: false,
+      tools: [
+        {
+          type: "function",
+          name: "get_weather",
+          description: "Look up the current weather for a city.",
+          parameters: WEATHER_TOOL_SCHEMA,
+          strict: true,
+        },
+      ],
+      tool_choice: { type: "function", name: "get_weather" },
+    };
+  }
+  return {
+    model: options.model,
+    max_tokens: 256,
+    messages: [{ role: "user", content: "What is the weather in Oslo?" }],
+    tools: [
+      {
+        name: "get_weather",
+        description: "Look up the current weather for a city.",
+        input_schema: WEATHER_TOOL_SCHEMA,
+      },
+    ],
+    tool_choice: { type: "tool", name: "get_weather" },
+  };
+}
+
 const STRUCTURED_SCHEMA = {
   type: "object",
   properties: { city: { type: "string" }, degrees: { type: "number" } },
@@ -464,7 +505,7 @@ function streamOrder(protocol: SuiteProtocol): { readonly first: string; readonl
 /**
  * Runs the first batch against one deployment and protocol. Every probe that
  * fails becomes an outcome, never an exception: a deployment that cannot stream
- * is a finding, not a broken run. Five of the seven requests are billable.
+ * is a finding, not a broken run. Six of the eight requests are billable.
  */
 export async function runCapabilitySuite(
   options: CapabilitySuiteOptions,
@@ -606,6 +647,34 @@ export async function runCapabilitySuite(
           : outcome("agent.single-tool-call", "partial", "a tool call came back with arguments that do not match the declared schema", [tool.requestId]),
   );
 
+  const forced = collect(await jsonProbe(options, forcedToolBody(options)));
+  const forcedArgs = toolArguments(options.protocol, forced.body);
+  outcomes.push(
+    !forced.ok
+      ? outcome(
+          "agent.forced-tool-choice",
+          "unsupported",
+          `HTTP ${forced.status}${forced.failure ? ` (${forced.failure})` : apiMessage(forced)}`,
+          [forced.requestId],
+        )
+      : forcedArgs === undefined
+        // Accepted the parameter and ignored it. Worth telling apart from a
+        // refusal: the request succeeds, so a caller relying on the forced call
+        // gets prose back and no error.
+        ? outcome(
+            "agent.forced-tool-choice",
+            "partial",
+            "the forced tool_choice was accepted but the model answered without calling the tool",
+            [forced.requestId],
+          )
+        : outcome(
+            "agent.forced-tool-choice",
+            "supported",
+            "the named tool was forced and called",
+            [forced.requestId],
+          ),
+  );
+
   const structured = collect(await jsonProbe(options, structuredBody(options)));
   const structuredValue =
     options.protocol === "anthropic-messages"
@@ -648,7 +717,7 @@ export async function runCapabilitySuite(
     // account, so nothing is ever written for it.
     preAuthRequestIds: rejected.requestId === undefined ? [] : [rejected.requestId],
     // The rejected credential and the invalid request are refused before inference.
-    billableRequests: 5,
+    billableRequests: 6,
   };
 }
 

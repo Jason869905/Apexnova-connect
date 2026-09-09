@@ -20,7 +20,8 @@ describe("capability definitions", () => {
   });
 
   it("is the first batch ADR 0004 fixed", () => {
-    expect(CAPABILITY_DEFINITIONS).toHaveLength(8);
+    // The eight ADR 0004 fixed, plus agent.forced-tool-choice in suite 0.3.0.
+    expect(CAPABILITY_DEFINITIONS).toHaveLength(9);
     const byCategory = CAPABILITY_DEFINITIONS.filter(
       (definition) => definition.category === "protocol-conformance",
     );

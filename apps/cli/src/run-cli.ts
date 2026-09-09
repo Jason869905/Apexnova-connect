@@ -100,7 +100,7 @@ const LIVE_VERIFY_ESTIMATE_USAGE = { inputTokens: 64, outputTokens: 256 } as con
 
 // Five billable requests, sized from the probe bodies. Non-binding, like every
 // estimate: the requestIds the run reports are what the real cost is read from.
-const CAPABILITY_SUITE_ESTIMATE_USAGE = { inputTokens: 400, outputTokens: 700 } as const;
+const CAPABILITY_SUITE_ESTIMATE_USAGE = { inputTokens: 480, outputTokens: 800 } as const;
 
 /** A local ceiling, because Hub has no per-request spending cap yet (M1-HUB-01). */
 const CAPABILITY_SUITE_BUDGET = 0.05;
@@ -1184,7 +1184,7 @@ async function executeCompatibilityRun(
   if (!parsed.yes) {
     throw new CliError({
       code: "APPROVAL_REQUIRED",
-      message: `The suite sends seven requests to ${deployment.id} over ${hubProtocol.protocol}, five of them billable. Hub estimates ${estimate.amount} ${estimate.currency}, which is not a spending cap. Re-run with --yes to approve.`,
+      message: `The suite sends eight requests to ${deployment.id} over ${hubProtocol.protocol}, six of them billable. Hub estimates ${estimate.amount} ${estimate.currency}, which is not a spending cap. Re-run with --yes to approve.`,
       exitCode: EXIT_CODES.permission,
       details: {
         estimate,
