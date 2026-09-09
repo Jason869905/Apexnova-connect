@@ -158,6 +158,8 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.4`。
 
+当前状态：进行中（首批范围见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)）。首批收窄为**一个 Scenario**（`coding-general` v1），候选只来自 Apexnova 目录，推荐在本地计算、Hub 托管 API 推迟。三个分项今天没有证据来源——`latency`（需要 Operational Evidence）、`quality`（需要 Scenario Quality Pack，M4 之后引入）、`privacy`（需要上游 Provider 身份，目录只给不可逆指纹）——因此**不参与排序且显式标为未测量**，不给默认分。M3 的证据全部是 `linux-x64`，`recommend` 在其他平台如实返回无证据；补 Windows 采集是 M4 第一批任务，macOS 仍无实机。「允许推荐非 Apexnova Provider」需要目录之外的第二个候选来源，首批不可验证，已挂账。
+
 范围：
 
 - Coding Scenario Pack v1；

@@ -12,3 +12,4 @@
 - [ADR 0004：M3 启动的首批范围与 Evidence 产出路径](0004-m3-scope-and-evidence-path.md)
 - [ADR 0005：M3 里程碑评审](0005-m3-milestone-review.md)
 - [ADR 0006：M3 收口](0006-m3-closure.md)
+- [ADR 0007：M4 启动的首批 Scenario 与 Recommendation 产出路径](0007-m4-scope-and-recommendation-path.md)
