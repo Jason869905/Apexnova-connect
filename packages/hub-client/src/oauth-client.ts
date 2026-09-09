@@ -321,6 +321,10 @@ export class HubOAuthClient {
         : { refreshToken: SecretValue.from(refreshTokenValue) }),
       ...(expiresAt === undefined ? {} : { expiresAt }),
       ...(token.scope === undefined ? {} : { scope: requiredString(token.scope, "scope", 2_048) }),
+      // Kept beside the granted scope so a caller can say which permissions the
+      // account did not get -- Hub drops ungranted scopes rather than refusing
+      // the login, and silently narrower permissions are worth naming.
+      ...(this.#effectiveScope === undefined ? {} : { requestedScope: this.#effectiveScope }),
       ...(token.account_id === undefined
         ? {}
         : { accountId: requiredString(token.account_id, "account_id", 256) }),

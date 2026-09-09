@@ -99,6 +99,33 @@ function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService 
     apiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z" }),
     updateApiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z" }),
     revokeApiKey: async () => undefined,
+    submitEvidence: async (_profile, evidence) => ({
+      record: {
+        id: String((evidence as { readonly id?: unknown }).id ?? "ev.unknown"),
+        payload: evidence,
+        received: { receivedAt: "2026-09-09T10:00:00.000Z", signatureStatus: "none" as const, submittedBy: "usr_00000000000000000000000001" },
+        derived: { capabilityStatus: [], supportsCurrentVerdict: true, fingerprint: { match: "absent" as const } },
+      },
+      created: true,
+    }),
+    evidence: async () => ({ items: [] }),
+    revokeEvidence: async (_profile, evidenceId, reason) => ({
+      id: evidenceId,
+      payload: {},
+      received: { revokedAt: "2026-09-09T10:00:00.000Z", revokedReason: reason },
+      derived: { capabilityStatus: [], supportsCurrentVerdict: false },
+    }),
+    registerTestSuite: async (_profile, input) => ({
+      suite: {
+        suiteId: input.suiteId,
+        version: input.version,
+        majorVersion: 0,
+        capabilityDigest: input.capabilityDigest,
+        ttlTable: input.ttlTable,
+        registeredAt: "2026-09-09T10:00:00.000Z",
+      },
+      created: true,
+    }),
     ...overrides,
   };
 }
@@ -336,6 +363,29 @@ describe("CLI", () => {
     expect(`${capture.stdout()}${capture.stderr()}`).not.toContain("access-secret");
     expect(`${capture.stdout()}${capture.stderr()}`).not.toContain("refresh-secret");
     expect(login.mock.calls[0]?.[2]).toBeUndefined();
+  });
+
+  it("names the scopes Hub did not grant instead of failing the login", async () => {
+    const capture = captureIo();
+    const login: HubCommandService["login"] = async (_profile, prompt) => {
+      await prompt({ userCode: "ABCD-EFGH", verificationUri: "https://hub.example.test/device", expiresAt: "2026-09-04T12:10:00Z" });
+      return {
+        accessToken: SecretValue.from("access-secret"),
+        tokenType: "Bearer",
+        // The collector scopes are granted per account, so an account without
+        // them comes back with a narrower session rather than a refusal.
+        requestedScope: "account:read catalog:read compatibility:read compatibility:write",
+        scope: "account:read catalog:read compatibility:read",
+        accountId: "account_1",
+      };
+    };
+
+    const result = await runCli(["login", "--json"], { io: capture.io, hubService: mockHub({ login }), createRequestId: () => "local_login" });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.ungrantedScopes).toEqual(["compatibility:write"]);
+    expect(output.warnings.join(" ")).toContain("compatibility:write");
   });
 
   it("joins and filters Hub catalog deployments for OpenCode", async () => {
@@ -1424,6 +1474,118 @@ describe("CLI", () => {
     expect(output.data.refreshed).toEqual([]);
     expect(output.data.due[0].skipped).toContain("no longer in the visible catalog");
     expect(output.warnings.join(" ")).toContain("every due subject was skipped");
+  });
+
+  it("sends nothing to Hub until the submission list is approved", async () => {
+    const { root, record } = await withEvidence();
+    const submitEvidence = vi.fn(mockHub().submitEvidence);
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "sync", "--json"], {
+      ...runDependencies(root),
+      io: capture.io,
+      hubService: mockHub({ submitEvidence }),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.permission);
+    const error = JSON.parse(capture.stdout()).error;
+    expect(error.code).toBe("APPROVAL_REQUIRED");
+    expect(error.message).toContain("immutable and public");
+    expect(error.details.submitting).toHaveLength(1);
+    expect(error.details.submitting[0].evidenceId).toBe(record.id);
+    expect(submitEvidence).not.toHaveBeenCalled();
+  });
+
+  it("registers the suite, submits the records and reports what Hub makes of them", async () => {
+    const { root, record } = await withEvidence();
+    const registerTestSuite = vi.fn(mockHub().registerTestSuite);
+    const submitEvidence = vi.fn(mockHub().submitEvidence);
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "sync", "--yes", "--json"], {
+      ...runDependencies(root),
+      io: capture.io,
+      hubService: mockHub({ registerTestSuite, submitEvidence }),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.suite).toMatchObject({ id: CAPABILITY_SUITE_ID, version: CAPABILITY_SUITE_VERSION, state: "registered" });
+    expect(output.data.submitted).toEqual([
+      { evidenceId: record.id, created: true, supportsCurrentVerdict: true, fingerprint: "absent", signatureStatus: "none" },
+    ]);
+    expect(registerTestSuite).toHaveBeenCalledTimes(1);
+    // The suite registration carries what the version stands for, or a later
+    // major cannot expire these records.
+    expect(registerTestSuite.mock.calls[0]?.[1]).toMatchObject({
+      capabilityDigest: { digest: expect.stringContaining("sha256:") },
+      ttlTable: { "protocol.non-streaming": 90 },
+    });
+    // The record goes up exactly as stored: Hub recomputes the hash from it.
+    expect(submitEvidence.mock.calls[0]?.[1]).toMatchObject({ id: record.id });
+  });
+
+  it("does not submit a record whose id form Hub refuses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-sync-legacy-"));
+    const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
+    const legacy = createEvidence({
+      sourceType: "maintainer-test",
+      subject: evidenceSubject,
+      observedAt: "2026-09-08T10:00:00.000Z",
+      outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({ capabilityId: definition.id, support: "supported" as const })),
+    });
+    // The twelve records written before the id form was agreed look like this.
+    await store.append({ ...legacy, id: `evidence.${"a".repeat(32)}` });
+    const submitEvidence = vi.fn(mockHub().submitEvidence);
+    const capture = captureIo();
+
+    const result = await runCli(["compatibility", "sync", "--yes", "--json"], {
+      ...runDependencies(root),
+      io: capture.io,
+      hubService: mockHub({ submitEvidence }),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.submitted).toEqual([]);
+    expect(output.data.skipped[0].evidenceId).toBe(`evidence.${"a".repeat(32)}`);
+    expect(submitEvidence).not.toHaveBeenCalled();
+    expect(output.warnings.join(" ")).toContain("cannot be submitted");
+  });
+
+  it("refuses to revoke without a reason, and without approval", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-revoke-"));
+    const revokeEvidence = vi.fn(mockHub().revokeEvidence);
+    const id = `ev.sha256.${"b".repeat(64)}`;
+
+    const noReason = captureIo();
+    const missing = await runCli(["compatibility", "revoke", id, "--yes", "--json"], {
+      ...runDependencies(root),
+      io: noReason.io,
+      hubService: mockHub({ revokeEvidence }),
+    });
+    expect(missing.exitCode).toBe(EXIT_CODES.usage);
+    expect(JSON.parse(noReason.stdout()).error.message).toContain("--reason");
+
+    const unapproved = captureIo();
+    const pending = await runCli(["compatibility", "revoke", id, "--reason", "collected against the wrong deployment", "--json"], {
+      ...runDependencies(root),
+      io: unapproved.io,
+      hubService: mockHub({ revokeEvidence }),
+    });
+    expect(pending.exitCode).toBe(EXIT_CODES.permission);
+    expect(JSON.parse(unapproved.stdout()).error.code).toBe("APPROVAL_REQUIRED");
+    expect(revokeEvidence).not.toHaveBeenCalled();
+
+    const approved = captureIo();
+    const done = await runCli(["compatibility", "revoke", id, "--reason", "collected against the wrong deployment", "--yes", "--json"], {
+      ...runDependencies(root),
+      io: approved.io,
+      hubService: mockHub({ revokeEvidence }),
+    });
+    expect(done.exitCode).toBe(EXIT_CODES.success);
+    expect(JSON.parse(approved.stdout()).data).toMatchObject({ evidenceId: id, reason: "collected against the wrong deployment" });
+    expect(revokeEvidence).toHaveBeenCalledWith("default", id, "collected against the wrong deployment", expect.any(AbortSignal));
   });
 
   it("rejects a subcommand it does not have", async () => {

@@ -24,6 +24,9 @@ import {
 } from "@apexnova-connect/hub-client";
 import {
   CAPABILITY_DEFINITIONS,
+  CAPABILITY_DEFINITIONS_DIGEST,
+  CAPABILITY_SUITE_ID,
+  CAPABILITY_SUITE_VERSION,
   FileEvidenceStore,
   REPLAY_CREDENTIAL,
   buildCompatibilityMatrix,
@@ -32,6 +35,7 @@ import {
   createEvidence,
   createRecordingFetch,
   createReplayFetch,
+  isLegacyEvidenceId,
   parseRecording,
   renderCompatibilityMatrix,
   runCapabilitySuite,
@@ -116,6 +120,8 @@ Usage:
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
   apexnova compatibility run <agent> --deployment <id> [--budget <amount>] [--yes]
   apexnova compatibility refresh [--within <days>] [--budget <amount>] [--yes]
+  apexnova compatibility sync [--agent <id>] [--deployment <id>] [--yes]
+  apexnova compatibility revoke <evidence-id> --reason <why> [--yes]
   apexnova compatibility replay <recording.json>
   apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
   apexnova compatibility matrix [--agent <id>] [--deployment <id>] [--protocol <id>]
@@ -138,6 +144,7 @@ Global options:
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
   --record <path>        Write a replayable recording of a suite run
   --within <days>        Refresh evidence expiring within this many days (default 7)
+  --reason <why>         Why an evidence record is being revoked (required)
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
   --api-key-helper       Let the Agent fetch the credential itself, where it supports one
@@ -194,6 +201,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let budget: string | undefined;
   let recordPath: string | undefined;
   let withinDays: number | undefined;
+  let reason: string | undefined;
   let dryRun = false;
   let list = false;
   let live = false;
@@ -315,6 +323,10 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         recordPath = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--reason":
+        reason = valueAfter(args, index, arg);
+        index += 1;
+        break;
       case "--budget": {
         budget = valueAfter(args, index, arg);
         if (!/^[0-9]+(?:\.[0-9]+)?$/.test(budget)) {
@@ -385,6 +397,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(budget ? { budget } : {}),
     ...(recordPath ? { recordPath } : {}),
     ...(withinDays === undefined ? {} : { withinDays }),
+    ...(reason ? { reason } : {}),
     dryRun,
     list,
     live,
@@ -544,10 +557,29 @@ async function executeLogin(parsed: ParsedArguments, dependencies: CliDependenci
     },
   );
   if (!promptShown) throw new CliError({ code: "INVALID_RESPONSE", message: "Hub login completed without a verification prompt.", exitCode: EXIT_CODES.runtime });
+  // Hub drops a scope the account was never granted rather than refusing the
+  // login, so a session can come back quietly narrower than it asked for. The
+  // collector scopes are the live case: they are granted per account by a Hub
+  // admin, and finding that out at the first submission is too late.
+  const granted = new Set((tokens.scope ?? "").split(/\s+/).filter(Boolean));
+  const ungranted = (tokens.requestedScope ?? "").split(/\s+/).filter((scope) => scope && !granted.has(scope));
   return {
-    data: { profile: parsed.profile, authenticated: true, tokenType: tokens.tokenType, expiresAt: tokens.expiresAt, scope: tokens.scope, accountId: tokens.accountId },
-    warnings: [] as readonly string[],
-    human: `Authenticated profile ${parsed.profile}${tokens.accountId ? ` as ${tokens.accountId}` : ""}.`,
+    data: {
+      profile: parsed.profile,
+      authenticated: true,
+      tokenType: tokens.tokenType,
+      expiresAt: tokens.expiresAt,
+      scope: tokens.scope,
+      ...(ungranted.length > 0 ? { ungrantedScopes: ungranted } : {}),
+      accountId: tokens.accountId,
+    },
+    warnings: ungranted.length > 0
+      ? [`Hub did not grant ${ungranted.join(", ")}. The session is otherwise valid; commands needing those scopes will fail until an administrator grants them to this account.`]
+      : [] as readonly string[],
+    human: [
+      `Authenticated profile ${parsed.profile}${tokens.accountId ? ` as ${tokens.accountId}` : ""}.`,
+      ...(ungranted.length > 0 ? [`Not granted: ${ungranted.join(", ")}`] : []),
+    ].join("\n"),
   };
 }
 
@@ -1517,6 +1549,247 @@ async function executeCompatibilityRefresh(
   };
 }
 
+/**
+ * Publishes local evidence to Hub. Push only: pulling other people's records
+ * into the store that feeds our published matrix would need the trust rules for
+ * community submissions, and those do not exist yet (no signature scheme), so
+ * this submits what we collected and reports what Hub makes of it.
+ *
+ * Nothing is sent before the list is approved. Accepted evidence is immutable
+ * and public: a mistake can only be answered with a superseding record or a
+ * revocation, both of which stay visible.
+ */
+async function executeCompatibilitySync(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  operands: readonly string[],
+) {
+  if (operands.length > 0) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility sync takes no operands; filter with --agent, --deployment or --protocol.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+
+  const store = evidenceStore(dependencies);
+  const records = await store.list({
+    ...(parsed.agent === undefined ? {} : { agentId: parsed.agent }),
+    ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+    ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
+  });
+  // Records written before the id form was agreed cannot be submitted: Hub
+  // refuses `evidence.<32hex>` with 400 evidence_legacy_id, and they are
+  // immutable, so they can only stay local.
+  const skipped = records
+    .filter((record) => isLegacyEvidenceId(record.id))
+    .map((record) => ({
+      evidenceId: record.id,
+      subject: record.subject,
+      reason: "Hub refuses the pre-agreement id form (400 evidence_legacy_id); this record stays local.",
+    }));
+  const uploadable = records.filter((record) => !isLegacyEvidenceId(record.id));
+
+  if (uploadable.length === 0) {
+    return {
+      data: { generatedAt: new Date(currentTime(dependencies)).toISOString(), submitted: [], skipped, failed: [] },
+      warnings: skipped.length > 0
+        ? [`${skipped.length} local records cannot be submitted because of their id form; re-collect those subjects to publish them.`]
+        : [] as readonly string[],
+      human: records.length === 0
+        ? "No evidence has been collected yet."
+        : `Nothing can be submitted: all ${records.length} records carry the pre-agreement id form.`,
+    };
+  }
+
+  const listing = uploadable.map(
+    (record) =>
+      `  ${record.id}\n    ${record.subject.agentId} ${record.subject.agentVersion} · ${record.subject.deploymentId} · ${record.subject.protocol} · ${record.subject.platform}`,
+  );
+
+  if (!parsed.yes) {
+    throw new CliError({
+      code: "APPROVAL_REQUIRED",
+      message: [
+        `${uploadable.length} evidence records would be submitted to Hub. Accepted evidence is immutable and public: it can be superseded or revoked, never edited or deleted. Re-run with --yes to approve.`,
+        ...listing,
+        ...(skipped.length === 0 ? [] : [`  (${skipped.length} skipped: pre-agreement id form)`]),
+      ].join("\n"),
+      exitCode: EXIT_CODES.permission,
+      details: {
+        submitting: uploadable.map((record) => ({ evidenceId: record.id, subject: record.subject })),
+        skipped,
+      },
+    });
+  }
+
+  const service = hubService(parsed, dependencies);
+  const signal = operationSignal(parsed);
+  const warnings: string[] = [];
+
+  // Registering the suite is not a precondition for submitting -- Hub accepts
+  // records either way -- but without it Hub cannot tell that a later major has
+  // superseded these records, which is half of what 12A.3 asks for.
+  let suite: { readonly id: string; readonly version: string; readonly state: string };
+  try {
+    const registration = await service.registerTestSuite(parsed.profile, {
+      suiteId: CAPABILITY_SUITE_ID,
+      version: CAPABILITY_SUITE_VERSION,
+      capabilityDigest: {
+        digest: CAPABILITY_DEFINITIONS_DIGEST,
+        capabilities: CAPABILITY_DEFINITIONS.map((definition) => ({
+          id: definition.id,
+          category: definition.category,
+          defaultLevel: definition.defaultLevel,
+          ttlDays: definition.ttlDays,
+        })),
+      },
+      ttlTable: Object.fromEntries(CAPABILITY_DEFINITIONS.map((definition) => [definition.id, definition.ttlDays])),
+      environment: `${platformTag(dependencies)} node ${process.version}`,
+    }, signal);
+    suite = {
+      id: registration.suite.suiteId,
+      version: registration.suite.version,
+      state: registration.created ? "registered" : "already registered",
+    };
+  } catch (error) {
+    const apiCode = error instanceof HubClientError ? error.apiCode : undefined;
+    const normalized = normalizeError(error);
+    suite = { id: CAPABILITY_SUITE_ID, version: CAPABILITY_SUITE_VERSION, state: `not registered (${apiCode ?? normalized.code})` };
+    warnings.push(
+      apiCode === "suite_version_immutable"
+        // A version is an immutable identifier: someone registered this one
+        // from a different definition, and the records already pointing at it
+        // no longer mean what this build thinks they mean.
+        ? `Hub already holds ${CAPABILITY_SUITE_ID} ${CAPABILITY_SUITE_VERSION} with a different definition. Records still upload, but the version no longer identifies one definition -- treat it as a contract problem, not a retry.`
+        : `The test suite version could not be registered (${normalized.code}). Records still upload, but Hub cannot expire them when the suite's major changes.`,
+    );
+  }
+
+  const submitted: {
+    readonly evidenceId: string;
+    readonly created: boolean;
+    readonly supportsCurrentVerdict?: boolean;
+    readonly staleReason?: string;
+    readonly fingerprint?: string;
+    readonly signatureStatus?: string;
+  }[] = [];
+  const failed: { readonly evidenceId: string; readonly code: string; readonly message: string }[] = [];
+  let firstFailure: unknown;
+
+  for (const record of uploadable) {
+    try {
+      const result = await service.submitEvidence(parsed.profile, record as unknown as Record<string, unknown>, signal);
+      submitted.push({
+        evidenceId: result.record.id,
+        created: result.created,
+        ...(result.record.derived.supportsCurrentVerdict === undefined
+          ? {}
+          : { supportsCurrentVerdict: result.record.derived.supportsCurrentVerdict }),
+        ...(result.record.derived.staleReason === undefined ? {} : { staleReason: result.record.derived.staleReason }),
+        ...(result.record.derived.fingerprint === undefined ? {} : { fingerprint: result.record.derived.fingerprint.match }),
+        ...(result.record.received.signatureStatus === undefined ? {} : { signatureStatus: result.record.received.signatureStatus }),
+      });
+    } catch (error) {
+      firstFailure ??= error;
+      const apiCode = error instanceof HubClientError ? error.apiCode : undefined;
+      const normalized = normalizeError(error);
+      failed.push({ evidenceId: record.id, code: apiCode ?? normalized.code, message: normalized.message });
+    }
+  }
+
+  // Every record failing is not a partial result to report; it is the command
+  // failing, and the first error carries the exit code that says why.
+  if (submitted.length === 0 && firstFailure !== undefined) throw firstFailure;
+
+  const created = submitted.filter((entry) => entry.created).length;
+  const notCounted = submitted.filter((entry) => entry.supportsCurrentVerdict === false);
+  if (notCounted.length > 0) {
+    warnings.push(
+      `Hub does not count ${notCounted.length} of the submitted records toward a current verdict (${[...new Set(notCounted.map((entry) => entry.staleReason ?? "not stated"))].join(", ")}). They stay queryable.`,
+    );
+  }
+  if (skipped.length > 0) {
+    warnings.push(`${skipped.length} local records were not submitted because of their id form; re-collect those subjects to publish them.`);
+  }
+  for (const failure of failed) {
+    warnings.push(`${failure.evidenceId} was rejected: ${failure.code}. ${failure.message}`);
+  }
+
+  return {
+    data: {
+      generatedAt: new Date(currentTime(dependencies)).toISOString(),
+      suite,
+      submitted,
+      skipped,
+      failed,
+    },
+    warnings: warnings as readonly string[],
+    human: [
+      `Suite ${suite.id} ${suite.version}: ${suite.state}`,
+      `Submitted ${submitted.length} of ${uploadable.length} records (${created} new, ${submitted.length - created} already held by Hub).`,
+      ...submitted.map(
+        (entry) =>
+          `  ${entry.evidenceId} ${entry.created ? "created" : "existing"}${entry.supportsCurrentVerdict === undefined ? "" : entry.supportsCurrentVerdict ? ", supports the current verdict" : `, does not support the current verdict${entry.staleReason ? ` (${entry.staleReason})` : ""}`}${entry.fingerprint ? `, fingerprint ${entry.fingerprint}` : ""}`,
+      ),
+      ...failed.map((entry) => `  ${entry.evidenceId} rejected: ${entry.code}`),
+      ...skipped.map((entry) => `  ${entry.evidenceId} skipped: pre-agreement id form`),
+    ].join("\n"),
+  };
+}
+
+/**
+ * Revokes one published record. Hub keeps it and writes why it was pulled --
+ * months later nobody can reconstruct that from an absence -- so the reason is
+ * required here as well as there. Revoking twice is the same outcome as once,
+ * and the first reason is the one that stands.
+ */
+async function executeCompatibilityRevoke(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  operands: readonly string[],
+) {
+  const [evidenceId, ...rest] = operands;
+  if (evidenceId === undefined || rest.length > 0) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "compatibility revoke takes exactly one evidence ID.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const reason = parsed.reason?.trim();
+  if (!reason) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: 'compatibility revoke requires --reason "why this record was pulled". Hub refuses a revocation without one.',
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  if (!parsed.yes) {
+    throw new CliError({
+      code: "APPROVAL_REQUIRED",
+      message: `Revoking ${evidenceId} is public and permanent: the record stops supporting any verdict, stays readable by ID, and carries the reason from now on. Re-run with --yes to approve.`,
+      exitCode: EXIT_CODES.permission,
+      details: { evidenceId, reason },
+    });
+  }
+
+  const record = await hubService(parsed, dependencies)
+    .revokeEvidence(parsed.profile, evidenceId, reason, operationSignal(parsed));
+  const recorded = record.received.revokedReason;
+  const warnings = recorded !== undefined && recorded !== reason
+    ? [`This record was already revoked; the original reason stands: ${recorded}`]
+    : [] as readonly string[];
+  return {
+    data: { evidenceId: record.id, revokedAt: record.received.revokedAt, reason: recorded ?? reason },
+    warnings,
+    human: [
+      `Revoked ${record.id}${record.received.revokedAt ? ` at ${record.received.revokedAt}` : ""}.`,
+      `Reason: ${recorded ?? reason}`,
+    ].join("\n"),
+  };
+}
+
 function planEntryDocument(entry: RefreshPlanEntry) {
   return {
     subject: entry.subject,
@@ -1653,10 +1926,12 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
   if (subcommand === "matrix") return await executeCompatibilityMatrix(parsed, dependencies, rest);
   if (subcommand === "replay") return await executeCompatibilityReplay(parsed, dependencies, rest);
   if (subcommand === "refresh") return await executeCompatibilityRefresh(parsed, dependencies, rest);
+  if (subcommand === "sync") return await executeCompatibilitySync(parsed, dependencies, rest);
+  if (subcommand === "revoke") return await executeCompatibilityRevoke(parsed, dependencies, rest);
   if (subcommand !== "explain") {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility accepts five subcommands: run, refresh, replay, explain and matrix.",
+      message: "compatibility accepts seven subcommands: run, refresh, sync, revoke, replay, explain and matrix.",
       exitCode: EXIT_CODES.usage,
     });
   }
@@ -2408,7 +2683,7 @@ function normalizeError(error: unknown): CliError {
             ? EXIT_CODES.billing
             : EXIT_CODES.runtime;
     const message = error.code === "INSUFFICIENT_SCOPE"
-      ? "Your session lacks the required scopes (api-keys:*). Run `apexnova login` to re-authorize with the new permissions."
+      ? "Your session lacks a scope this command needs. Run `apexnova login` to re-authorize. The compatibility:write and compatibility:revoke scopes also have to be granted to the account by a Hub administrator -- re-authorizing alone will not add them."
       : error.code === "KEY_TTL_POLICY"
         ? "Your organization requires keys to have a maximum TTL. Use --rotating for short-lived credentials or specify a shorter expiry."
         : error.message;

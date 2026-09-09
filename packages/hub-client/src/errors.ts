@@ -20,6 +20,8 @@ export type HubClientErrorCode =
 
 export class HubClientError extends Error {
   readonly code: HubClientErrorCode;
+  /** Hub's own error code, verbatim, when the response carried one. */
+  readonly apiCode?: string;
   readonly oauthError?: string;
   readonly requestId?: string;
   readonly retryable: boolean;
@@ -29,6 +31,7 @@ export class HubClientError extends Error {
     code: HubClientErrorCode,
     message: string,
     options: ErrorOptions & {
+      readonly apiCode?: string;
       readonly oauthError?: string;
       readonly requestId?: string;
       readonly retryable?: boolean;
@@ -39,6 +42,7 @@ export class HubClientError extends Error {
     this.name = "HubClientError";
     this.code = code;
     this.retryable = options.retryable ?? false;
+    if (options.apiCode !== undefined) this.apiCode = options.apiCode;
     if (options.oauthError !== undefined) this.oauthError = options.oauthError;
     if (options.requestId !== undefined) this.requestId = options.requestId;
     if (options.retryAfterSeconds !== undefined) this.retryAfterSeconds = options.retryAfterSeconds;

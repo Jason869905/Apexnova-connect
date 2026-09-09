@@ -291,6 +291,104 @@ describe("HubControlPlaneClient", () => {
     await expect(client(fetch).usage("req_1")).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
+  it("keeps the submission, Hub's receipt and Hub's derivation apart", async () => {
+    // Shaped after Hub's own openapi/fixtures/compatibility-evidence.json.
+    const payload = { schemaVersion: "0.1", id: "ev.sha256.aa", sourceType: "maintainer-test" };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      id: "ev.sha256.acc7db41",
+      payload,
+      received: {
+        receivedAt: "2026-09-09T10:00:03.117Z",
+        submittedBy: "usr_00000000000000000000000001",
+        signatureStatus: "none",
+        payloadBytes: 812,
+        implementationFingerprint: "a3f19c04b7e25d18",
+        revokedAt: null,
+        revokedReason: null,
+      },
+      derived: {
+        recordExpired: false,
+        capabilityStatus: [
+          { capabilityId: "tool.calling", expiresAt: "2027-01-01T00:00:00.000Z", expired: false },
+          { capabilityId: "streaming.sse", expiresAt: "2026-10-09T00:00:00.000Z", expired: true },
+        ],
+        staleReason: null,
+        supersededBy: null,
+        fingerprint: { subject: "a3f19c04b7e25d18", received: "a3f19c04b7e25d18", current: "a3f19c04b7e25d18", match: "match" },
+        supportsCurrentVerdict: true,
+      },
+    }, { status: 201 }));
+
+    const result = await client(fetch).submitCompatibilityEvidence(payload);
+
+    // 201 is Hub taking the record; 200 would mean it already had it.
+    expect(result.created).toBe(true);
+    // The submission comes back untouched, never merged with Hub's own blocks.
+    expect(result.record.payload).toEqual(payload);
+    expect(result.record.received).toMatchObject({ signatureStatus: "none", payloadBytes: 812 });
+    expect(result.record.received.revokedAt).toBeUndefined();
+    expect(result.record.derived.capabilityStatus[1]).toEqual({
+      capabilityId: "streaming.sse",
+      expiresAt: "2026-10-09T00:00:00.000Z",
+      expired: true,
+    });
+    expect(result.record.derived.staleReason).toBeUndefined();
+    expect(result.record.derived.fingerprint?.match).toBe("match");
+    expect(fetch).toHaveBeenCalledWith(
+      new URL("https://hub.example.test/v1/compatibility/evidence"),
+      expect.objectContaining({ method: "POST", body: JSON.stringify(payload) }),
+    );
+  });
+
+  it("reads an already-stored submission as not created", async () => {
+    const payload = { id: "ev.sha256.aa" };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      id: "ev.sha256.aa", payload, received: {}, derived: {},
+    }, { status: 200 }));
+
+    await expect(client(fetch).submitCompatibilityEvidence(payload)).resolves.toMatchObject({ created: false });
+  });
+
+  it("carries Hub's own error code through, so a rejection can be reported precisely", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      error: { code: "evidence_legacy_id", message: "The id form predates the agreement.", retryable: false, requestId: "req_1" },
+    }, { status: 400 }));
+
+    await expect(client(fetch).submitCompatibilityEvidence({ id: "evidence.aa" })).rejects.toMatchObject({
+      code: "API_ERROR",
+      apiCode: "evidence_legacy_id",
+      retryable: false,
+    });
+  });
+
+  it("refuses to revoke without a reason before touching the network", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    await expect(client(fetch).revokeCompatibilityEvidence("ev.sha256.aa", "   ")).rejects.toMatchObject({ code: "INVALID_CONFIG" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("registers a test suite version and reports whether it was new", async () => {
+    const suite = {
+      suiteId: "apexnova.capability-suite",
+      version: "0.2.0",
+      majorVersion: 0,
+      capabilityDigest: { capabilities: ["tool.calling"] },
+      ttlTable: { "tool.calling": 90 },
+      environment: "linux-x64 node22",
+      registeredAt: "2026-09-09T09:58:11.004Z",
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json(suite, { status: 200 }));
+
+    const result = await client(fetch).registerCompatibilityTestSuite({
+      suiteId: suite.suiteId,
+      version: suite.version,
+      capabilityDigest: suite.capabilityDigest,
+      ttlTable: suite.ttlTable,
+    });
+
+    expect(result).toEqual({ suite, created: false });
+  });
+
   it("rejects an invalid requestId argument", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
     await expect(client(fetch).usage("")).rejects.toMatchObject({ code: "INVALID_CONFIG" });

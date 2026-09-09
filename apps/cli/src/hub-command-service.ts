@@ -18,7 +18,13 @@ import {
   type HubPricingEstimate,
   type HubPricingUsage,
   type HubTokenSet,
+  type HubEvidenceQuery,
+  type HubEvidenceRecord,
+  type HubEvidenceListResult,
+  type HubEvidenceSubmission,
+  type HubTestSuiteRegistration,
   type HubUsageRecord,
+  type RegisterTestSuiteInput,
   type RuntimeCredentialSummary,
   type UsageQuery,
   type UsageAggregateResult,
@@ -58,6 +64,10 @@ export interface HubCommandService {
   apiKey(profileId: string, id: string, signal?: AbortSignal): Promise<ApiKeySummary>;
   updateApiKey(profileId: string, id: string, input: UpdateApiKeyInput, signal?: AbortSignal): Promise<ApiKeySummary>;
   revokeApiKey(profileId: string, id: string, signal?: AbortSignal): Promise<void>;
+  submitEvidence(profileId: string, evidence: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<HubEvidenceSubmission>;
+  evidence(profileId: string, query: HubEvidenceQuery, signal?: AbortSignal): Promise<HubEvidenceListResult>;
+  revokeEvidence(profileId: string, evidenceId: string, reason: string, signal?: AbortSignal): Promise<HubEvidenceRecord>;
+  registerTestSuite(profileId: string, input: RegisterTestSuiteInput, signal?: AbortSignal): Promise<HubTestSuiteRegistration>;
 }
 
 export interface DefaultHubCommandServiceOptions {
@@ -132,5 +142,9 @@ export function createDefaultHubCommandService(options: DefaultHubCommandService
     apiKey: (profileId, id, signal) => control(profileId).apiKey(id, signal),
     updateApiKey: (profileId, id, input, signal) => control(profileId).updateApiKey(id, input, signal),
     revokeApiKey: (profileId, id, signal) => control(profileId).revokeApiKey(id, signal),
+    submitEvidence: (profileId, evidence, signal) => control(profileId).submitCompatibilityEvidence(evidence, signal),
+    evidence: (profileId, query, signal) => control(profileId).compatibilityEvidence(query, signal),
+    revokeEvidence: (profileId, evidenceId, reason, signal) => control(profileId).revokeCompatibilityEvidence(evidenceId, reason, signal),
+    registerTestSuite: (profileId, input, signal) => control(profileId).registerCompatibilityTestSuite(input, signal),
   };
 }

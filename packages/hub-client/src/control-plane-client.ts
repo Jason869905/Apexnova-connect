@@ -16,7 +16,18 @@ import type {
   HubCatalogSnapshot,
   HubPricingEstimate,
   HubPricingUsage,
+  HubEvidenceListResult,
+  HubEvidenceQuery,
+  HubEvidenceRecord,
+  HubEvidenceSubmission,
+  HubTestSuiteListResult,
+  HubTestSuiteRegistration,
+  HubTestSuiteVersion,
   HubUsageRecord,
+  EvidenceFingerprintMatch,
+  EvidenceSignatureStatus,
+  EvidenceStaleReason,
+  RegisterTestSuiteInput,
   RuntimeCredentialSummary,
   UpdateApiKeyInput,
   UsageAggregateRecord,
@@ -186,8 +197,12 @@ function settlementStatus(value: unknown): UsageSettlementStatus {
 
 function parseUsageRecord(value: unknown): HubUsageRecord {
   const item = object(value, "usage record");
-  const status = string(item.status, "usage record.status", 32);
-  if (status !== "success" && status !== "error") throw invalid("usage record.status");
+  // Null until billing settles: whether a request succeeded is only known once
+  // there is a usage record behind it, so `pending` and `failed` carry no status.
+  const status = item.status === null || item.status === undefined
+    ? undefined
+    : string(item.status, "usage record.status", 32);
+  if (status !== undefined && status !== "success" && status !== "error") throw invalid("usage record.status");
   const usage = object(item.usage, "usage record.usage");
   const integer = (value: unknown, field: string): number | undefined => {
     if (value === null || value === undefined) return undefined;
@@ -203,7 +218,7 @@ function parseUsageRecord(value: unknown): HubUsageRecord {
     id: string(item.id, "usage record.id", 256),
     requestId: string(item.requestId, "usage record.requestId", 512),
     at: timestamp(item.at, "usage record.at"),
-    status,
+    ...(status === undefined ? {} : { status }),
     ...(statusCode === undefined ? {} : { statusCode }),
     ...(item.requestedModel === null || item.requestedModel === undefined ? {} : { requestedModel: string(item.requestedModel, "usage record.requestedModel", 512) }),
     ...(item.requestedDeploymentId === null || item.requestedDeploymentId === undefined ? {} : { requestedDeploymentId: string(item.requestedDeploymentId, "usage record.requestedDeploymentId", 256) }),
@@ -276,6 +291,106 @@ function parseUsageAggregate(value: unknown): UsageAggregateRecord {
   };
 }
 
+const SIGNATURE_STATUSES: readonly EvidenceSignatureStatus[] = ["none", "unverified", "valid", "invalid"];
+const STALE_REASONS: readonly EvidenceStaleReason[] = ["implementation-changed", "implementation-unknown", "suite-major-superseded"];
+const FINGERPRINT_MATCHES: readonly EvidenceFingerprintMatch[] = ["match", "stale", "unknown", "absent"];
+
+/** Hub writes `null` for "not set" throughout the compatibility blocks. */
+function nullableString(value: unknown, field: string, max: number): string | undefined {
+  return value === null || value === undefined ? undefined : string(value, field, max);
+}
+
+function nullableTimestamp(value: unknown, field: string): string | undefined {
+  return value === null || value === undefined ? undefined : timestamp(value, field);
+}
+
+function nullableBoolean(value: unknown, field: string): boolean | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "boolean") throw invalid(field);
+  return value;
+}
+
+function nullableCount(value: unknown, field: string): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalid(field);
+  return value as number;
+}
+
+function member<T extends string>(value: string | undefined, allowed: readonly T[], field: string): T | undefined {
+  if (value === undefined) return undefined;
+  if (!allowed.includes(value as T)) throw invalid(field);
+  return value as T;
+}
+
+function present<T>(key: string, value: T | undefined): Record<string, T> | Record<string, never> {
+  return value === undefined ? {} : ({ [key]: value } as Record<string, T>);
+}
+
+function parseEvidenceRecord(value: unknown): HubEvidenceRecord {
+  const item = object(value, "evidence record");
+  const received = item.received === null || item.received === undefined ? {} : object(item.received, "evidence record.received");
+  const derived = item.derived === null || item.derived === undefined ? {} : object(item.derived, "evidence record.derived");
+  const fingerprint = derived.fingerprint === null || derived.fingerprint === undefined
+    ? undefined
+    : (() => {
+        const view = object(derived.fingerprint, "evidence record.derived.fingerprint");
+        return {
+          ...present("subject", nullableString(view.subject, "evidence record.derived.fingerprint.subject", 128)),
+          ...present("received", nullableString(view.received, "evidence record.derived.fingerprint.received", 128)),
+          ...present("current", nullableString(view.current, "evidence record.derived.fingerprint.current", 128)),
+          match: member(string(view.match, "evidence record.derived.fingerprint.match", 32), FINGERPRINT_MATCHES, "evidence record.derived.fingerprint.match")!,
+        };
+      })();
+  return {
+    id: string(item.id, "evidence record.id", 256),
+    // Returned verbatim by contract, so it is carried through untouched rather
+    // than re-parsed into a shape of ours.
+    payload: object(item.payload, "evidence record.payload"),
+    received: {
+      ...present("receivedAt", nullableTimestamp(received.receivedAt, "evidence record.received.receivedAt")),
+      ...present("submittedBy", nullableString(received.submittedBy, "evidence record.received.submittedBy", 256)),
+      ...present("signatureStatus", member(nullableString(received.signatureStatus, "evidence record.received.signatureStatus", 32), SIGNATURE_STATUSES, "evidence record.received.signatureStatus")),
+      ...present("payloadBytes", nullableCount(received.payloadBytes, "evidence record.received.payloadBytes")),
+      ...present("implementationFingerprint", nullableString(received.implementationFingerprint, "evidence record.received.implementationFingerprint", 128)),
+      ...present("revokedAt", nullableTimestamp(received.revokedAt, "evidence record.received.revokedAt")),
+      ...present("revokedReason", nullableString(received.revokedReason, "evidence record.received.revokedReason", 1_024)),
+    },
+    derived: {
+      ...present("recordExpired", nullableBoolean(derived.recordExpired, "evidence record.derived.recordExpired")),
+      capabilityStatus: derived.capabilityStatus === null || derived.capabilityStatus === undefined
+        ? []
+        : array(derived.capabilityStatus, "evidence record.derived.capabilityStatus", (entry) => {
+            const status = object(entry, "evidence record.derived.capabilityStatus[]");
+            const expired = nullableBoolean(status.expired, "evidence record.derived.capabilityStatus[].expired");
+            if (expired === undefined) throw invalid("evidence record.derived.capabilityStatus[].expired");
+            return {
+              ...present("capabilityId", nullableString(status.capabilityId, "evidence record.derived.capabilityStatus[].capabilityId", 256)),
+              ...present("expiresAt", nullableTimestamp(status.expiresAt, "evidence record.derived.capabilityStatus[].expiresAt")),
+              expired,
+            };
+          }),
+      ...present("staleReason", member(nullableString(derived.staleReason, "evidence record.derived.staleReason", 64), STALE_REASONS, "evidence record.derived.staleReason")),
+      ...present("supersededBy", nullableString(derived.supersededBy, "evidence record.derived.supersededBy", 256)),
+      ...present("fingerprint", fingerprint),
+      ...present("supportsCurrentVerdict", nullableBoolean(derived.supportsCurrentVerdict, "evidence record.derived.supportsCurrentVerdict")),
+    },
+  };
+}
+
+function parseTestSuiteVersion(value: unknown): HubTestSuiteVersion {
+  const item = object(value, "test suite");
+  if (!Number.isSafeInteger(item.majorVersion) || (item.majorVersion as number) < 0) throw invalid("test suite.majorVersion");
+  return {
+    suiteId: string(item.suiteId, "test suite.suiteId", 256),
+    version: string(item.version, "test suite.version", 64),
+    majorVersion: item.majorVersion as number,
+    capabilityDigest: object(item.capabilityDigest, "test suite.capabilityDigest"),
+    ttlTable: object(item.ttlTable, "test suite.ttlTable"),
+    ...present("environment", nullableString(item.environment, "test suite.environment", 512)),
+    registeredAt: timestamp(item.registeredAt, "test suite.registeredAt"),
+  };
+}
+
 export class HubControlPlaneClient {
   readonly #baseUrl: URL;
   readonly #accessToken: HubControlPlaneClientOptions["accessToken"];
@@ -306,6 +421,15 @@ export class HubControlPlaneClient {
   }
 
   async #request(path: string, init: { readonly method?: "GET" | "POST" | "PATCH" | "DELETE"; readonly body?: unknown; readonly signal?: AbortSignal } = {}): Promise<unknown> {
+    return (await this.#send(path, init)).body;
+  }
+
+  /**
+   * The status matters for the idempotent compatibility endpoints -- 201 means
+   * Hub took the record, 200 means it already had it -- so the raw status is
+   * kept here and `#request` drops it for everyone else.
+   */
+  async #send(path: string, init: { readonly method?: "GET" | "POST" | "PATCH" | "DELETE"; readonly body?: unknown; readonly signal?: AbortSignal } = {}): Promise<{ readonly status: number; readonly body: unknown }> {
     const token = await this.#accessToken(init.signal);
     const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(this.#requestTimeoutMs)]) : AbortSignal.timeout(this.#requestTimeoutMs);
     let response: Response;
@@ -344,11 +468,12 @@ export class HubControlPlaneClient {
       const code = response.status === 401 ? "UNAUTHENTICATED" : response.status === 403 && apiCode === "insufficient_scope" ? "INSUFFICIENT_SCOPE" : response.status === 403 && apiCode === "key_ttl_policy" ? "KEY_TTL_POLICY" : response.status === 403 ? "FORBIDDEN" : response.status === 404 ? "NOT_FOUND" : response.status === 429 ? "RATE_LIMITED" : apiCode === "insufficient_balance" || apiCode === "budget_exceeded" ? "BILLING_BLOCKED" : "API_ERROR";
       throw new HubClientError(code, message, {
         retryable,
+        ...(apiCode ? { apiCode } : {}),
         ...(requestId ? { requestId } : {}),
         ...(Number.isFinite(retryAfter) && retryAfter >= 0 ? { retryAfterSeconds: retryAfter } : {}),
       });
     }
-    return body;
+    return { status: response.status, body };
   }
 
   async me(signal?: AbortSignal): Promise<HubAccountSummary> {
@@ -544,6 +669,103 @@ export class HubControlPlaneClient {
   async revokeApiKey(id: string, signal?: AbortSignal): Promise<void> {
     if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) throw new HubClientError("INVALID_CONFIG", "API key id is invalid.");
     await this.#request(this.#path(`/v1/api-keys/${encodeURIComponent(id)}`), { method: "DELETE", ...(signal ? { signal } : {}) });
+  }
+
+  /**
+   * Submits one evidence record. Idempotent on the content hash: `created` is
+   * false when Hub already held this exact record, which makes a retry after a
+   * dropped connection safe. Hub is not allowed to alter the submission, so the
+   * record comes back with its payload untouched beside Hub's own two blocks.
+   */
+  async submitCompatibilityEvidence(
+    evidence: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<HubEvidenceSubmission> {
+    const response = await this.#send(this.#path("/v1/compatibility/evidence"), {
+      method: "POST",
+      body: evidence,
+      ...(signal ? { signal } : {}),
+    });
+    return { record: parseEvidenceRecord(response.body), created: response.status === 201 };
+  }
+
+  async compatibilityEvidence(query: HubEvidenceQuery = {}, signal?: AbortSignal): Promise<HubEvidenceListResult> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined) continue;
+      if (key === "limit") {
+        if (!Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > 200) {
+          throw new HubClientError("INVALID_CONFIG", "limit must be 1..200.");
+        }
+        params.set(key, String(value));
+        continue;
+      }
+      params.set(key, String(value));
+    }
+    const suffix = params.toString();
+    const root = object(await this.#request(this.#path(`/v1/compatibility/evidence${suffix ? `?${suffix}` : ""}`), signal ? { signal } : {}), "evidence list");
+    return {
+      items: array(root.items, "evidence list.items", parseEvidenceRecord),
+      ...(root.nextCursor === null || root.nextCursor === undefined ? {} : { nextCursor: string(root.nextCursor, "evidence list.nextCursor", 1_024) }),
+    };
+  }
+
+  async compatibilityEvidenceById(evidenceId: string, signal?: AbortSignal): Promise<HubEvidenceRecord> {
+    if (!evidenceId || evidenceId.length > 256 || /[^A-Za-z0-9._-]/.test(evidenceId)) {
+      throw new HubClientError("INVALID_CONFIG", "evidenceId is invalid.");
+    }
+    return parseEvidenceRecord(await this.#request(this.#path(`/v1/compatibility/evidence/${encodeURIComponent(evidenceId)}`), signal ? { signal } : {}));
+  }
+
+  /**
+   * Revocation keeps the record and writes why it was pulled. Hub requires the
+   * reason, and revoking twice is the same outcome as revoking once -- the
+   * first reason stands.
+   */
+  async revokeCompatibilityEvidence(evidenceId: string, reason: string, signal?: AbortSignal): Promise<HubEvidenceRecord> {
+    if (!evidenceId || evidenceId.length > 256 || /[^A-Za-z0-9._-]/.test(evidenceId)) {
+      throw new HubClientError("INVALID_CONFIG", "evidenceId is invalid.");
+    }
+    if (!reason.trim() || reason.length > 1_000) {
+      throw new HubClientError("INVALID_CONFIG", "A revocation reason of 1..1000 characters is required.");
+    }
+    return parseEvidenceRecord(await this.#request(this.#path(`/v1/compatibility/evidence/${encodeURIComponent(evidenceId)}/revoke`), {
+      method: "POST",
+      body: { reason },
+      ...(signal ? { signal } : {}),
+    }));
+  }
+
+  /**
+   * Registers what a suite version stands for. Idempotent on (suiteId,
+   * version); re-registering a version with a different definition is refused,
+   * because evidence already points at this version and editing it in place
+   * would rewrite what those records mean.
+   */
+  async registerCompatibilityTestSuite(input: RegisterTestSuiteInput, signal?: AbortSignal): Promise<HubTestSuiteRegistration> {
+    if (!input.suiteId.trim() || !input.version.trim()) {
+      throw new HubClientError("INVALID_CONFIG", "suiteId and version are required.");
+    }
+    const response = await this.#send(this.#path("/v1/compatibility/test-suites"), {
+      method: "POST",
+      body: {
+        suiteId: input.suiteId,
+        version: input.version,
+        capabilityDigest: input.capabilityDigest,
+        ttlTable: input.ttlTable,
+        ...(input.environment === undefined ? {} : { environment: input.environment }),
+      },
+      ...(signal ? { signal } : {}),
+    });
+    return { suite: parseTestSuiteVersion(response.body), created: response.status === 201 };
+  }
+
+  async compatibilityTestSuites(signal?: AbortSignal): Promise<HubTestSuiteListResult> {
+    const root = object(await this.#request(this.#path("/v1/compatibility/test-suites"), signal ? { signal } : {}), "test suite list");
+    return {
+      items: array(root.items, "test suite list.items", parseTestSuiteVersion),
+      ...(root.nextCursor === null || root.nextCursor === undefined ? {} : { nextCursor: string(root.nextCursor, "test suite list.nextCursor", 1_024) }),
+    };
   }
 
   async usageQuery(query: UsageQuery, signal?: AbortSignal): Promise<UsageAggregateResult | UsageListResult> {

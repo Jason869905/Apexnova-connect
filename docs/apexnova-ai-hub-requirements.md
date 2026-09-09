@@ -704,6 +704,66 @@ Hub 提醒的另外两点都已落地：LB 权重/优先级变化不改指纹（
 - `tool.choice.forced` 的探针与对应 Capability Definition（套件 minor 版本）；
 - M3 保持开启，直到跑通一次真实同步——评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)。
 
+## 12D. Hub 第二次答复的落地（2026-09-09）
+
+12C.5 列的八个问题 Hub 全部答复，`compatibility sync` 因此开工并随本次提交落地。契约以 Hub 仓库的 `openapi/apexnova-hub-v1.json` 为准（另有 `openapi/fixtures/`、`mock-server.mjs`、`contract.test.ts`），本节只记结论与两处需要 Hub 更正的地方。
+
+### 12D.1 Q1/Q2 指纹：两条保证都拿到了
+
+**稳定性（书面确认）**：盐来自 `APEX_FINGERPRINT_SALT`（未配置时由平台主密钥按固定字符串派生），与请求、时间、进程、节点无关；指纹的输入只有每条 `enabled` 上游线路的 `{credentialId, provider, upstreamModel, apiBase}`，取集合排序后的 canonical JSON。`catalogVersion` bump、价格、availability、LB 权重/优先级/rpm/tpm 都不是输入。反向成立：指纹变则 `catalogVersion` 一定跟着变。
+
+这条保证是 12B.4（指纹进 `subject`）与 12C.2(a)（指纹参与 subject 身份）成立的前提。**若它日后失效，同一实现会在每次采集下生成新 subject，矩阵碎成一行一条记录——那是契约问题，不是本地缺陷。**
+
+**初值**：Hub 已改为「从未观测到变化时 `implementationChangedAt` 返回 `null`」，判据是历史表里有没有前序行，而不是首次见到该值的时间。我们 12C.2(a) 的规则不变（`changedAt` 晚于该 subject 最近观测 → 判到期），`null` 时天然不触发，既有记录不会被一次性判到期。
+
+> **部署前不要跑 `compatibility refresh`。** 现网仍是旧行为（首次观测即写 `changedAt = now`），跑了会把全部 subject 列进重采计划。Hub 部署带 `implementationChangedAt` 修复的版本之后再跑。
+
+### 12D.2 Q3 契约：两处 OpenAPI 与实现不一致
+
+1. **`Estimate` schema 里没有 `discount` 对象**，但 `fixtures/pricing-estimate.json` 里有，且 `appliesTo` / `expiresAt` 可为 `null`。我们按 fixture 实现（整块可选，null 容忍）。**请把它补进 schema**，否则 Hub 自己的契约测试与实际响应对不上。
+2. **`UsageRecord.status` 可为 `null`**（`pending` / `failed` 时尚不知道成败）。OpenAPI 写清楚了，是我们的解析器原先要求它必须是 `success | error`——**这是 Connect 的缺陷，已修**。未修之前，结算完成前按 requestId 查询会报 `INVALID_RESPONSE`。
+
+错误码表照单接受：400 系（`invalid_evidence`、`evidence_hash_mismatch`、`evidence_legacy_id`、`evidence_contains_secret`、`invalid_json` / `invalid_request` / `invalid_version`、`reason_required` / `reason_too_long`）、`413 evidence_too_large`、409（`evidence_immutable`、`suite_version_immutable`）、`404 evidence_not_found`、401/403 一律终态不重试；**只有 `429` 按 `Retry-After` 退避**。CLI 这条由既有的 `withRetry` 统一实现（只对 `RATE_LIMITED` 退避，最多 3 次、单次不超过 30 秒）。Hub 的 code 现在原样带到 CLI 输出（`HubClientError.apiCode`），不再被归一化成 `API_ERROR` 一个词。
+
+查询参数与 12A.1 完全一致；`limit` 默认 50、上限 200，游标是上一页最后一条的 id 且只在同一组过滤下有效。
+
+### 12D.3 Q4 套件登记：不是前置，但 sync 仍然先登记
+
+Hub 确认直接 `POST evidence` 会照常接收（201），不拒绝也不自动登记。仍然先登记的理由是 Hub 自己给的：**不登记就没有 major，`derived.staleReason` 永远不会是 `suite-major-superseded`**，12A.3 要求的「套件 major 变化使旧记录不再支撑 Verdict」就落空一半。
+
+`compatibility sync` 的第一步因此是登记 `apexnova.capability-suite` `0.2.0`，附 `CAPABILITY_DEFINITIONS_DIGEST` 与逐能力 TTL 表。登记失败不阻断提交，只警告；收到 `409 suite_version_immutable` 时按契约问题报出（有人用不同定义登记了同一版本，已经指向该版本的记录不再表示这份定义），不重试。
+
+### 12D.4 Q5 签名：暂不签
+
+Hub 澄清 `none`（没交签名）与 `unverified`（交了但未验）是分开的两档，12A.4 要的「厂商声明与实测分开」由 `sourceType` 满足，与签名无关。签名算法与密钥分发都未定，现在签只会得到 `unverified`，没有收益。**Connect 暂不签名**，等真有 `community-test` 来源时再一起定——那才是签名要解决的信任边界。
+
+### 12D.5 Q6 限流与体积
+
+60 次/分钟按账号、专用桶，与推理请求不共享（采集时的模型调用不会吃掉提交配额）；64KB 量的是解析后 `JSON.stringify` 的 UTF-8 字节数，含 `id` 与 `signature`，**不是** canonical 串（canonical 会剔掉那两个字段，只用于算哈希）。我们目前最大的记录约 3KB。
+
+### 12D.6 Q7 验证环境
+
+只有生产 `https://api.apexnova-consulting.com`。边缘错误的 `edge_` 前缀 Hub 已在生产实测（`429` + `application/json` + `source:"edge"`）；`settlementStatus` 与「未结算金额为 null」需要一条真实请求才看得到，排在 Hub 部署之后的第一轮真实采集里验。
+
+### 12D.7 Q8 分工，写死
+
+**公开矩阵由 Connect 仓库生成，Hub 只做存储、查询与派生判据。** 服务端没有也不打算有 `published` 状态或服务端 Verdict；`derived.supportsCurrentVerdict` 是 Hub 唯一的服务端判断，且判据（过期、撤回、被 supersede、stale）全部摊开，调用方可自行重算——这正是 12A.4 要求的。
+
+[ADR 0005](decisions/0005-m3-milestone-review.md) 里「公开这件事还没有服务端支撑」据此结案：**不是等 Hub 补，而是 by-design 不在 Hub。** M3 的剩余条件因此只有一条：跑通一次真实同步。
+
+### 12D.8 Connect 这次落地了什么
+
+- **`compatibility sync`**：登记套件 → 提交本地记录 → 报告 Hub 的 `derived` 判断（`supportsCurrentVerdict`、`staleReason`、`fingerprint.match`、`signatureStatus`）。**只推不拉**：把别人的记录拉进本地库会直接影响我们生成的公开矩阵，而社区证据的信任规则依赖签名，签名方案还不存在（Q5）；
+- **`compatibility revoke <id> --reason`**：撤回必须带理由，重复撤回幂等且保留第一次的理由；
+- **登录**：Hub 不再因未授予的 scope 拒绝登录（`815f7ef`），CLI 如实报出「请求了但没拿到」的 scope，而不是等到第一次提交才失败；
+- 那 12 条 `evidence.<32hex>` 记录在 sync 里被跳过并说明原因，不会反复撞 `400 evidence_legacy_id`。
+
+### 12D.9 剩下的
+
+- **跑通一次真实同步**（等 Hub 部署 + 采集者账号开通），M3 的最后一条退出条件；
+- `tool.choice.forced` 的探针与 Capability Definition（套件 minor 版本）；
+- 那 8 条 subject 用新 id 形制重采一遍，公开矩阵才在服务端有支撑。
+
 ## 13. 非功能要求
 
 - 上游密钥进入现有加密 Credential/secret 管理链路，绝不进入公共目录；

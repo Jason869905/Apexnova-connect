@@ -39,7 +39,10 @@ export interface HubTokenSet {
   readonly refreshToken?: SecretValue;
   readonly tokenType: string;
   readonly expiresAt?: string;
+  /** What Hub granted. It can be narrower than `requestedScope`. */
   readonly scope?: string;
+  /** What was asked for: the advertised subset of the core and optional scopes. */
+  readonly requestedScope?: string;
   readonly accountId?: string;
 }
 
@@ -231,7 +234,8 @@ export interface HubUsageRecord {
   readonly id: string;
   readonly requestId: string;
   readonly at: string;
-  readonly status: "success" | "error";
+  /** Absent until billing settles -- `pending` and `failed` records carry none. */
+  readonly status?: "success" | "error";
   readonly statusCode?: number;
   readonly requestedModel?: string;
   readonly requestedDeploymentId?: string;
@@ -258,6 +262,123 @@ export interface HubUsageRecord {
   readonly apiKeyId?: string;
   readonly apiKeyName?: string;
   readonly apiKeyKind?: "user" | "runtime";
+}
+
+/**
+ * The three blocks of a stored evidence record, kept strictly apart: `payload`
+ * is the submission returned byte for byte, `received` is what Hub appended on
+ * receipt, and `derived` is what Hub computed at query time. Merging them would
+ * make it impossible to say which fields the submitter authored.
+ */
+export type EvidenceSignatureStatus = "none" | "unverified" | "valid" | "invalid";
+
+export type EvidenceStaleReason =
+  | "implementation-changed"
+  | "implementation-unknown"
+  | "suite-major-superseded";
+
+export type EvidenceFingerprintMatch = "match" | "stale" | "unknown" | "absent";
+
+export interface HubEvidenceReceived {
+  readonly receivedAt?: string;
+  readonly submittedBy?: string;
+  /** `none` means no signature was submitted; `unverified` means one was and Hub has not checked it. */
+  readonly signatureStatus?: EvidenceSignatureStatus;
+  readonly payloadBytes?: number;
+  /** Hub's own reading of the deployment fingerprint, beside the collector's claim in `subject`. */
+  readonly implementationFingerprint?: string;
+  readonly revokedAt?: string;
+  readonly revokedReason?: string;
+}
+
+export interface HubEvidenceCapabilityStatus {
+  readonly capabilityId?: string;
+  readonly expiresAt?: string;
+  readonly expired: boolean;
+}
+
+export interface HubEvidenceFingerprintView {
+  readonly subject?: string;
+  readonly received?: string;
+  readonly current?: string;
+  /** `stale` is a fingerprint Hub has seen before; `unknown` is one it never has. */
+  readonly match: EvidenceFingerprintMatch;
+}
+
+export interface HubEvidenceDerived {
+  readonly recordExpired?: boolean;
+  /** Per capability, evaluated independently; the payload's own list is never trimmed. */
+  readonly capabilityStatus: readonly HubEvidenceCapabilityStatus[];
+  readonly staleReason?: EvidenceStaleReason;
+  readonly supersededBy?: string;
+  readonly fingerprint?: HubEvidenceFingerprintView;
+  /** Hub's own judgement; every input above is exposed so a caller can recompute it. */
+  readonly supportsCurrentVerdict?: boolean;
+}
+
+export interface HubEvidenceRecord {
+  readonly id: string;
+  /** The submitted record, unchanged. Hub is not allowed to rewrite any field of it. */
+  readonly payload: Readonly<Record<string, unknown>>;
+  readonly received: HubEvidenceReceived;
+  readonly derived: HubEvidenceDerived;
+}
+
+export interface HubEvidenceSubmission {
+  readonly record: HubEvidenceRecord;
+  /** False when Hub already held this exact record: submission is idempotent on the content hash. */
+  readonly created: boolean;
+}
+
+export interface HubEvidenceListResult {
+  readonly items: readonly HubEvidenceRecord[];
+  readonly nextCursor?: string;
+}
+
+export interface HubEvidenceQuery {
+  readonly agentId?: string;
+  readonly agentVersion?: string;
+  readonly integrationId?: string;
+  readonly integrationVersion?: string;
+  readonly deploymentId?: string;
+  readonly protocol?: string;
+  readonly platform?: string;
+  readonly suiteId?: string;
+  readonly suiteVersion?: string;
+  readonly sourceType?: string;
+  readonly includeExpired?: boolean;
+  readonly includeRevoked?: boolean;
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
+export interface RegisterTestSuiteInput {
+  readonly suiteId: string;
+  readonly version: string;
+  readonly capabilityDigest: Readonly<Record<string, unknown>>;
+  readonly ttlTable: Readonly<Record<string, unknown>>;
+  readonly environment?: string;
+}
+
+export interface HubTestSuiteVersion {
+  readonly suiteId: string;
+  readonly version: string;
+  readonly majorVersion: number;
+  readonly capabilityDigest: Readonly<Record<string, unknown>>;
+  readonly ttlTable: Readonly<Record<string, unknown>>;
+  readonly environment?: string;
+  readonly registeredAt: string;
+}
+
+export interface HubTestSuiteRegistration {
+  readonly suite: HubTestSuiteVersion;
+  /** False when this exact version was already registered with the same definition. */
+  readonly created: boolean;
+}
+
+export interface HubTestSuiteListResult {
+  readonly items: readonly HubTestSuiteVersion[];
+  readonly nextCursor?: string;
 }
 
 export interface CreateApiKeyInput {

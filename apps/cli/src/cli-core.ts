@@ -122,6 +122,7 @@ export interface ParsedArguments {
   readonly budget?: string;
   readonly recordPath?: string;
   readonly withinDays?: number;
+  readonly reason?: string;
 }
 
 export interface CliErrorShape {
@@ -275,6 +276,12 @@ function withRetryableHub(service: HubCommandService, sleep: (milliseconds: numb
     apiKey: (profileId, id, signal) => retry(() => service.apiKey(profileId, id, signal), signal),
     updateApiKey: (profileId, id, input, signal) => retry(() => service.updateApiKey(profileId, id, input, signal), signal),
     revokeApiKey: (profileId, id, signal) => retry(() => service.revokeApiKey(profileId, id, signal), signal),
+    // Safe to retry: submission is idempotent on the content hash, and revoking
+    // twice is the same outcome as revoking once.
+    submitEvidence: (profileId, evidence, signal) => retry(() => service.submitEvidence(profileId, evidence, signal), signal),
+    evidence: (profileId, query, signal) => retry(() => service.evidence(profileId, query, signal), signal),
+    revokeEvidence: (profileId, evidenceId, reason, signal) => retry(() => service.revokeEvidence(profileId, evidenceId, reason, signal), signal),
+    registerTestSuite: (profileId, input, signal) => retry(() => service.registerTestSuite(profileId, input, signal), signal),
   };
 }
 

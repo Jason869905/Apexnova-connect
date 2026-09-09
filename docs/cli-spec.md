@@ -310,6 +310,36 @@ Evidence 是按 TTL 主动过期的（协议静态字段 90 天、流式与 Tool
 - 本机安装的 Agent 版本与旧证据不同时，重采会落到**新的 subject** 上，旧证据保持过期状态——这是正确的：版本变了就是另一个问题。命令会在计划里标出这一点；
 - 单个 subject 失败不终止整轮，失败逐条报出；全部失败时返回 `REFRESH_FAILED`。
 
+### `apexnova compatibility sync`
+
+把本地 Evidence 提交到 Hub。**只推不拉**，不计费。
+
+```text
+apexnova compatibility sync                       # 只列计划，不发送
+apexnova compatibility sync --yes
+apexnova compatibility sync --agent opencode --deployment <id> --yes
+```
+
+需要 `compatibility:write`——该 scope 由 Hub admin 按账号授予，仅重新 `login` 不会拿到（见[需求 12D](apexnova-ai-hub-requirements.md)）。流程：
+
+1. 没有 `--yes` 时返回 `APPROVAL_REQUIRED` 并逐条列出将提交的记录。**被接收的 Evidence 不可修改也不可删除**，只能被新记录 supersede 或被撤回，且两者都留痕——所以提交必须是一次明确的批准；
+2. 先登记测试套件版本（`apexnova.capability-suite` 与当前版本，附能力定义摘要与 TTL 表）。这不是提交的前置条件，但不登记 Hub 就无法在套件 major 变化时让旧记录失效。登记失败只警告，不阻断提交；
+3. 逐条提交。提交对内容哈希幂等：同一条记录重复提交返回既有记录（报告为 `existing`），因此连接中断后重跑是安全的；
+4. 报告 Hub 对每条记录的 `derived` 判断——是否支撑当前 Verdict、`staleReason`、指纹是否对得上、签名档位。这些判据全部由 Hub 摊开，调用方可自行重算；
+5. `evidence.<32hex>` 形制的历史记录直接跳过并说明原因（Hub 以 `400 evidence_legacy_id` 拒收），不会反复重试。
+
+`400` 系错误一律终态，不重试；只有 `429` 按 `Retry-After` 退避。单条记录被拒不终止整轮，逐条报出；全部失败时按第一条错误的退出码失败。
+
+### `apexnova compatibility revoke <evidence-id>`
+
+撤回一条已发布的记录。不删除：记录仍可按 ID 查到，只是不再支撑任何 Verdict。
+
+```text
+apexnova compatibility revoke ev.sha256.<64hex> --reason "collected against the wrong deployment" --yes
+```
+
+`--reason` 是必填的——几个月后没人能从一条记录的消失里还原出撤回的原因。没有 `--yes` 时返回 `APPROVAL_REQUIRED`。重复撤回是幂等的，且**第一次的理由不被覆盖**；命令会在理由不同时给出警告。需要 `compatibility:revoke`。
+
 ### `apexnova compatibility replay <recording>`
 
 对一份录制回放能力套件。不调用 Hub、不需要凭据、不产生任何费用，**也不写入 Evidence**。

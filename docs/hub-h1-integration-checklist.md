@@ -107,8 +107,19 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 
 待办两项（Hub 要求，见需求 12C.4）：
 
-- `[pending]` **重新授权**：`compatibility:read/:write/:revoke` 已加进 CLI 的可选 scope，授权服务器宣告后才会请求，因此不会提前向用户弹权限；Hub 部署后需要用户重新 `apexnova login` 才拿得到；
-- `[pending]` **采集者账号**：`compatibility:write` / `:revoke` 需 Hub admin 服务端授予，由维护者带外提供，本清单不写账号。未开通时用户在批准页会看到明确的「采集者权限未授予」而非「码无效」。
+- `[pending]` **重新授权**：`compatibility:read/:write/:revoke` 已加进 CLI 的可选 scope，授权服务器宣告后才会请求，因此不会提前向用户弹权限；Hub 部署后需要用户重新 `apexnova login` 才拿得到。Hub 已改为**丢弃未授予的 scope 而不是拒绝登录**，CLI 相应改为如实报出「请求了但没拿到」的 scope；
+- `[pending]` **采集者账号**：`compatibility:write` / `:revoke` 需 Hub admin 服务端授予。账号已由维护者带外提供，等待开通，本清单不写账号。未开通时用户在批准页会看到明确的「采集者权限未授予」而非「码无效」。
+
+## M3 同步链路就绪（2026-09-09，Hub 第二次答复）
+
+Hub 答复了[需求 12C.5](apexnova-ai-hub-requirements.md) 提的八个问题，OpenAPI 与 fixtures 已在 Hub 仓库 `openapi/`。`compatibility sync` 与 `compatibility revoke` 据此实现，处置详见需求 12D。
+
+> `[blocked]` **Hub 部署完成前不要跑 `apexnova compatibility refresh`。** 现网仍是「首次观测到指纹即写 `implementationChangedAt = now`」的旧行为，跑了会把全部 subject 判到期并列进重采计划（要 `--yes` 才会真的花钱，但计划本身是错的）。Hub 已修为「从未观测到变化则返回 `null`」，部署后即可正常使用。
+
+- `[closed]` **指纹稳定性**：Hub 书面确认实现不变时指纹逐字节稳定，输入只有 enabled 上游线路的四元组集合；`catalogVersion`、价格、availability、LB 权重都不进指纹。这是指纹参与 subject 身份的前提；
+- `[found]` **`Estimate` schema 缺 `discount` 对象**：`fixtures/pricing-estimate.json` 里有 `discount{rate,source,appliesTo,expiresAt}`，OpenAPI 的 `Estimate` 里没有。已按 fixture 实现（整块可选、容忍 null），请 Hub 补进 schema；
+- `[fixed]` **`UsageRecord.status` 可为 `null`**：OpenAPI 写明未结算时为 null，我们的解析器原先要求 `success | error`——结算完成前按 requestId 查询会报 `INVALID_RESPONSE`。这是 Connect 的缺陷，已修；
+- `[pending]` **一次真实同步**：`settlementStatus`、未结算金额为 `null`、以及提交链路本身都还没跑过真实请求。等 Hub 部署与采集者账号开通后跑一轮，那是 M3 的最后一条退出条件。
 
 ## 本机 Docker 验证记录（2026-09-05）
 
