@@ -134,7 +134,18 @@ Hub 答复了[需求 12C.5](apexnova-ai-hub-requirements.md) 提的八个问题�
 - `[expected]` 鉴权前失败（401）的 requestId 查不到，与 Hub 说明一致。套件现在单独标出它，不再计进「未结算」；
 - `[fixed]` Connect 侧两个洞：目录 `null` 解析会让整份目录读不了（`ea6e05e`）；`compatibility explain` 的 subject 键漏了指纹，换实现前后的记录会并成一行。
 
-M3 的最后一条退出条件（跑通一次真实同步）**已满足**。剩余 8 条 subject 中的 7 条仍是旧 id 形制，公开矩阵要完整落到服务端还需把它们重采一遍。
+M3 的最后一条退出条件（跑通一次真实同步）**已满足**。
+
+### 剩余 7 条 subject 的重采（同日 15:24–15:29）
+
+`glm-5.2` × OpenCode 之外的 7 条全部重采并上行，本批实扣 `0.007382 USD`，当日合计 `0.009655 USD`。8 条记录现在都在 Hub 上（7 条 `created`、1 条重复提交返回 `existing`），逐条 `supportsCurrentVerdict: true`、`fingerprint.match: "match"`、`signatureStatus: "none"`。公开矩阵已重新生成。
+
+- `[passed]` **结论与 9 月 8 日首批逐条一致**：Claude Code 在 `glm-5.2`/`glm-5.1`/`deepseek-v4-pro-0813` 上 `compatible`、`qwen3.8-flash` `partial`；OpenCode 四个全部 `partial`（都卡在 `agent.structured-output`）。跨一天、两条协议、四个 Deployment 复现了同样的判定；
+- `[passed]` 每条新记录的 subject 都带上了目录指纹，矩阵按实现分行，与旧记录并列而不是覆盖它们；
+- `[finding]` **中断的流式请求 8 轮 8 次都查不到**。每一轮恰好有一条未结算的请求，逐轮核对都是 `protocol.cancellation` 那条——这把 12E.1 从单次观测变成了稳定行为：**不是偶发，是 `(c)` 没有实现**；
+- `[observed]` `qwen3.8-flash` × Claude Code 有两条 `not-billable`（其余各一条）：除了被拒的无效请求，强制 `tool_choice` 那条也被上游拒了，与 9 月 8 日记录的该模型行为一致。
+
+公开矩阵现在有 16 行：8 条带指纹的新记录，加上 8 条 9 月 8 日采集、目录当时还没有指纹的旧记录。两者是不同的 subject（不同实现），不能合并显示——成对的行逐条给出同样的 Verdict，这本身就是一次跨日复现。
 
 ## 本机 Docker 验证记录（2026-09-05）
 
