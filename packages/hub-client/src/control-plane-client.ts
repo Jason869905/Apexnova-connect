@@ -161,12 +161,16 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
     inferenceAlias: string(item.inferenceAlias, "deployment.inferenceAlias", 512),
     aliases: item.aliases === undefined ? [] : strings(item.aliases, "deployment.aliases"),
     protocols,
-    ...(item.implementationFingerprint === undefined
+    // Both are null in the ordinary case -- no upstream line enabled, or no
+    // implementation change ever observed -- so null has to read as absent.
+    // Refusing it would make every catalog fetch fail on a deployment nobody
+    // has changed.
+    ...(item.implementationFingerprint === undefined || item.implementationFingerprint === null
       ? {}
       : { implementationFingerprint: string(item.implementationFingerprint, "deployment.implementationFingerprint", 128) }),
-    ...(item.implementationChangedAt === undefined
+    ...(item.implementationChangedAt === undefined || item.implementationChangedAt === null
       ? {}
-      : { implementationChangedAt: string(item.implementationChangedAt, "deployment.implementationChangedAt", 64) }),
+      : { implementationChangedAt: timestamp(item.implementationChangedAt, "deployment.implementationChangedAt") }),
     ...(item.limits === undefined ? {} : { limits: (() => {
       const limits = object(item.limits, "deployment.limits");
       const integer = (value: unknown, field: string) => {

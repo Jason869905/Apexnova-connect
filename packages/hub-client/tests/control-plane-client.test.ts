@@ -44,6 +44,56 @@ describe("HubControlPlaneClient", () => {
     );
   });
 
+  it("reads a deployment that has no fingerprint and no observed change", async () => {
+    // The ordinary case once fingerprints ship: null means "no upstream line
+    // enabled" and "never seen it change", not a malformed catalog.
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      schemaVersion: "0.1",
+      catalogVersion: "cat_123",
+      generatedAt: "2026-09-03T12:00:00Z",
+      expiresAt: "2026-09-03T12:15:00Z",
+      providers: [],
+      models: [],
+      deployments: [{
+        id: "deployment.nova", providerId: "provider.apexnova-ai-hub", modelId: "model.nova", displayName: "Nova", inferenceAlias: "nova",
+        protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }], capabilities: [],
+        implementationFingerprint: null,
+        implementationChangedAt: null,
+        availability: { status: "available" },
+      }],
+    }));
+
+    const result = await client(fetch).catalog();
+
+    expect(result.deployments[0]?.implementationFingerprint).toBeUndefined();
+    expect(result.deployments[0]?.implementationChangedAt).toBeUndefined();
+  });
+
+  it("carries the fingerprint and the moment it last changed", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      schemaVersion: "0.1",
+      catalogVersion: "cat_124",
+      generatedAt: "2026-09-03T12:00:00Z",
+      expiresAt: "2026-09-03T12:15:00Z",
+      providers: [],
+      models: [],
+      deployments: [{
+        id: "deployment.nova", providerId: "provider.apexnova-ai-hub", modelId: "model.nova", displayName: "Nova", inferenceAlias: "nova",
+        protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }], capabilities: [],
+        implementationFingerprint: "a3f19c04b7e25d18",
+        implementationChangedAt: "2026-09-15T10:00:00.000Z",
+        availability: { status: "available" },
+      }],
+    }));
+
+    const result = await client(fetch).catalog();
+
+    expect(result.deployments[0]).toMatchObject({
+      implementationFingerprint: "a3f19c04b7e25d18",
+      implementationChangedAt: "2026-09-15T10:00:00.000Z",
+    });
+  });
+
   it("never includes the bearer token in a network error", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(new Error("offline"));
     const error = await client(fetch).me().catch((value: unknown) => value);
