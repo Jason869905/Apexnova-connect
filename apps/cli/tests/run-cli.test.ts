@@ -1610,7 +1610,10 @@ describe("CLI", () => {
         detail: "probe answered as expected",
         requestIds: ["req_capability_1"],
       })),
-      requestIds: ["req_capability_1", "req_capability_2"],
+      requestIds: ["req_capability_1", "req_capability_2", "req_capability_rejected"],
+      // Answered with an ID but never billed: there is no account behind a
+      // rejected credential, so no ledger row is ever written for it.
+      preAuthRequestIds: ["req_capability_rejected"],
       billableRequests: 5,
     };
   }
@@ -1715,8 +1718,10 @@ describe("CLI", () => {
     const output = JSON.parse(capture.stdout());
     expect(output.data).toMatchObject({
       verdict: "partial",
-      billed: { amount: "0.000200", currency: "USD" },
-      requestIds: ["req_capability_1", "req_capability_2"],
+      // The pre-auth probe is attributed to the run but never reconciled: Hub
+      // opens no ledger row for a request it refused before authentication.
+      billed: { amount: "0.000200", currency: "USD", settledRequests: 2, attributedRequests: 3, preAuthRequests: 1 },
+      requestIds: ["req_capability_1", "req_capability_2", "req_capability_rejected"],
       subject: { agentVersion: "1.18.29", deploymentId: "deployment.nova", protocol: "openai-responses" },
     });
 
@@ -1753,13 +1758,14 @@ describe("CLI", () => {
 
     expect(result.exitCode).toBe(EXIT_CODES.success);
     const output = JSON.parse(capture.stdout());
-    expect(output.data.billed).toMatchObject({ amount: "0.000000", settledRequests: 0, attributedRequests: 2 });
+    expect(output.data.billed).toMatchObject({ amount: "0.000000", settledRequests: 0, attributedRequests: 3, preAuthRequests: 1 });
     expect(output.warnings.join(" ")).toContain("has not settled 2 of 2 requests");
     expect(sleep).toHaveBeenCalled();
 
     const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
     const stored = await store.list();
-    expect(stored[0]?.result.summary).toContain("over 0 settled of 2 attributed requests");
+    expect(stored[0]?.result.summary).toContain("over 0 settled of 3 attributed requests");
+    expect(stored[0]?.result.summary).toContain("1 refused before authentication");
   });
 
   it("tells apart what is unsettled, what is not billable and what never reached the ledger", async () => {

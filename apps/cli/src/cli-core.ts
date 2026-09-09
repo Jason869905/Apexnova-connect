@@ -123,6 +123,7 @@ export interface ParsedArguments {
   readonly recordPath?: string;
   readonly withinDays?: number;
   readonly reason?: string;
+  readonly requestId?: string;
 }
 
 export interface CliErrorShape {

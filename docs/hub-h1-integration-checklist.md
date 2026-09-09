@@ -121,6 +121,21 @@ Hub 答复了[需求 12C.5](apexnova-ai-hub-requirements.md) 提的八个问题�
 - `[fixed]` **`UsageRecord.status` 可为 `null`**：OpenAPI 写明未结算时为 null，我们的解析器原先要求 `success | error`——结算完成前按 requestId 查询会报 `INVALID_RESPONSE`。这是 Connect 的缺陷，已修；
 - `[pending]` **一次真实同步**：`settlementStatus`、未结算金额为 `null`、以及提交链路本身都还没跑过真实请求。等 Hub 部署与采集者账号开通后跑一轮，那是 M3 的最后一条退出条件。
 
+## M3 首次真实同步（2026-09-09，Linux/WSL2，`api.apexnova-consulting.com`）
+
+采集者账号已开通，13 个 scope 全部授予。对 `glm-5.2` × OpenCode × `openai-responses` 跑一轮真实采集并上行，实扣 `0.002273 USD`。结论见[需求 12E](apexnova-ai-hub-requirements.md)。
+
+- `[passed]` **提交链路成立**：记录被接收（`created: true`），`derived` 报 `supportsCurrentVerdict: true`、`fingerprint.match: "match"`、`signatureStatus: "none"`；重跑同一条返回 `created: false`，幂等如约；
+- `[passed]` **指纹与初值**：46/46 deployment 带指纹，`implementationChangedAt` 全为 `null`，`compatibility refresh` 报「没有到期、也没有实现变更」；新采的记录 subject 带上了 `29870b6039ab19ad`；
+- `[passed]` **`settlementStatus`**：4 条已结算、1 条 `not-billable`（被拒的无效请求）、未结算的金额为 `null`；
+- `[observed]` **估价响应带 `discount{rate,source,appliesTo,expiresAt}`**（`0.5` / `promo` / `model` / `2026-09-30`），但 OpenAPI 的 `Estimate` schema 里没有这一块，请 Hub 补；
+- `[finding]` **中断的流式请求仍然查不到**：`98627d46-92ed-4a9b-816b-9675b6f86699` 20 分钟后按 requestId 查返回 0 条——不是 `pending`、不是 `not-billable`，是空结果。与 §J(c) 承诺的「保留计费 + `abortedAt` + 可按 requestId 查到」不符，(c) 未兑现；
+- `[finding]` **套件登记不幂等**：同一份定义第二次登记返回 `409 suite_version_immutable`（第三次同样），文档与 OpenAPI 都写的是同定义返回 200。不阻塞提交，但 `staleReason` 永远不会是 `suite-major-superseded`；
+- `[expected]` 鉴权前失败（401）的 requestId 查不到，与 Hub 说明一致。套件现在单独标出它，不再计进「未结算」；
+- `[fixed]` Connect 侧两个洞：目录 `null` 解析会让整份目录读不了（`ea6e05e`）；`compatibility explain` 的 subject 键漏了指纹，换实现前后的记录会并成一行。
+
+M3 的最后一条退出条件（跑通一次真实同步）**已满足**。剩余 8 条 subject 中的 7 条仍是旧 id 形制，公开矩阵要完整落到服务端还需把它们重采一遍。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：

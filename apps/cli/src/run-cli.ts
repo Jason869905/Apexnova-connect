@@ -113,7 +113,7 @@ Usage:
   apexnova login | logout | whoami | balance
   apexnova agents
   apexnova models [--agent <id>] [--protocol <id>] [--compatible-only]
-  apexnova usage [--key <id>] [--from <iso>] [--to <iso>] [--granularity hour|day|month]
+  apexnova usage [--request-id <id>] [--key <id>] [--from <iso>] [--to <iso>] [--granularity hour|day|month]
   apexnova connect <agent> --deployment <id> (--dry-run | --yes)
   apexnova switch <agent> --deployment <id> (--dry-run | --yes)
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
@@ -145,6 +145,7 @@ Global options:
   --record <path>        Write a replayable recording of a suite run
   --within <days>        Refresh evidence expiring within this many days (default 7)
   --reason <why>         Why an evidence record is being revoked (required)
+  --request-id <id>      Reconcile one request by its Hub request ID
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
   --api-key-helper       Let the Agent fetch the credential itself, where it supports one
@@ -202,6 +203,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let recordPath: string | undefined;
   let withinDays: number | undefined;
   let reason: string | undefined;
+  let requestIdFilter: string | undefined;
   let dryRun = false;
   let list = false;
   let live = false;
@@ -327,6 +329,10 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         reason = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--request-id":
+        requestIdFilter = valueAfter(args, index, arg);
+        index += 1;
+        break;
       case "--budget": {
         budget = valueAfter(args, index, arg);
         if (!/^[0-9]+(?:\.[0-9]+)?$/.test(budget)) {
@@ -398,6 +404,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(recordPath ? { recordPath } : {}),
     ...(withinDays === undefined ? {} : { withinDays }),
     ...(reason ? { reason } : {}),
+    ...(requestIdFilter ? { requestId: requestIdFilter } : {}),
     dryRun,
     list,
     live,
@@ -832,6 +839,11 @@ function subjectKey(subject: EvidenceSubject): string {
     subject.deploymentId,
     subject.protocol,
     subject.platform,
+    // The implementation is part of the subject, so it is part of the key:
+    // without it a record from before a deployment changed and one from after
+    // collapse into a single row, and the row then reports whichever of the two
+    // was read last.
+    subject.implementationFingerprint ?? "",
   ].join("\u0000");
 }
 
@@ -892,6 +904,8 @@ interface CollectionResult {
   readonly unsettleable: readonly string[];
   /** Rejected before the data plane, so never in the ledger. */
   readonly edgeIds: readonly string[];
+  /** Refused before authentication, so Hub never opened a ledger row. */
+  readonly preAuthIds: readonly string[];
   readonly warnings: readonly string[];
 }
 
@@ -947,7 +961,15 @@ async function collectEvidence(
   // never reaches the billing ledger -- Hub says so outright, so asking for it
   // would spend three attempts to learn what we already know.
   const edgeIds = attributed.filter((id) => id.startsWith(EDGE_REQUEST_ID_PREFIX));
-  const requestIds = attributed.filter((id) => !id.startsWith(EDGE_REQUEST_ID_PREFIX));
+  // A probe refused before authentication is answered with a request ID but
+  // never written to the ledger: there is no account to bill. Asking for it
+  // would leave every run reporting one request as permanently unsettled.
+  const preAuthIds = attributed.filter(
+    (id) => !id.startsWith(EDGE_REQUEST_ID_PREFIX) && suiteResult.preAuthRequestIds.includes(id),
+  );
+  const requestIds = attributed.filter(
+    (id) => !id.startsWith(EDGE_REQUEST_ID_PREFIX) && !suiteResult.preAuthRequestIds.includes(id),
+  );
   let billed = 0;
   let currency = target.currency;
   const notBillable: string[] = [];
@@ -1005,6 +1027,7 @@ async function collectEvidence(
     );
   }
 
+
   if (recorder && parsed.recordPath !== undefined) {
     const recording = buildRecording({
       endpoint: hubProtocol.baseUrl,
@@ -1057,6 +1080,7 @@ async function collectEvidence(
         ...(notBillable.length === 0 ? [] : [`${notBillable.length} not billable`]),
         ...(unsettleable.length === 0 ? [] : [`${unsettleable.length} failed to settle`]),
         ...(edgeIds.length === 0 ? [] : [`${edgeIds.length} failed at the edge`]),
+        ...(preAuthIds.length === 0 ? [] : [`${preAuthIds.length} refused before authentication`]),
         `requests ${attributed.join(" ")}`,
       ].join("; "),
     ),
@@ -1084,6 +1108,7 @@ async function collectEvidence(
     notBillable,
     unsettleable,
     edgeIds,
+    preAuthIds,
     warnings,
   };
 }
@@ -1180,7 +1205,7 @@ async function executeCompatibilityRun(
     protocolId,
     currency: estimate.currency,
   });
-  const { billedAmount, currency, settled, requestIds, unsettled, notBillable, unsettleable, edgeIds, warnings } = collected;
+  const { billedAmount, currency, settled, requestIds, unsettled, notBillable, unsettleable, edgeIds, preAuthIds, warnings } = collected;
 
   return {
     data: {
@@ -1198,6 +1223,7 @@ async function executeCompatibilityRun(
         ...(notBillable.length > 0 ? { notBillableRequests: notBillable.length } : {}),
         ...(unsettleable.length > 0 ? { failedToSettleRequests: unsettleable.length } : {}),
         ...(edgeIds.length > 0 ? { edgeRequests: edgeIds.length } : {}),
+        ...(preAuthIds.length > 0 ? { preAuthRequests: preAuthIds.length } : {}),
       },
       requestIds,
       ...(unsettled.length > 0 ? { unsettledRequestIds: unsettled } : {}),
@@ -1219,6 +1245,7 @@ async function executeCompatibilityRun(
       ...(notBillable.length > 0 ? [`Not billable: ${notBillable.join(", ")}`] : []),
       ...(unsettleable.length > 0 ? [`Settlement failed: ${unsettleable.join(", ")}`] : []),
       ...(edgeIds.length > 0 ? [`Failed at the edge, not in the ledger: ${edgeIds.join(", ")}`] : []),
+      ...(preAuthIds.length > 0 ? [`Refused before authentication, never in the ledger: ${preAuthIds.join(", ")}`] : []),
       `Requests: ${requestIds.join(", ")}`,
       `Evidence: ${collected.evidenceId}`,
     ].join("\n"),
@@ -2004,7 +2031,7 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
             ),
           ];
           return [
-            `${agent.displayName} ${subject.agentVersion} · ${subject.deploymentId} · ${subject.protocol} · ${subject.platform}: ${entry.verdict}`,
+            `${agent.displayName} ${subject.agentVersion} · ${subject.deploymentId}${subject.implementationFingerprint ? ` (impl ${subject.implementationFingerprint.slice(0, 12)})` : ""} · ${subject.protocol} · ${subject.platform}: ${entry.verdict}`,
             ...entry.capabilities.map(
               (capability) =>
                 `  ${capability.capabilityId.padEnd(26)} ${capability.level.padEnd(9)} ${capability.support.padEnd(11)} ${capabilityNote(capability)}`,
@@ -2622,6 +2649,9 @@ async function executeUsage(parsed: ParsedArguments, dependencies: CliDependenci
   noOperands(parsed);
   const service = hubService(parsed, dependencies);
   const query: UsageQuery = {
+    // Reconciliation is per request: the ledger key is the request ID, and
+    // "what did this one request cost" is the question a suite run leaves open.
+    ...(parsed.requestId ? { requestId: parsed.requestId } : {}),
     ...(parsed.apiKeyId ? { apiKeyId: parsed.apiKeyId } : {}),
     ...(parsed.from ? { from: parsed.from } : {}),
     ...(parsed.to ? { to: parsed.to } : {}),

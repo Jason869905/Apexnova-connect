@@ -764,6 +764,43 @@ Hub 澄清 `none`（没交签名）与 `unverified`（交了但未验）是分�
 - `tool.choice.forced` 的探针与 Capability Definition（套件 minor 版本）；
 - 那 8 条 subject 用新 id 形制重采一遍，公开矩阵才在服务端有支撑。
 
+## 12E. 首次真实同步的结果（2026-09-09）
+
+现网 `api.apexnova-consulting.com`，采集者账号已开通（13 个 scope 全部授予）。对 `glm-5.2` × OpenCode × `openai-responses` 跑了一轮真实采集并 `compatibility sync` 上行，实扣 `0.002273 USD`（估价 `0.001820`）。链路成立：记录被接收（`created: true`），Hub 的 `derived` 报 `supportsCurrentVerdict: true`、`fingerprint.match: "match"`、`signatureStatus: "none"`；重跑同一条得到 `created: false`，幂等如约。
+
+**已在现网确认的**：46/46 deployment 带指纹且 `implementationChangedAt` 全为 `null`（12D.1 的初值修复到位）；`settlementStatus` 逐条返回；被拒的无效请求为 `not-billable`；估价响应确实带 `discount{rate:"0.5", source:"promo", appliesTo:"model", expiresAt:"2026-09-30T23:59:00.000Z"}`——**印证 12D.2(1)：这块在响应里，不在 OpenAPI 的 `Estimate` schema 里**。
+
+### 12E.1 `(c)` 中断计费没有兑现
+
+套件的 7 个请求里有 2 个在用量里查不到（按 requestId 查返回 0 条，不是 `pending`、不是 `not-billable`）：
+
+| requestId | 探针 | 判定 |
+| --- | --- | --- |
+| `92babfcb-9193-4f44-ab3a-8e6b4d60ed50` | 无效凭据（401，鉴权前失败） | 与 Hub 说明一致，**预期行为** |
+| `98627d46-92ed-4a9b-816b-9675b6f86699` | 客户端中断的流式请求 | **与 §J(c) 的承诺不符** |
+
+Hub 在 §J(c) 与 12C.2(c) 给的是「保留计费 + 补 `abortedAt` 记录，且带 requestId 可按 requestId 查到」。实际是：**20 分钟后按 requestId 查仍然是空结果**。这正是 12A.5(c)+(d) 原本要消除的那种「同一种请求有时查得到有时查不到」——(d) 只在 Hub 写了行的请求上成立，中断的那条根本没有行。
+
+需求不变，重申一次：**中断的流式请求必须有一条可按 requestId 查到的用量记录**，`settlementStatus` 明确、`abortedAt` 有值，金额按已产出 token 计或为 0 都可以，唯独不能是空结果。
+
+Connect 侧的处置：401 那条不再等它结算（套件现在单独标出鉴权前失败的 requestId，见 12E.3），中断那条仍如实停在「未结算」并点名——在 Hub 补上记录之前，这是唯一诚实的呈现。
+
+### 12E.2 套件登记的幂等性有 bug
+
+`POST /v1/compatibility/test-suites` 第一次成功，**第二次用同一份定义再登记返回 `409 suite_version_immutable`**（第三次同样）。Hub 自己的说明是「登记本身幂等：同版本同定义 200，同版本改定义 409」，OpenAPI 里也写着 200 = Already registered, identical definition。
+
+请求体在两次之间逐字节相同（`capabilityDigest` 是 `CAPABILITY_DEFINITIONS_DIGEST` 加固定顺序的能力列表，`ttlTable` 与 `environment` 都是确定性的），所以不是我们发的内容变了。两种可能：等值比较有缺陷（例如比较存回来的 JSON 时键序不同），或者生产库里本来就有一条用 fixture 占位内容登记的 `apexnova.capability-suite@0.2.0`，而我们第一次的「成功」其实是别的路径。**请 Hub 查一下这个版本当前存的是什么定义。**
+
+影响不阻塞提交（记录照常上行），但 `derived.staleReason` 永远不会是 `suite-major-superseded`，12A.3 的套件维度就是空的。Connect 侧已按契约问题报出而不是重试。
+
+### 12E.3 Connect 这侧同时修掉的两个洞
+
+1. **目录里的 `null` 会让整份目录读不了**（`ea6e05e`）。`implementationFingerprint` 与 `implementationChangedAt` 的解析只认 `undefined` 不认 `null`，而现网 46 个 deployment 的 `changedAt` 全是 `null`——`models`、`connect`、`run`、`refresh` 会一起报 `INVALID_RESPONSE`。是我们的缺陷，赶在跑之前修掉了；
+2. **`compatibility explain` 的 subject 键没带指纹**。12C.2(a) 把指纹并进了 Verdict 与矩阵的 subject 身份，但 explain 在 `run-cli` 里有自己的一份键，漏了——同一个 Deployment 换实现前后的两条记录会并成一行，并且显示后读到的那一条。已修，explain 现在与矩阵一致，并显示指纹前 12 位；
+3. **鉴权前失败的 requestId 不再等它结算**。套件新增 `preAuthRequestIds`，采集报告把它单列为「refused before authentication, never in the ledger」，不再计进「未结算」——否则每一轮都会留下一条永远不会消失的警告，警告就不再有意义了。
+
+`apexnova usage` 同时加了 `--request-id`：逐 requestId 对账是 Connect 的基本动作，此前 CLI 反而只能按时间段查。
+
 ## 13. 非功能要求
 
 - 上游密钥进入现有加密 Credential/secret 管理链路，绝不进入公共目录；

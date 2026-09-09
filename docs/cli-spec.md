@@ -165,30 +165,19 @@ apexnova models --compatible-only
 
 ### `apexnova usage`
 
-查询用量，支持按 key、时间、模型过滤和聚合。
+查询用量，支持按 requestId、key、时间、模型过滤和聚合。
 
 ```text
 apexnova usage
+apexnova usage --request-id <requestId>
 apexnova usage --key <keyId>
 apexnova usage --granularity day
-apexnova usage --key <keyId> --from 2026-09-01T00:00:00Z --to 2026-09-07T00:00:001Z --granularity day
+apexnova usage --key <keyId> --from 2026-09-01T00:00:00Z --to 2026-09-07T00:00:00Z --granularity day
 ```
 
-+D
-```
+选项：`--request-id <id>`、`--key <id>`、`--from <RFC3339>`、`--to <RFC3339>`、`--granularity hour|day|month`。
 
-选项：`--key <id>`、`--from <RFC3339>`、`--to <RFC3339>`、`--granularity hour|day|month`。
-
-查询 Model 与 Deployment 目录。
-
-```text
-apexnova models
-apexnova models --agent opencode
-apexnova models --protocol openai-responses
-apexnova models --compatible-only
-```
-
-`--compatible-only` 只隐藏明确不兼容项；未验证项必须单独标记，不能当作兼容。
+`--request-id` 是逐条对账用的：requestId 是计费台账的唯一键，一轮能力采集留下的问题正是「这一个请求到底花了多少」。返回记录带 `settlementStatus`（`pending` / `settled` / `not-billable` / `failed`），**未结算时金额是 `null` 而不是零**；Hub 没有为该请求写行时返回空结果，鉴权前失败的请求就是这种情况。
 
 ### `apexnova connect <agent>`
 

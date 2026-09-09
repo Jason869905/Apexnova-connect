@@ -35,6 +35,12 @@ export interface CapabilitySuiteResult {
   readonly outcomes: readonly CapabilityOutcomeDetail[];
   /** Every request the Hub attributed, for reconciliation against billed usage. */
   readonly requestIds: readonly string[];
+  /**
+   * Requests refused before authentication. Hub answers them with a request ID
+   * but writes no ledger row -- there is no account to bill yet -- so
+   * reconciliation must not wait for one.
+   */
+  readonly preAuthRequestIds: readonly string[];
   readonly billableRequests: number;
 }
 
@@ -637,6 +643,10 @@ export async function runCapabilitySuite(
     suite: { id: CAPABILITY_SUITE_ID, version: CAPABILITY_SUITE_VERSION },
     outcomes,
     requestIds,
+    // The invalid request is refused after authentication and does get a
+    // not-billable ledger row; the rejected credential never reaches an
+    // account, so nothing is ever written for it.
+    preAuthRequestIds: rejected.requestId === undefined ? [] : [rejected.requestId],
     // The rejected credential and the invalid request are refused before inference.
     billableRequests: 5,
   };
