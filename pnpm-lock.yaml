@@ -53,6 +53,9 @@ importers:
       '@apexnova-connect/integration-sdk':
         specifier: workspace:*
         version: link:../../sdks/typescript
+      '@apexnova-connect/recommendation':
+        specifier: workspace:*
+        version: link:../../packages/recommendation
       '@inquirer/prompts':
         specifier: ^7.0.0
         version: 7.10.1(@types/node@24.13.3)
@@ -162,6 +165,15 @@ importers:
       '@apexnova-connect/integration-sdk':
         specifier: workspace:*
         version: link:../../sdks/typescript
+
+  packages/recommendation:
+    dependencies:
+      '@apexnova-connect/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
+      '@apexnova-connect/schemas':
+        specifier: workspace:*
+        version: link:../../schemas
 
   schemas: {}
 

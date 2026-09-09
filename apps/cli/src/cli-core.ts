@@ -124,6 +124,8 @@ export interface ParsedArguments {
   readonly withinDays?: number;
   readonly reason?: string;
   readonly requestId?: string;
+  readonly scenarioId?: string;
+  readonly maxPrice?: string;
 }
 
 export interface CliErrorShape {

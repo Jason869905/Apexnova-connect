@@ -877,6 +877,23 @@ Hub 同时修了 `abortedAt` 恒为 `null` 的问题（客户端 abort 与「上
 
 > 本节之前的 12B.8 与 12C.5 写着「M3 保持开启，直到跑通一次真实同步」。那是当时的状态，条件已于同日满足，收口记录见 [ADR 0006](decisions/0006-m3-closure.md)。这些按日期追加的节保持原样——它们是往来记录，不是当前状态；当前状态以[路线图](roadmap.md)和 ADR 为准。
 
+## 12H. 公共目录的 `pricing` 全为 `0`（2026-09-09，M4 首次消费目录价格时发现）
+
+M4 的 `recommend` 需要按价格排序，第一次真的去读目录的 `pricing` 就发现：**现网 46 个 Deployment 的 `pricing.input` 与 `pricing.output` 全部是 `"0"`**（`unit: 1000000`、`billingMode: "token"`、`currency: "USD"` 都正常）。
+
+同一批模型的其他两个来源都说不是零：
+
+- `POST /v1/pricing/estimate` 对 `glm-5.2` 按 400/700 tokens 返回 `listAmount: "0.003640"`；
+- 用量台账逐条计费，当日 16 轮采集实扣 `0.019851 USD`。
+
+因此这不是「免费」，是**公共投影里没有价格**。OpenAPI 的 `PublicDeployment.pricing` 是 required 且 `input`/`output` 注明「Decimal string. Never a float.」，所以形状是对的，值不对。
+
+**需求**：公共目录的 `pricing` 要么给出与估价一致的真实售价，要么明确用 `null` 表示「本投影不提供价格」。**一个发布出来的 `0` 是最坏的一种**——它与「免费」不可分辨，任何按价格排序的消费方都会把最贵的模型排到第一。
+
+Connect 这侧的处置（不等 Hub）：`recommend` 把「`input` 与 `output` 都为零」判定为**没有价格**而不是零价，该 Deployment 的 `cost` 分数为 0 并说明原因；当本轮所有候选都没有可用价格时，整个 `cost` 分项被丢弃并在输出里说明——按 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md) 的规则，没有度量来源的分项不参与排序，也不给默认分。
+
+修好之后 Connect 无需改代码：非零价格会自动重新参与排序。另一条备选路径是逐 Deployment 调估价接口取价，但那是 46 次请求换一次排序，只有在目录长期不提供价格时才值得做。
+
 ## 13. 非功能要求
 
 - 上游密钥进入现有加密 Credential/secret 管理链路，绝不进入公共目录；

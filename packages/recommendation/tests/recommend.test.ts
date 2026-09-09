@@ -1,0 +1,266 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  CAPABILITY_DEFINITIONS,
+  createEvidence,
+  type CapabilitySupport,
+  type CompatibilityEvidence,
+  type EvidenceSubject,
+} from "@apexnova-connect/capabilities";
+
+import {
+  CODING_GENERAL,
+  assertScenarioIsSatisfiable,
+  recommend,
+  type RecommendOptions,
+  type RecommendationCandidate,
+} from "../src/index.js";
+
+const NOW = new Date("2026-09-20T10:00:00.000Z");
+const OBSERVED_AT = "2026-09-15T10:00:00.000Z";
+
+const subject: EvidenceSubject = {
+  agentId: "opencode",
+  agentVersion: "1.18.29",
+  integrationId: "opencode",
+  integrationVersion: "0.1.0",
+  deploymentId: "deployment.cheap",
+  protocol: "openai-responses",
+  platform: "linux-x64",
+};
+
+function evidenceFor(
+  deploymentId: string,
+  overrides: Readonly<Record<string, CapabilitySupport>> = {},
+  patch: Partial<EvidenceSubject> = {},
+): CompatibilityEvidence {
+  return createEvidence({
+    sourceType: "maintainer-test",
+    subject: { ...subject, deploymentId, ...patch },
+    observedAt: OBSERVED_AT,
+    outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({
+      capabilityId: definition.id,
+      support: overrides[definition.id] ?? "supported",
+    })),
+  });
+}
+
+function candidate(
+  deploymentId: string,
+  overrides: Partial<Record<keyof RecommendationCandidate, unknown>> = {},
+): RecommendationCandidate {
+  const base = {
+    deploymentId,
+    displayName: deploymentId,
+    protocols: ["openai-responses"],
+    availability: "available",
+    pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "0.6", output: "2.2" },
+    contextWindow: 128_000,
+    ...overrides,
+  };
+  // A candidate the catalog carries no price for has no `pricing` key at all,
+  // which is not the same as one whose price is zero.
+  return Object.fromEntries(Object.entries(base).filter(([, value]) => value !== undefined)) as unknown as RecommendationCandidate;
+}
+
+function options(overrides: Partial<RecommendOptions> = {}): RecommendOptions {
+  return {
+    scenario: CODING_GENERAL,
+    agentId: "opencode",
+    agentVersion: "1.18.29",
+    integrationId: "opencode",
+    integrationVersion: "0.1.0",
+    platform: "linux-x64",
+    agentProtocols: ["openai-responses"],
+    catalogVersion: "cat_1",
+    candidates: [candidate("deployment.cheap")],
+    evidence: [evidenceFor("deployment.cheap")],
+    now: NOW,
+    ...overrides,
+  };
+}
+
+describe("recommend", () => {
+  it("ranks a deployment whose required capabilities all passed, and says what carried it", () => {
+    const result = recommend(options());
+
+    expect(result.candidates).toHaveLength(1);
+    const top = result.candidates[0]!;
+    expect(top).toMatchObject({ rank: 1, eligible: true, protocol: "openai-responses", sponsored: false });
+    expect(top.evidenceRefs.length).toBeGreaterThan(0);
+    // Every scored dimension names its own number, so the ranking can be checked
+    // rather than believed.
+    expect(top.dimensions?.map((dimension) => dimension.priority)).toEqual(["compatibility", "cost", "context"]);
+    expect(top.dimensions?.every((dimension) => dimension.detail.length > 0)).toBe(true);
+    expect(result.ruleVersion).toBe("coding.v1");
+  });
+
+  it("reports the priorities nothing measures instead of scoring them", () => {
+    const result = recommend(options({
+      scenario: { ...CODING_GENERAL, priorities: ["quality", "compatibility", "cost", "latency"] },
+    }));
+
+    expect(result.unmeasured.map((entry) => entry.priority)).toEqual(["quality", "latency"]);
+    expect(result.unmeasured.every((entry) => entry.why.length > 0)).toBe(true);
+    // Unmeasured priorities carry no weight at all -- not a default one.
+    expect(result.candidates[0]?.dimensions?.map((dimension) => dimension.priority)).toEqual(["compatibility", "cost"]);
+    const weights = result.candidates[0]!.dimensions!.reduce((sum, dimension) => sum + dimension.weight, 0);
+    expect(weights).toBeCloseTo(1, 10);
+  });
+
+  it("excludes a deployment whose required capability failed, rather than scoring it down", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.cheap"), candidate("deployment.broken")],
+      evidence: [
+        evidenceFor("deployment.cheap"),
+        // Cheapest possible and a required capability failed: no weighting may
+        // rescue it.
+        evidenceFor("deployment.broken", { "agent.single-tool-call": "unsupported" }),
+      ],
+    }));
+
+    const broken = result.candidates.find((entry) => entry.deploymentId === "deployment.broken")!;
+    expect(broken.eligible).toBe(false);
+    expect(broken.score).toBeUndefined();
+    expect(broken.reasons.join(" ")).toContain("agent.single-tool-call");
+    // Ineligible candidates rank below every eligible one.
+    expect(result.candidates[0]?.deploymentId).toBe("deployment.cheap");
+  });
+
+  it("refuses to answer for a platform it has no evidence for", () => {
+    const result = recommend(options({ platform: "win32-x64" }));
+
+    const only = result.candidates[0]!;
+    expect(only.eligible).toBe(false);
+    expect(only.reasons.join(" ")).toContain("win32-x64");
+    expect(only.reasons.join(" ")).toContain("does not carry over");
+    expect(result.summary).toContain("No deployment can be recommended");
+  });
+
+  it("does not treat evidence from a different implementation as current", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.cheap", { implementationFingerprint: "impl-999999999999" })],
+      evidence: [evidenceFor("deployment.cheap", {}, { implementationFingerprint: "impl-a1b2c3d4e5f6" })],
+    }));
+
+    expect(result.candidates[0]?.eligible).toBe(false);
+    expect(result.candidates[0]?.reasons.join(" ")).toContain("No compatibility evidence");
+  });
+
+  it("prefers the cheaper deployment when compatibility ties, and says why", () => {
+    const result = recommend(options({
+      candidates: [
+        candidate("deployment.dear", { pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "6", output: "18" } }),
+        candidate("deployment.cheap"),
+      ],
+      evidence: [evidenceFor("deployment.cheap"), evidenceFor("deployment.dear")],
+    }));
+
+    expect(result.candidates.map((entry) => entry.deploymentId)).toEqual(["deployment.cheap", "deployment.dear"]);
+    expect(result.candidates[0]?.dimensions?.find((dimension) => dimension.priority === "cost")?.detail)
+      .toContain("per million blended");
+  });
+
+  it("scores one unpriced deployment at zero rather than assuming it is cheap", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.cheap"), candidate("deployment.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("deployment.cheap"), evidenceFor("deployment.unpriced")],
+    }));
+
+    const unpriced = result.candidates.find((entry) => entry.deploymentId === "deployment.unpriced")!;
+    const cost = unpriced.dimensions!.find((dimension) => dimension.priority === "cost")!;
+    expect(cost.score).toBe(0);
+    expect(cost.detail).toContain("rather than being assumed cheap");
+    expect(result.candidates[0]?.deploymentId).toBe("deployment.cheap");
+  });
+
+  it("drops cost entirely when nothing eligible has a price, and says so", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.a", { pricing: undefined }), candidate("deployment.b", { pricing: undefined })],
+      evidence: [evidenceFor("deployment.a"), evidenceFor("deployment.b")],
+    }));
+
+    // Scoring every candidate zero would keep cost's weight while carrying no
+    // information; dropping it and reporting why is the honest equivalent of an
+    // unmeasured priority.
+    expect(result.unmeasured.map((entry) => entry.priority)).toContain("cost");
+    expect(result.candidates[0]?.dimensions?.map((dimension) => dimension.priority)).toEqual(["compatibility", "context"]);
+  });
+
+  it("treats a published price of zero as no price at all", () => {
+    // What the live catalog does today: every deployment is quoted at 0 while
+    // the estimate endpoint and the bill say otherwise.
+    const free = { currency: "USD", billingMode: "token", unit: 1_000_000, input: "0", output: "0" };
+    const result = recommend(options({
+      candidates: [candidate("deployment.zero", { pricing: free }), candidate("deployment.cheap")],
+      evidence: [evidenceFor("deployment.zero"), evidenceFor("deployment.cheap")],
+    }));
+
+    const zero = result.candidates.find((entry) => entry.deploymentId === "deployment.zero")!;
+    const cost = zero.dimensions!.find((dimension) => dimension.priority === "cost")!;
+    expect(cost.score).toBe(0);
+    // The one with a real price outranks the one quoted at zero.
+    expect(result.candidates[0]?.deploymentId).toBe("deployment.cheap");
+  });
+
+  it("excludes what the Agent cannot speak to, or the catalog has withdrawn", () => {
+    const result = recommend(options({
+      candidates: [
+        candidate("deployment.other-protocol", { protocols: ["apexnova-media-videos"] }),
+        candidate("deployment.down", { availability: "maintenance" }),
+        candidate("deployment.cheap"),
+      ],
+      evidence: [evidenceFor("deployment.cheap")],
+    }));
+
+    const byId = new Map(result.candidates.map((entry) => [entry.deploymentId, entry]));
+    expect(byId.get("deployment.other-protocol")?.eligible).toBe(false);
+    expect(byId.get("deployment.other-protocol")?.reasons[0]).toContain("this Agent speaks");
+    expect(byId.get("deployment.down")?.reasons[0]).toContain("maintenance");
+  });
+
+  it("honours a price ceiling as a filter with a stated reason", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.dear", { pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "6", output: "18" } })],
+      evidence: [evidenceFor("deployment.dear")],
+      constraints: { maxBlendedPricePerMillion: "1" },
+    }));
+
+    expect(result.candidates[0]?.eligible).toBe(false);
+    expect(result.candidates[0]?.reasons[0]).toContain("above the 1 ceiling");
+  });
+
+  it("produces the same bytes twice for the same input", () => {
+    const input = options({
+      candidates: [candidate("deployment.b"), candidate("deployment.a"), candidate("deployment.c")],
+      evidence: [evidenceFor("deployment.a"), evidenceFor("deployment.b"), evidenceFor("deployment.c")],
+    });
+
+    // Same score for all three, so only the tiebreak keeps the order stable.
+    const first = JSON.stringify(recommend(input));
+    const second = JSON.stringify(recommend({ ...input, candidates: [...input.candidates].reverse() }));
+
+    expect(first).toBe(second);
+    expect(JSON.parse(first).candidates.map((entry: { deploymentId: string }) => entry.deploymentId))
+      .toEqual(["deployment.a", "deployment.b", "deployment.c"]);
+  });
+
+  it("keeps sponsorship out of the ranking", () => {
+    const result = recommend(options());
+
+    // The first batch has no sponsored placements, and the scorer has no input
+    // for one: the exit condition holds because there is nothing to hide.
+    expect(result.candidates.every((entry) => entry.sponsored === false)).toBe(true);
+    expect(JSON.stringify(result.candidates[0]?.dimensions)).not.toContain("sponsor");
+  });
+
+  it("only asks for capabilities the registry defines", () => {
+    expect(() => assertScenarioIsSatisfiable(CODING_GENERAL)).not.toThrow();
+    expect(() =>
+      assertScenarioIsSatisfiable({
+        ...CODING_GENERAL,
+        requirements: [{ capabilityId: "agent.invented", level: "required" }],
+      }),
+    ).toThrowError(/not in the capability registry/);
+  });
+});

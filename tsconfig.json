@@ -29,6 +29,8 @@
     "packages/credential-store/tests/**/*.ts",
     "packages/hub-client/src/**/*.ts",
     "packages/hub-client/tests/**/*.ts",
+    "packages/recommendation/src/**/*.ts",
+    "packages/recommendation/tests/**/*.ts",
     "sdks/typescript/src/**/*.ts",
     "sdks/typescript/tests/**/*.ts",
     "tests/**/*.ts"

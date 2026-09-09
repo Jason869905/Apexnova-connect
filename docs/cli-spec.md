@@ -374,6 +374,29 @@ apexnova compatibility explain opencode --deployment <id> --protocol <id>
 
 采集命令 `compatibility run` 随首批能力测试套件提供，见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)。
 
+### `apexnova recommend <agent>`
+
+按 Scenario 对目录排序，给出可解释的推荐。只读，除了拉一次目录不调用 Hub，不产生任何费用。
+
+```text
+apexnova recommend opencode
+apexnova recommend opencode --scenario coding-general --json
+apexnova recommend claude-code --max-price 2.5
+apexnova recommend opencode --deployment <id>          # 只看某一个
+```
+
+排序由 M3 采集的 Evidence 加目录数据算出，**全部在本地完成**，因此任何拿着同一批记录的人都能复算。规则见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)：
+
+- **硬约束是过滤不是扣分**：required 能力实测失败、或没有当前平台的实时证据，该 Deployment 直接 `eligible: false` 并给出排除理由，不参与排序。总分不得掩盖必需能力的失败；
+- **平台是证据 subject 的一部分**：Linux 上的结论不适用于 Windows。当前平台没有证据时，命令**如实报「无证据」并提示去采集**，而不是借用别处的结论；
+- **没有度量来源的分项不参与排序**，并在输出里逐条说明原因（`quality` 缺 Scenario Quality Pack、`latency` 缺 Operational Evidence、`privacy` 因目录只给不可逆指纹而无法区分）。**不给默认分**——默认分等于让「没测过」以「中等」的身份进入排序；
+- **某个分项在本轮所有候选上都没有数据时整项丢弃**并说明（例如目录当前对所有 Deployment 都发布 `0` 价格），而不是给所有人打零分却仍占权重；
+- 每个候选列出各分项的分数、权重、依据文字与所引用的 Evidence ID；`sponsored` 恒为 `false` 且不是打分输入。
+
+输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`；排序确定（同分按 deploymentId 字典序），同一输入两次运行逐字节相同。
+
+M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、`--model-allowlist`、`--verified-only`，**首批都未实现**：优先级由 Scenario 的 `priorities` 顺序决定而不是命令行覆盖；区域与 Provider 在只有一个公共 Provider、且目录只给不可逆指纹的前提下无从区分；`--verified-only` 没有意义，因为没有实测证据的 Deployment 本来就不会被推荐。这些在第二个 Scenario 或第二个候选来源出现时再重新评估。
+
 ### `apexnova doctor [agent]`
 
 执行只读诊断，省略 agent 时诊断全部已注册 Integration。每项检查符合 [`diagnostic-result.schema.json`](../schemas/diagnostic-result.schema.json) 的 `checks[]` 形状：
@@ -400,28 +423,6 @@ apexnova compatibility explain \
 ```
 
 输出 Verdict、限制、Evidence、测试版本、新鲜度和未验证能力。
-
-### `apexnova recommend`
-
-M4 提供：
-
-```text
-apexnova recommend \
-  --agent opencode \
-  --scenario coding.repository-edit \
-  --priority quality
-```
-
-选项包括：
-
-- `--priority quality|cost|latency|privacy|balanced`；
-- `--max-cost`；
-- `--region`；
-- `--provider`；
-- `--model-allowlist`；
-- `--verified-only`。
-
-输出推荐、备选、排除原因、Evidence 和商业推广标记。
 
 ## JSON 输出
 

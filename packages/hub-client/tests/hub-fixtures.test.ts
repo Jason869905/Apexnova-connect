@@ -44,6 +44,9 @@ describe("Hub's published fixtures", () => {
     expect(deployment.capabilityStatements.every((statement) => statement.sourceType === "provider-claim")).toBe(true);
     expect(deployment.capabilityStatements.map((statement) => statement.capabilityId)).toContain("tool.calling");
     expect(deployment.implementationFingerprint).toBeDefined();
+    // Required by the contract, and the input M4 scores cost from.
+    expect(deployment.pricing).toMatchObject({ currency: "USD", billingMode: "token", unit: 1_000_000 });
+    expect(deployment.limits?.contextWindow).toBeGreaterThan(0);
   });
 
   it("parses a usage list whose unsettled row has no money at all", async () => {

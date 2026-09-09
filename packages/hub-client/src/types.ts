@@ -175,6 +175,17 @@ export interface HubCatalogModel {
   readonly deploymentIds: readonly string[];
 }
 
+/** Sell-side price only; upstream cost never appears in the public catalog. */
+export interface HubCatalogPricing {
+  readonly currency: string;
+  readonly billingMode: "token" | "per_item" | "duration" | "flat";
+  /** How many units `input` and `output` are quoted per -- 1000000 for tokens. */
+  readonly unit: number;
+  readonly input: string;
+  readonly output: string;
+  readonly cachedInput?: string;
+}
+
 export interface HubCatalogDeployment {
   readonly id: string;
   readonly providerId: string;
@@ -190,6 +201,7 @@ export interface HubCatalogDeployment {
     readonly contextWindow?: number;
     readonly maxOutputTokens?: number;
   };
+  readonly pricing?: HubCatalogPricing;
   readonly capabilities: readonly string[];
   /** The same capabilities, each carrying its evidence level. */
   readonly capabilityStatements: readonly HubCatalogCapabilityStatement[];

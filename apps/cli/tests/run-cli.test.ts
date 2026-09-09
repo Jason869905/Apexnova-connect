@@ -1836,4 +1836,64 @@ describe("CLI", () => {
     const store = new FileEvidenceStore({ root: join(root, "Apexnova", "connect", "evidence") });
     expect(await store.list()).toEqual([]);
   });
+
+  it("ranks the catalog from the evidence on hand, and shows what decided it", async () => {
+    const { root, record } = await withEvidence({ "agent.structured-output": "unsupported" });
+    const capture = captureIo();
+
+    const result = await runCli(["recommend", "opencode", "--json"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data).toMatchObject({
+      scenarioId: "coding-general",
+      ruleVersion: "coding.v1",
+      platform: `windows-${process.arch}`,
+      catalogVersion: "cat_1",
+    });
+    const top = output.data.candidates[0];
+    expect(top).toMatchObject({ deploymentId: "deployment.nova", rank: 1, eligible: true, sponsored: false });
+    expect(top.evidenceRefs).toContain(record.id);
+    // The number that produced the ranking is on the page beside the ranking.
+    expect(top.dimensions.map((entry: { priority: string }) => entry.priority)).toContain("compatibility");
+    expect(top.dimensions[0].detail).toContain("preferred capabilities supported");
+  });
+
+  it("recommends nothing for a platform it has no evidence for, and says to collect some", async () => {
+    // Evidence collected on Linux, recommendation asked for on Windows.
+    const { root } = await withEvidence({}, { ...evidenceSubject, platform: "linux-x64" });
+    const capture = captureIo();
+
+    const result = await runCli(["recommend", "opencode", "--json"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = JSON.parse(capture.stdout());
+    expect(output.data.candidates.every((entry: { eligible: boolean }) => !entry.eligible)).toBe(true);
+    expect(output.warnings.join(" ")).toContain("compatibility run opencode");
+    expect(output.data.candidates[0].reasons.join(" ")).toContain("does not carry over");
+  });
+
+  it("refuses to recommend when the Agent version cannot be read", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+    const { productVersion: _version, ...withoutVersion } = installed;
+
+    const result = await runCli(["recommend", "opencode", "--json"], {
+      // Not installed here, so there is no version to match evidence against.
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z", { ...withoutVersion, status: "not-found" }),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.unavailable);
+    expect(JSON.parse(capture.stdout()).error.code).toBe("AGENT_VERSION_UNKNOWN");
+  });
 });

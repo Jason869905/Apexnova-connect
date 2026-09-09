@@ -12,6 +12,7 @@ import type {
   HubCatalogDeployment,
   HubCatalogModel,
   HubCatalogCapabilityStatement,
+  HubCatalogPricing,
   HubCatalogProtocol,
   HubCatalogProvider,
   HubCatalogSnapshot,
@@ -183,6 +184,9 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
       const maxOutputTokens = integer(limits.maxOutputTokens, "deployment.limits.maxOutputTokens");
       return { ...(contextWindow ? { contextWindow } : {}), ...(maxOutputTokens ? { maxOutputTokens } : {}) };
     })() }),
+    // Required by the contract and dropped here until M4 needed it to score
+    // cost -- the third field this whitelist parser has silently omitted.
+    ...(item.pricing === null || item.pricing === undefined ? {} : { pricing: parseCatalogPricing(item.pricing) }),
     capabilities: strings(item.capabilities, "deployment.capabilities"),
     // Parsed rather than dropped: the evidence level beside each capability is
     // the whole point of the field, and a whitelist parser that skips it turns
@@ -210,6 +214,23 @@ function apiKeyKind(value: unknown): "user" | "runtime" {
   const kind = string(value, "usage record.apiKeyKind", 32);
   if (kind !== "user" && kind !== "runtime") throw invalid("usage record.apiKeyKind");
   return kind;
+}
+
+const BILLING_MODES: readonly HubCatalogPricing["billingMode"][] = ["token", "per_item", "duration", "flat"];
+
+function parseCatalogPricing(value: unknown): HubCatalogPricing {
+  const item = object(value, "deployment.pricing");
+  const billingMode = string(item.billingMode, "deployment.pricing.billingMode", 32);
+  if (!BILLING_MODES.includes(billingMode as HubCatalogPricing["billingMode"])) throw invalid("deployment.pricing.billingMode");
+  if (!Number.isSafeInteger(item.unit) || (item.unit as number) <= 0) throw invalid("deployment.pricing.unit");
+  return {
+    currency: string(item.currency, "deployment.pricing.currency", 3),
+    billingMode: billingMode as HubCatalogPricing["billingMode"],
+    unit: item.unit as number,
+    input: money(item.input, "deployment.pricing.input"),
+    output: money(item.output, "deployment.pricing.output"),
+    ...present("cachedInput", item.cachedInput === null || item.cachedInput === undefined ? undefined : money(item.cachedInput, "deployment.pricing.cachedInput")),
+  };
 }
 
 const CATALOG_SUPPORT: readonly HubCatalogCapabilityStatement["support"][] = ["supported", "partial", "unsupported", "unknown"];

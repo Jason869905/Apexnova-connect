@@ -33,6 +33,7 @@
     "@apexnova-connect/integration-hermes": "workspace:*",
     "@apexnova-connect/integration-opencode": "workspace:*",
     "@apexnova-connect/integration-sdk": "workspace:*",
+    "@apexnova-connect/recommendation": "workspace:*",
     "@inquirer/prompts": "^7.0.0"
   }
 }

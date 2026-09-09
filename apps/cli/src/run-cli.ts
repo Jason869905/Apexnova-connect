@@ -44,6 +44,12 @@ import {
   type SubjectVerdict,
   type SuiteProtocol,
 } from "@apexnova-connect/capabilities";
+import {
+  CODING_GENERAL,
+  recommend,
+  scenario as scenarioProfile,
+  type RecommendationCandidate,
+} from "@apexnova-connect/recommendation";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
 import { CredentialStoreError, SecretValue } from "@apexnova-connect/credential-store";
 
@@ -125,6 +131,7 @@ Usage:
   apexnova compatibility replay <recording.json>
   apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
   apexnova compatibility matrix [--agent <id>] [--deployment <id>] [--protocol <id>]
+  apexnova recommend <agent> [--scenario <id>] [--deployment <id>] [--max-price <per-1M>]
   apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
   apexnova inspect <agent> [--config <path>]
@@ -145,6 +152,8 @@ Global options:
   --record <path>        Write a replayable recording of a suite run
   --within <days>        Refresh evidence expiring within this many days (default 7)
   --reason <why>         Why an evidence record is being revoked (required)
+  --scenario <id>        Scenario to rank for (default coding-general)
+  --max-price <amount>   Blended price ceiling per million tokens for recommend
   --request-id <id>      Reconcile one request by its Hub request ID
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
@@ -204,6 +213,8 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let withinDays: number | undefined;
   let reason: string | undefined;
   let requestIdFilter: string | undefined;
+  let scenarioId: string | undefined;
+  let maxPrice: string | undefined;
   let dryRun = false;
   let list = false;
   let live = false;
@@ -333,6 +344,22 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         requestIdFilter = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--scenario":
+        scenarioId = valueAfter(args, index, arg);
+        index += 1;
+        break;
+      case "--max-price": {
+        maxPrice = valueAfter(args, index, arg);
+        if (!/^[0-9]+(?:\.[0-9]+)?$/.test(maxPrice)) {
+          throw new CliError({
+            code: "INVALID_ARGUMENT",
+            message: "--max-price must be a decimal blended price per million tokens, such as 2.5.",
+            exitCode: EXIT_CODES.usage,
+          });
+        }
+        index += 1;
+        break;
+      }
       case "--budget": {
         budget = valueAfter(args, index, arg);
         if (!/^[0-9]+(?:\.[0-9]+)?$/.test(budget)) {
@@ -405,6 +432,8 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(withinDays === undefined ? {} : { withinDays }),
     ...(reason ? { reason } : {}),
     ...(requestIdFilter ? { requestId: requestIdFilter } : {}),
+    ...(scenarioId ? { scenarioId } : {}),
+    ...(maxPrice ? { maxPrice } : {}),
     dryRun,
     list,
     live,
@@ -1574,6 +1603,117 @@ async function executeCompatibilityRefresh(
       ),
     ].join("\n"),
   };
+}
+
+/**
+ * Ranks the catalog for one Agent and one Scenario, from the evidence on hand.
+ *
+ * Read-only and local except for the catalog: the ranking is computed here, so
+ * it can be recomputed by anyone holding the same records. Everything that
+ * decided the order is in the output -- the dimensions with their numbers, the
+ * evidence behind each one, and the priorities nothing measures yet.
+ */
+async function executeRecommend(parsed: ParsedArguments, dependencies: CliDependencies) {
+  const requested = agentOperand(parsed, dependencies, { optional: false, command: "recommend" });
+  const integration = resolveIntegration(requested!, dependencies);
+  const profile = parsed.scenarioId === undefined ? CODING_GENERAL : scenarioProfile(parsed.scenarioId);
+  if (profile === undefined) {
+    throw new CliError({
+      code: "SCENARIO_NOT_FOUND",
+      message: `No Scenario ${parsed.scenarioId}. This build carries ${CODING_GENERAL.id}.`,
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+
+  const agentVersion = await installedVersionOf(parsed, dependencies, integration);
+  if (agentVersion === undefined) {
+    // Evidence is collected against an Agent version. Recommending without one
+    // would mean picking whichever records happen to be in the store.
+    throw new CliError({
+      code: "AGENT_VERSION_UNKNOWN",
+      message: `${integration.manifest.displayName} is not installed here, or its version could not be read. Compatibility evidence is per Agent version, so there is nothing to recommend from.`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+
+  const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
+  const protocols = [...hubProtocolsFor(integration)];
+  const candidates: RecommendationCandidate[] = catalog.deployments.map((deployment) => ({
+    deploymentId: deployment.id,
+    displayName: deployment.displayName,
+    protocols: deployment.protocols.map((entry) => entry.protocol),
+    availability: deployment.availability.status,
+    ...(deployment.pricing === undefined
+      ? {}
+      : {
+          pricing: {
+            currency: deployment.pricing.currency,
+            billingMode: deployment.pricing.billingMode,
+            unit: deployment.pricing.unit,
+            input: deployment.pricing.input,
+            output: deployment.pricing.output,
+          },
+        }),
+    ...(deployment.limits?.contextWindow === undefined ? {} : { contextWindow: deployment.limits.contextWindow }),
+    ...(deployment.implementationFingerprint === undefined
+      ? {}
+      : { implementationFingerprint: deployment.implementationFingerprint }),
+  }));
+
+  const store = evidenceStore(dependencies);
+  const result = recommend({
+    scenario: profile,
+    agentId: integration.manifest.id,
+    agentVersion,
+    integrationId: integration.manifest.id,
+    integrationVersion: integration.manifest.version,
+    platform: platformTag(dependencies),
+    agentProtocols: protocols,
+    catalogVersion: catalog.catalogVersion,
+    candidates,
+    evidence: await store.list({ agentId: integration.manifest.id }),
+    now: new Date(currentTime(dependencies)),
+    constraints: {
+      ...(parsed.deployment === undefined ? {} : { deploymentIds: [parsed.deployment] }),
+      ...(parsed.maxPrice === undefined ? {} : { maxBlendedPricePerMillion: parsed.maxPrice }),
+    },
+  });
+
+  const eligible = result.candidates.filter((candidate) => candidate.eligible);
+  const excluded = result.candidates.filter((candidate) => !candidate.eligible);
+  const warnings: string[] = [];
+  if (result.unmeasured.length > 0) {
+    warnings.push(
+      `${result.unmeasured.map((entry) => entry.priority).join(", ")} ${result.unmeasured.length === 1 ? "is a priority" : "are priorities"} this Scenario asks for that nothing measures yet; the ranking rests on ${result.candidates[0]?.dimensions?.map((dimension) => dimension.priority).join(", ") ?? "the remaining dimensions"}.`,
+    );
+  }
+  if (eligible.length === 0) {
+    warnings.push(
+      `Nothing is recommendable for ${integration.manifest.displayName} ${agentVersion} on ${result.platform}. Collect evidence with "apexnova compatibility run ${integration.manifest.id} --deployment <id>".`,
+    );
+  }
+
+  const human = [
+    `${integration.manifest.displayName} ${agentVersion} · ${profile.id} ${profile.profileVersion} · ${result.platform} · rule ${result.ruleVersion}`,
+    `Catalog ${result.catalogVersion}; ${eligible.length} eligible of ${result.candidates.length} considered.`,
+    ...result.unmeasured.map((entry) => `Not measured — ${entry.priority}: ${entry.why}`),
+    "",
+    ...(eligible.length === 0 ? ["No deployment has live evidence for every required capability."] : []),
+    ...eligible.flatMap((candidate) => [
+      `${candidate.rank}. ${candidate.displayName}  score ${candidate.score?.toFixed(3)}  confidence ${candidate.confidence?.toFixed(2)}  ${candidate.protocol}`,
+      `     ${candidate.deploymentId}`,
+      ...(candidate.dimensions ?? []).map(
+        (dimension) =>
+          `     ${dimension.priority.padEnd(14)} ${dimension.score.toFixed(2)} ×${dimension.weight.toFixed(2)}  ${dimension.detail}`,
+      ),
+      `     Evidence: ${candidate.evidenceRefs.join(", ") || "none"}`,
+    ]),
+    ...(excluded.length === 0
+      ? []
+      : ["", "Excluded:", ...excluded.map((candidate) => `  ${candidate.displayName} — ${candidate.reasons[0] ?? "no reason recorded"}`)]),
+  ].join("\n");
+
+  return { data: result, warnings: warnings as readonly string[], human };
 }
 
 /**
@@ -2800,6 +2940,9 @@ export async function runCli(
         break;
       case "usage":
         result = await executeUsage(parsed, dependencies);
+        break;
+      case "recommend":
+        result = await executeRecommend(parsed, dependencies);
         break;
       case "connect":
         result = await executeConnect(parsed, dependencies);

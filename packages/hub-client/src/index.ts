@@ -29,6 +29,7 @@ export type {
   HubCatalogCapabilityStatement,
   HubCatalogDeployment,
   HubCatalogModel,
+  HubCatalogPricing,
   HubCatalogProtocol,
   HubCatalogProvider,
   HubCatalogSnapshot,
