@@ -156,7 +156,27 @@ M3 的最后一条退出条件（跑通一次真实同步）**已满足**。
 - `[passed]` 回放录制已按新套件重录（旧录制遇到新探针报 `RECORDING_INCOMPLETE`，是失效而不是降级），因此这条判定离线可复算；
 - `[passed]` 套件 `0.3.0` 在 Hub 登记返回 `201`，新记录上行 `created: true` —— 顺带确认了 Hub 那次登记幂等性修复在**新版本**路径上同样正确；
 - `[observed]` 这一轮的对账首次出现**零条未结算**：中断的流式请求正常读到 `not-billable`（`promoCovered` 的 `null` 修复之后），另加 1 条鉴权前失败、2 条不计费；
-- `[pending]` 其余 8 条 subject 仍是 `0.2.0` 采的，这一项在矩阵里读作 `untested`（缺席即未知，不是不支持）。要让这一列有完整数据需要按 `0.3.0` 再采一轮。
+- `[passed]` 八条 subject 已全部按 `0.3.0` 重采（同日，本批实扣 `0.009940 USD`）并上行，`sync` 报 7 条 `created` / 9 条 `existing` / 0 失败，逐条 `supportsCurrentVerdict: true`、`fingerprint.match: "match"`。矩阵里这一列现在有完整数据；
+
+### `agent.forced-tool-choice` 的分布，以及它解释了什么
+
+| Deployment | OpenCode / `openai-responses` | Claude Code / `anthropic-messages` |
+| --- | --- | --- |
+| `glm-5.2` | supported | supported |
+| `glm-5.1` | supported | supported |
+| `deepseek-v4-pro-0813` | supported | supported |
+| `qwen3.8-flash` | **unsupported** | **unsupported** |
+
+`qwen3.8-flash` 在两条协议上都拒绝按名字强制指定 tool，其余三个模型两条协议都支持。
+
+**这一列把此前混在一起的两个原因分开了。** 在此之前「`agent.structured-output: unsupported`」在两处出现，看起来是同一个结论：
+
+- **`anthropic-messages` 上的 `qwen3.8-flash`**：该协议没有独立的结构化输出模式，schema 由**强制指定的 tool** 承载。所以那里的结构化输出失败**是强制 tool 被拒的后果**，不是一条独立发现——修好前者，后者自然消失；
+- **`openai-responses` 上的四个模型全部失败**：包括三个 `forced-tool-choice: supported` 的模型。这一条与强制 tool 无关，仍然是 12A.5(e) 那条——上游忽略 `text.format.json_schema` 且不报错。
+
+一条能力测的是一件事，因此两个原因才能被分开；这正是把强制选择从 `agent.single-tool-call` 里拆出来的收益。
+
+- `[observed]` 七轮**全部零条未结算**（此前每轮固定一条）。`promoCovered` 的 `null` 修复之后，被中断的流式请求正常读作 `not-billable`，对账第一次是干净的。
 
 ## 本机 Docker 验证记录（2026-09-05）
 

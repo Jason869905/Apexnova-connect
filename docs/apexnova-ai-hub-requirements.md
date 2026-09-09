@@ -864,6 +864,17 @@ Hub 同时修了 `abortedAt` 恒为 `null` 的问题（客户端 abort 与「上
 
 套件 `0.3.0` 已在 Hub 登记（`201`），新记录已上行。**12A.5 的 (f) 到此在 Connect 侧收口**；目录能力位那一半在 Hub，等存量模型被勾选。
 
+### 12G.1 全量采集后的分布，以及它解释了什么
+
+八条 subject 已全部按 `0.3.0` 重采并上行。`qwen3.8-flash` 在**两条协议上**都拒绝按名字强制 tool，其余三个模型两条协议都支持。
+
+**这一列把此前混在一起的两个原因分开了。** 在此之前 `agent.structured-output: unsupported` 出现在两处，看起来是同一个结论：
+
+- `anthropic-messages` 上的 `qwen3.8-flash`——该协议没有独立的结构化输出模式，schema 由强制指定的 tool 承载，**那里的结构化输出失败是强制 tool 被拒的后果**，不是独立发现；
+- `openai-responses` 上的四个模型全部失败——包括三个 `forced-tool-choice: supported` 的，这一条与强制 tool 无关，仍然是 (e)：上游忽略 `text.format.json_schema` 且不报错。
+
+**一条能力只测一件事，两个原因才分得开。** 反过来说，如果当初把强制选择并进 `agent.single-tool-call`，得到的会是「qwen 不能调用工具」——既错误，又把 (e) 和 (f) 永久混为一谈。
+
 ## 13. 非功能要求
 
 - 上游密钥进入现有加密 Credential/secret 管理链路，绝不进入公共目录；
