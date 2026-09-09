@@ -107,9 +107,9 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.3`。
 
-当前状态：进行中，**不宣布关闭**（评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)）。五条退出条件中四条已满足，「Provider 变化使 Evidence 过期」因目录不暴露上游身份而未满足；`Hub Evidence 查询接口`未交付。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
+当前状态：**已关闭**（2026-09-09，收口见 [ADR 0006](decisions/0006-m3-closure.md)；9 月 8 日的评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)）。五条退出条件全部满足：ADR 0005 时未满足的「Provider 变化使 Evidence 过期」由目录的 `implementationFingerprint` 补上——指纹进 `subject` 并参与 subject 身份比较，`compatibility refresh` 另按 `implementationChangedAt` 判到期；`Hub Evidence 查询接口`已交付并完成真实同步。**该条以 Hub 的指纹稳定性保证为前提**，保证失效按契约问题处理。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
 
-已完成：`packages/capabilities`（8 项能力定义与版本化套件、Evidence 的不可变本地存储与过期语义、Verdict 计算、Vendor Claimed 与 Apexnova Verified 分离）、可运行的能力测试套件（`openai-responses` 与 `anthropic-messages`，离线 fixture 测试）、`compatibility run`（估价、预算上限、按 requestId 对账）、`compatibility explain`、`compatibility matrix` 与由它生成的[兼容性矩阵](compatibility-matrix.md)；首批 4 个 Deployment 已固定并完成真实采集（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。能力套件的运行可以 `--record` 录制并 `compatibility replay` 离线回放（仓库内保留了一份对现网 `qwen3.8-flash` 的真实录制作为回归夹具），过期后的重采集由 `compatibility refresh` 承担。剩余依赖：Hub 的 Evidence 查询接口，需求已写入 [Hub 对接需求 12A](apexnova-ai-hub-requirements.md)，其中 (b) 推理错误响应缺 Request ID 与 (d) 用量无法区分未结算/不计费两项是硬前置。
+已完成：`packages/capabilities`（能力定义与版本化套件，首批 8 项、`0.3.0` 起 9 项、Evidence 的不可变本地存储与过期语义、Verdict 计算、Vendor Claimed 与 Apexnova Verified 分离）、可运行的能力测试套件（`openai-responses` 与 `anthropic-messages`，离线 fixture 测试）、`compatibility run`（估价、预算上限、按 requestId 对账）、`compatibility explain`、`compatibility matrix` 与由它生成的[兼容性矩阵](compatibility-matrix.md)；首批 4 个 Deployment 已固定并完成真实采集（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。能力套件的运行可以 `--record` 录制并 `compatibility replay` 离线回放（仓库内保留了一份对现网 `qwen3.8-flash` 的真实录制作为回归夹具），过期后的重采集由 `compatibility refresh` 承担。`compatibility sync` 与 `compatibility revoke` 把本地证据推到 Hub 并报告服务端的派生判断（是否支撑当前 Verdict、`staleReason`、指纹是否对得上）；12A 的七条服务端缺口全部关闭，其中 (b) 推理错误响应缺 Request ID 与 (d) 用量无法区分未结算/不计费两项硬前置已在现网验证。套件 `0.3.0` 增加 `agent.forced-tool-choice`，把「能否调用工具」与「能否强制指定工具」分开，首次实测即复现了 `qwen3.8-flash` 的拒绝。未交付并明确推迟的：图片、缓存、长上下文与并行 Tool Call；macOS 平台的证据行（无实机）。
 
 范围：
 
@@ -126,7 +126,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 - 2 个 Agent：OpenCode（`openai-responses`）与 Claude Code（`anthropic-messages`）；
 - 4 个 Model Deployment，按 ADR 0004 的标准在采集时固定；
-- 8 项基础能力测试：6 项 Protocol Conformance、2 项 Agent Interaction。
+- 8 项基础能力测试：6 项 Protocol Conformance、2 项 Agent Interaction（套件 `0.3.0` 后为 9 项，新增 `agent.forced-tool-choice`）。
 
 ### 遗留缺陷：`restore` 的顺序判定来源（已修复）
 
