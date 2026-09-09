@@ -1,0 +1,15 @@
+{
+  "items": [
+    {
+      "deviceId": "dev_00000000000000000000000001",
+      "name": "OpenCode on laptop",
+      "platform": "win32",
+      "createdAt": "2026-09-03T21:09:00.590Z",
+      "lastSeenAt": "2026-09-03T21:12:41.201Z",
+      "revoked": false,
+      "activeRuntimeCredentials": 1,
+      "current": true
+    }
+  ],
+  "nextCursor": null
+}

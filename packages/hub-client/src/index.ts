@@ -26,6 +26,7 @@ export type {
   UpdateApiKeyInput,
   HubAccountSummary,
   HubBalance,
+  HubCatalogCapabilityStatement,
   HubCatalogDeployment,
   HubCatalogModel,
   HubCatalogProtocol,

@@ -1,0 +1,8 @@
+{
+  "device_code": "andc_EXAMPLE_DEVICE_CODE_NOT_A_REAL_SECRET",
+  "user_code": "BCDF-GH23",
+  "verification_uri": "https://console.example.com/device",
+  "verification_uri_complete": "https://console.example.com/device?user_code=BCDF-GH23",
+  "expires_in": 900,
+  "interval": 5
+}

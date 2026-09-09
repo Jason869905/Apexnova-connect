@@ -1,0 +1,12 @@
+{
+  "accountId": "acct_00000000000000000000000001",
+  "userId": "usr_00000000000000000000000001",
+  "displayName": "user_0123456789",
+  "email": "customer@example.com",
+  "plan": { "id": "personal", "name": "Personal" },
+  "defaultCurrency": "USD",
+  "createdAt": "2026-08-29T14:01:36.759Z",
+  "context": { "type": "personal" },
+  "device": { "id": "dev_00000000000000000000000001" },
+  "scopes": ["account:read", "catalog:read", "billing:read"]
+}

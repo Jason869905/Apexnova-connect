@@ -1,0 +1,65 @@
+{
+  "items": [
+    {
+      "id": "use_00000000000000000000000001",
+      "requestId": "00000000-0000-0000-0000-000000000000",
+      "at": "2026-09-03T21:37:14.488Z",
+      "status": "success",
+      "statusCode": null,
+      "requestedModel": "glm-5.2",
+      "requestedDeploymentId": "deployment.apexnova.mdl00000000000000000000001",
+      "resolvedModel": "glm-5.2",
+      "resolvedDeploymentId": "deployment.apexnova.mdl00000000000000000000001",
+      "fallbackApplied": false,
+      "workspaceId": "wsp_00000000000000000000000001",
+      "source": "api",
+      "apiKeyId": "key_EXAMPLE_laptop",
+      "apiKeyName": "opencode on laptop",
+      "apiKeyKind": "user",
+      "usage": {
+        "inputTokens": 16,
+        "outputTokens": 99,
+        "cachedInputTokens": 0,
+        "items": 0
+      },
+      "currency": "USD",
+      "amount": "0.000214",
+      "promoCovered": "0.000000",
+      "balanceCovered": "0.000214",
+      "discountRate": null,
+      "settlementStatus": "settled",
+      "abortedAt": null
+    },
+    {
+      "id": "atp_00000000000000000000000002",
+      "requestId": "00000000-0000-0000-0000-000000000002",
+      "at": "2026-09-03T21:39:02.100Z",
+      "status": null,
+      "statusCode": null,
+      "requestedModel": "glm-5.2",
+      "requestedDeploymentId": "deployment.apexnova.mdl00000000000000000000001",
+      "resolvedModel": "glm-5.2",
+      "resolvedDeploymentId": "deployment.apexnova.mdl00000000000000000000001",
+      "fallbackApplied": false,
+      "workspaceId": "wsp_00000000000000000000000001",
+      "source": "api",
+      "apiKeyId": "key_EXAMPLE_laptop",
+      "apiKeyName": "opencode on laptop",
+      "apiKeyKind": "user",
+      "usage": {
+        "inputTokens": 16,
+        "outputTokens": 0,
+        "cachedInputTokens": 0,
+        "items": null
+      },
+      "currency": "USD",
+      "amount": null,
+      "promoCovered": null,
+      "balanceCovered": null,
+      "discountRate": null,
+      "settlementStatus": "pending",
+      "abortedAt": null
+    }
+  ],
+  "nextCursor": null
+}

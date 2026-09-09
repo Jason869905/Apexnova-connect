@@ -1,0 +1,76 @@
+{
+  "id": "ev.sha256.acc7db41ec02a5f1b4d0e6c93a17f2085b6d4c1e9f30a7b2c85d4e6f019a3b7c",
+  "payload": {
+    "schemaVersion": "0.1",
+    "id": "ev.sha256.acc7db41ec02a5f1b4d0e6c93a17f2085b6d4c1e9f30a7b2c85d4e6f019a3b7c",
+    "sourceType": "maintainer-test",
+    "subject": {
+      "agentId": "opencode",
+      "agentVersion": "1.18.29",
+      "integrationId": "opencode",
+      "integrationVersion": "0.1.0",
+      "deploymentId": "deployment.apexnova.mdl00000000000000000000001",
+      "protocol": "openai-responses",
+      "platform": "linux-x64",
+      "implementationFingerprint": "a3f19c04b7e25d18"
+    },
+    "testSuite": {
+      "id": "apexnova.capability-suite",
+      "version": "0.2.0"
+    },
+    "result": {
+      "verdict": "verified",
+      "passed": 8,
+      "failed": 0,
+      "capabilities": [
+        {
+          "capabilityId": "tool.calling",
+          "support": "supported",
+          "sourceType": "maintainer-test",
+          "expiresAt": "2027-01-01T00:00:00.000Z"
+        },
+        {
+          "capabilityId": "streaming.sse",
+          "support": "supported",
+          "sourceType": "maintainer-test",
+          "expiresAt": "2026-10-09T00:00:00.000Z"
+        }
+      ]
+    },
+    "observedAt": "2026-09-09T10:00:00.000Z",
+    "expiresAt": "2027-01-01T00:00:00.000Z"
+  },
+  "received": {
+    "receivedAt": "2026-09-09T10:00:03.117Z",
+    "submittedBy": "usr_00000000000000000000000001",
+    "signatureStatus": "none",
+    "payloadBytes": 812,
+    "implementationFingerprint": "a3f19c04b7e25d18",
+    "revokedAt": null,
+    "revokedReason": null
+  },
+  "derived": {
+    "recordExpired": false,
+    "capabilityStatus": [
+      {
+        "capabilityId": "tool.calling",
+        "expiresAt": "2027-01-01T00:00:00.000Z",
+        "expired": false
+      },
+      {
+        "capabilityId": "streaming.sse",
+        "expiresAt": "2026-10-09T00:00:00.000Z",
+        "expired": false
+      }
+    ],
+    "staleReason": null,
+    "supersededBy": null,
+    "fingerprint": {
+      "subject": "a3f19c04b7e25d18",
+      "received": "a3f19c04b7e25d18",
+      "current": "a3f19c04b7e25d18",
+      "match": "match"
+    },
+    "supportsCurrentVerdict": true
+  }
+}

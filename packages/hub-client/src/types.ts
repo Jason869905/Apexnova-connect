@@ -151,6 +151,20 @@ export interface HubCatalogProvider {
   readonly kind: "platform";
 }
 
+/**
+ * A capability the catalog lists, with who is making the claim. Absence of a
+ * statement means unknown, never unsupported: the catalog carries only what an
+ * operator declared. Everything it emits today is `provider-claim` -- nobody
+ * has measured it -- which is why a claim never reaches a tested verdict.
+ */
+export interface HubCatalogCapabilityStatement {
+  readonly capabilityId: string;
+  readonly support: "supported" | "partial" | "unsupported" | "unknown";
+  readonly sourceType: "provider-claim" | "official-test" | "maintainer-test" | "community-test" | "runtime-observation";
+  readonly observedAt?: string;
+  readonly expiresAt?: string;
+}
+
 export interface HubCatalogModel {
   readonly id: string;
   readonly name: string;
@@ -177,6 +191,8 @@ export interface HubCatalogDeployment {
     readonly maxOutputTokens?: number;
   };
   readonly capabilities: readonly string[];
+  /** The same capabilities, each carrying its evidence level. */
+  readonly capabilityStatements: readonly HubCatalogCapabilityStatement[];
   readonly availability: {
     readonly status: "available" | "degraded" | "maintenance" | "unavailable";
     readonly observedAt?: string;

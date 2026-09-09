@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "suiteId": "apexnova.capability-suite",
+      "version": "0.2.0",
+      "majorVersion": 0,
+      "capabilityDigest": {
+        "capabilities": [
+          "tool.calling",
+          "streaming.sse",
+          "structured-output.json"
+        ]
+      },
+      "ttlTable": {
+        "tool.calling": 90,
+        "streaming.sse": 30
+      },
+      "environment": "linux-x64 node22",
+      "registeredAt": "2026-09-09T09:58:11.004Z"
+    }
+  ],
+  "nextCursor": null
+}

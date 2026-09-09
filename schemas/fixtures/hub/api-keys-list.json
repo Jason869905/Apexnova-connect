@@ -1,0 +1,29 @@
+{
+  "items": [
+    {
+      "id": "key_EXAMPLE_laptop",
+      "name": "opencode on laptop",
+      "prefix": "sk-EXAMPL…wxyz",
+      "kind": "user",
+      "workspaceId": "ws_EXAMPLE_default",
+      "protocols": ["openai-responses", "anthropic-messages"],
+      "publicDeploymentIds": ["deployment.apexnova.cm123example"],
+      "expiresAt": null,
+      "createdAt": "2026-09-06T12:00:00.000Z",
+      "lastUsedAt": "2026-09-06T12:41:07.000Z"
+    },
+    {
+      "id": "key_EXAMPLE_ci",
+      "name": "ci runner",
+      "prefix": "sk-EXAMPL…4f2a",
+      "kind": "user",
+      "workspaceId": "ws_EXAMPLE_default",
+      "protocols": [],
+      "publicDeploymentIds": [],
+      "expiresAt": "2026-12-06T12:00:00.000Z",
+      "createdAt": "2026-09-01T09:15:00.000Z",
+      "lastUsedAt": null
+    }
+  ],
+  "nextCursor": null
+}

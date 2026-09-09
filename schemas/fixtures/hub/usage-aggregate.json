@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "0.1",
+  "granularity": "day",
+  "from": "2026-09-01T00:00:00.000Z",
+  "to": "2026-09-06T23:59:59.000Z",
+  "items": [
+    {
+      "bucketStart": "2026-09-06T00:00:00Z",
+      "apiKeyId": "key_EXAMPLE_laptop",
+      "apiKeyName": "opencode on laptop",
+      "apiKeyKind": "user",
+      "publicDeploymentId": "deployment.apexnova.cm123example",
+      "requestedModel": "glm-5.2",
+      "resolvedModel": "glm-5.2",
+      "requestCount": 142,
+      "inputTokens": 18432,
+      "outputTokens": 41280,
+      "cachedTokens": 0,
+      "items": 0,
+      "normalCost": "0.042100",
+      "promoCost": "0.000000",
+      "currency": "USD"
+    },
+    {
+      "bucketStart": "2026-09-05T00:00:00Z",
+      "apiKeyId": "key_EXAMPLE_laptop",
+      "apiKeyName": "opencode on laptop",
+      "apiKeyKind": "user",
+      "publicDeploymentId": "deployment.apexnova.cm123example",
+      "requestedModel": "glm-broken",
+      "resolvedModel": "glm-5.2",
+      "requestCount": 3,
+      "inputTokens": 402,
+      "outputTokens": 918,
+      "cachedTokens": 0,
+      "items": 0,
+      "normalCost": "0.000000",
+      "promoCost": "0.001180",
+      "currency": "USD"
+    }
+  ],
+  "nextCursor": null,
+  "asOf": "2026-09-06T12:00:00.000Z"
+}

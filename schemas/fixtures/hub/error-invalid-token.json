@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "invalid_token",
+    "message": "The access token is expired, revoked or invalid.",
+    "retryable": false,
+    "requestId": "req_00000000000000000000000000000001",
+    "details": {}
+  }
+}

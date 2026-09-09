@@ -1,0 +1,16 @@
+{
+  "currency": "USD",
+  "normalBalance": "18.420000",
+  "held": "2.000000",
+  "normalAvailable": "16.420000",
+  "promoCredits": [
+    {
+      "id": "promo.prm00000000000000000000001",
+      "remaining": "5.000000",
+      "eligibleModelAliases": ["glm-5.2"],
+      "expiresAt": "2026-10-01T00:00:00.000Z"
+    }
+  ],
+  "model": null,
+  "asOf": "2026-09-03T21:30:38.803Z"
+}

@@ -11,6 +11,7 @@ import type {
   HubBalance,
   HubCatalogDeployment,
   HubCatalogModel,
+  HubCatalogCapabilityStatement,
   HubCatalogProtocol,
   HubCatalogProvider,
   HubCatalogSnapshot,
@@ -183,6 +184,12 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
       return { ...(contextWindow ? { contextWindow } : {}), ...(maxOutputTokens ? { maxOutputTokens } : {}) };
     })() }),
     capabilities: strings(item.capabilities, "deployment.capabilities"),
+    // Parsed rather than dropped: the evidence level beside each capability is
+    // the whole point of the field, and a whitelist parser that skips it turns
+    // "declared by an operator, never measured" into "the catalog said so".
+    capabilityStatements: item.capabilityStatements === null || item.capabilityStatements === undefined
+      ? []
+      : array(item.capabilityStatements, "deployment.capabilityStatements", parseCatalogCapabilityStatement),
     availability: {
       status: availability as HubCatalogDeployment["availability"]["status"],
       ...(availabilityObject.observedAt === null || availabilityObject.observedAt === undefined ? {} : { observedAt: timestamp(availabilityObject.observedAt, "deployment.availability.observedAt") }),
@@ -203,6 +210,26 @@ function apiKeyKind(value: unknown): "user" | "runtime" {
   const kind = string(value, "usage record.apiKeyKind", 32);
   if (kind !== "user" && kind !== "runtime") throw invalid("usage record.apiKeyKind");
   return kind;
+}
+
+const CATALOG_SUPPORT: readonly HubCatalogCapabilityStatement["support"][] = ["supported", "partial", "unsupported", "unknown"];
+const CATALOG_SOURCE_TYPE: readonly HubCatalogCapabilityStatement["sourceType"][] = [
+  "provider-claim", "official-test", "maintainer-test", "community-test", "runtime-observation",
+];
+
+function parseCatalogCapabilityStatement(value: unknown): HubCatalogCapabilityStatement {
+  const item = object(value, "deployment.capabilityStatements[]");
+  const support = string(item.support, "deployment.capabilityStatements[].support", 32);
+  const sourceType = string(item.sourceType, "deployment.capabilityStatements[].sourceType", 64);
+  if (!CATALOG_SUPPORT.includes(support as HubCatalogCapabilityStatement["support"])) throw invalid("deployment.capabilityStatements[].support");
+  if (!CATALOG_SOURCE_TYPE.includes(sourceType as HubCatalogCapabilityStatement["sourceType"])) throw invalid("deployment.capabilityStatements[].sourceType");
+  return {
+    capabilityId: string(item.capabilityId, "deployment.capabilityStatements[].capabilityId", 256),
+    support: support as HubCatalogCapabilityStatement["support"],
+    sourceType: sourceType as HubCatalogCapabilityStatement["sourceType"],
+    ...(item.observedAt === null || item.observedAt === undefined ? {} : { observedAt: timestamp(item.observedAt, "deployment.capabilityStatements[].observedAt") }),
+    ...(item.expiresAt === null || item.expiresAt === undefined ? {} : { expiresAt: timestamp(item.expiresAt, "deployment.capabilityStatements[].expiresAt") }),
+  };
 }
 
 function parseUsageRecord(value: unknown): HubUsageRecord {

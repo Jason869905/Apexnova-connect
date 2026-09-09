@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "evidence_immutable",
+    "message": "An evidence record with this id already exists with different content. Records are immutable; submit a new record with `supersedes` instead.",
+    "retryable": false,
+    "requestId": "req_00000000000000000000000000000001",
+    "details": {}
+  }
+}

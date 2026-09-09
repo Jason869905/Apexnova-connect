@@ -1,0 +1,8 @@
+{
+  "access_token": "anat_EXAMPLE_ACCESS_TOKEN_NOT_A_REAL_SECRET",
+  "refresh_token": "anrf_EXAMPLE_REFRESH_TOKEN_NOT_A_REAL_SECRET",
+  "token_type": "Bearer",
+  "expires_in": 600,
+  "scope": "account:read catalog:read billing:read usage:read devices:read devices:revoke runtime-credentials:write",
+  "device_id": "dev_00000000000000000000000001"
+}

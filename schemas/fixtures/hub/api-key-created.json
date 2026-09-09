@@ -1,0 +1,13 @@
+{
+  "id": "key_EXAMPLE_laptop",
+  "name": "opencode on laptop",
+  "prefix": "sk-EXAMPL…wxyz",
+  "kind": "user",
+  "secret": "sk-EXAMPLE****",
+  "workspaceId": "ws_EXAMPLE_default",
+  "protocols": ["openai-responses", "anthropic-messages"],
+  "publicDeploymentIds": ["deployment.apexnova.cm123example"],
+  "expiresAt": null,
+  "createdAt": "2026-09-06T12:00:00.000Z",
+  "lastUsedAt": null
+}

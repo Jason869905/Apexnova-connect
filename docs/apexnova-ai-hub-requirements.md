@@ -801,6 +801,8 @@ Hub 同时修了 `abortedAt` 恒为 `null` 的问题（客户端 abort 与「上
 
 影响不阻塞提交（记录照常上行），但 `derived.staleReason` 永远不会是 `suite-major-superseded`，12A.3 的套件维度就是空的。Connect 侧已按契约问题报出而不是重试。
 
+**已关闭。** Hub 复核后确认是他们的等值比较缺陷（jsonb 键序），已修并部署；生产库里存的本来就是我们那份真实定义（`sha256:632b0e9b…`、8 条能力、8 个 TTL 键、`linux-x64 node v22.23.1`，15:12:09 登记），不需要清理。我们重登记一次得到 `200 already registered`，四条分支（首次 / 同定义重复 / 键序不同内容相同 / 真改定义）在他们那侧逐条验过。
+
 ### 12E.3 Connect 这侧同时修掉的洞
 
 1. **目录里的 `null` 会让整份目录读不了**（`ea6e05e`）。`implementationFingerprint` 与 `implementationChangedAt` 的解析只认 `undefined` 不认 `null`，而现网 46 个 deployment 的 `changedAt` 全是 `null`——`models`、`connect`、`run`、`refresh` 会一起报 `INVALID_RESPONSE`。是我们的缺陷，赶在跑之前修掉了；
@@ -809,6 +811,36 @@ Hub 同时修了 `abortedAt` 恒为 `null` 的问题（客户端 abort 与「上
 4. **鉴权前失败的 requestId 不再等它结算**。套件新增 `preAuthRequestIds`，采集报告把它单列为「refused before authentication, never in the ledger」，不再计进「未结算」——否则每一轮都会留下一条永远不会消失的警告，警告就不再有意义了。
 
 `apexnova usage` 同时加了 `--request-id`：逐 requestId 对账是 Connect 的基本动作，此前 CLI 反而只能按时间段查。
+
+## 12F. 三条的收口，与一条做法（2026-09-09）
+
+12E 提出的三条全部收口，**其中一条不在 Hub 而在我们**：
+
+| | 结论 |
+| --- | --- |
+| 套件登记 `409` | Hub 的等值比较缺陷（jsonb 键序），已修部署；重登记验证返回 `200`。生产库里存的就是我们的真实定义，无需清理 |
+| `Estimate` 缺 `discount` | Hub 拆提交时回退了一版 schema，已补回并部署；他们另加了「fixture 里的顶层字段 schema 必须有定义」的契约不变量 |
+| 目录不返回 `capabilityStatements` | **是我们的**：Hub 无条件下发（空数组也出），是 `control-plane-client.ts` 的白名单解析器里根本没有这个字段。已加；现网 46 个 Deployment 里 43 个有值，全部 `provider-claim`，与 §J(e) 一致 |
+
+### 12F.1 用对方的 fixture 测自己的解析器
+
+`capabilityStatements` 与刚关闭的 `promoCovered`（12E.1）是同一个文件、同一类洞：**白名单解析器遇上契约里已有而我们没写的字段**——一个抛异常被上层吞成「没数据」，一个直接消失。两次都不是靠读自己的代码发现的，是 Hub 指出来的。
+
+这类洞用我们自己写的单元测试抓不到：测试数据出自我们对契约的理解，而缺陷正是这份理解漏了一块。所以 Hub 的 fixtures 现在**原样收进仓库并喂进解析器**：
+
+- [`schemas/fixtures/hub/`](../schemas/fixtures/hub/)：Hub 仓库 `openapi/fixtures/` 的逐字副本，记着来源 commit；
+- [`packages/hub-client/tests/hub-fixtures.test.ts`](../packages/hub-client/tests/hub-fixtures.test.ts)：逐个喂进对应的客户端方法。
+
+**这条测试是承重的，不是装饰**：把两个缺陷分别改回去，`billing-usage.json` 的第二条（四个金额全 `null`）与 `catalog-snapshot.json` 的 `capabilityStatements` 会分别让它变红——已实际验证过一次。
+
+规则与 12B.3 的 canonical 向量一致：**刷新 fixtures 之后测试失败，按契约变更处理，不更新快照。**
+
+### 12F.2 两边一起交的学费
+
+- **一个查询结果，只有在能区分「没有行」和「读不了行」时才算证据**（12E.1：我们把解析失败读成了 Hub 没写记录，还复现了八次）；
+- **测试数据的形状必须能触发它要防的 bug**（Hub 那侧：单键 digest 恰好绕过了 jsonb 键序比较，手工填字段绕过了写路径）。
+
+两条是同一件事的两面：验证手段本身要能失败，否则它证明的只是自己没被触发。
 
 ## 13. 非功能要求
 

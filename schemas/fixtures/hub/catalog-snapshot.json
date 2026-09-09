@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "0.1",
+  "catalogVersion": "cat_8248a5c923eb",
+  "generatedAt": "2026-09-03T21:25:42.405Z",
+  "expiresAt": "2026-09-03T21:40:42.405Z",
+  "providers": [
+    {
+      "id": "provider.apexnova-ai-hub",
+      "name": "Apexnova AI Hub",
+      "kind": "platform"
+    }
+  ],
+  "models": [
+    {
+      "id": "model.mdl00000000000000000000001",
+      "name": "GLM 5.2",
+      "publisher": "zhipu",
+      "publisherName": "Zhipu AI",
+      "modelType": "chat",
+      "capabilities": [
+        "reasoning.supported",
+        "tool.calling"
+      ],
+      "capabilityStatements": [
+        {
+          "capabilityId": "reasoning.supported",
+          "support": "supported",
+          "sourceType": "provider-claim"
+        },
+        {
+          "capabilityId": "tool.calling",
+          "support": "supported",
+          "sourceType": "provider-claim"
+        }
+      ],
+      "deploymentIds": [
+        "deployment.apexnova.mdl00000000000000000000001"
+      ]
+    }
+  ],
+  "deployments": [
+    {
+      "id": "deployment.apexnova.mdl00000000000000000000001",
+      "providerId": "provider.apexnova-ai-hub",
+      "modelId": "model.mdl00000000000000000000001",
+      "displayName": "GLM 5.2",
+      "inferenceAlias": "glm-5.2",
+      "aliases": [
+        "glm-5.2"
+      ],
+      "publisher": "zhipu",
+      "publisherName": "Zhipu AI",
+      "modality": {
+        "type": "chat",
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "protocols": [
+        {
+          "protocol": "openai-responses",
+          "baseUrl": "https://api.example.com/v1/responses"
+        },
+        {
+          "protocol": "openai-chat",
+          "baseUrl": "https://api.example.com/v1/chat/completions"
+        },
+        {
+          "protocol": "anthropic-messages",
+          "baseUrl": "https://api.example.com/anthropic/v1/messages"
+        }
+      ],
+      "limits": {
+        "contextWindow": 128000,
+        "maxOutputTokens": 8192,
+        "advertisedRpm": null,
+        "advertisedTpm": null
+      },
+      "capabilities": [
+        "reasoning.supported",
+        "tool.calling"
+      ],
+      "capabilityStatements": [
+        {
+          "capabilityId": "reasoning.supported",
+          "support": "supported",
+          "sourceType": "provider-claim"
+        },
+        {
+          "capabilityId": "tool.calling",
+          "support": "supported",
+          "sourceType": "provider-claim"
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "billingMode": "token",
+        "unit": 1000000,
+        "input": "0.6",
+        "output": "2.2",
+        "cachedInput": null,
+        "tiers": null
+      },
+      "implementationFingerprint": "a3f19c04b7e25d18",
+      "implementationChangedAt": null,
+      "availability": {
+        "status": "available",
+        "observedAt": "2026-09-03T20:00:00.000Z",
+        "source": "apexnova.e2e-probe"
+      },
+      "tags": [
+        "popular"
+      ]
+    }
+  ]
+}

@@ -130,7 +130,8 @@ Hub 答复了[需求 12C.5](apexnova-ai-hub-requirements.md) 提的八个问题�
 - `[passed]` **`settlementStatus`**：4 条已结算、1 条 `not-billable`（被拒的无效请求）、未结算的金额为 `null`；
 - `[observed]` **估价响应带 `discount{rate,source,appliesTo,expiresAt}`**（`0.5` / `promo` / `model` / `2026-09-30`），但 OpenAPI 的 `Estimate` schema 里没有这一块，请 Hub 补；
 - `[corrected]` **「中断的流式请求查不到」是误判，已撤回**：台账行八条全在，`settlementStatus: not-billable`，两条带 `abortedAt`。我们的用量解析把 `promoCovered` / `balanceCovered` 的 `null` 当成错误，整条记录被吞，而对账又把解析失败归入「还没结算」。已修，(c) 与 (d) 关闭，详见[需求 12E.1](apexnova-ai-hub-requirements.md)；
-- `[finding]` **套件登记不幂等**：同一份定义第二次登记返回 `409 suite_version_immutable`（第三次同样），文档与 OpenAPI 都写的是同定义返回 200。不阻塞提交，但 `staleReason` 永远不会是 `suite-major-superseded`；
+- `[closed]` **套件登记不幂等**：同一份定义第二次登记返回 `409 suite_version_immutable`。Hub 侧的等值比较缺陷（jsonb 键序），已修部署，重登记验证返回 `200 already registered`；生产库里存的本来就是我们的真实定义，无需清理；
+- `[fixed]` **目录的 `capabilityStatements` 我们没解析**：Hub 无条件下发，是 `control-plane-client.ts` 的白名单解析器里没有这个字段。已加，现网 43/46 个 Deployment 有值且全部 `provider-claim`。与 `promoCovered` 是同一类洞，处置见[需求 12F](apexnova-ai-hub-requirements.md)：Hub 的 fixtures 已收进 `schemas/fixtures/hub/` 并逐个喂进解析器；
 - `[expected]` 鉴权前失败（401）的 requestId 查不到，与 Hub 说明一致。套件现在单独标出它，不再计进「未结算」；
 - `[fixed]` Connect 侧两个洞：目录 `null` 解析会让整份目录读不了（`ea6e05e`）；`compatibility explain` 的 subject 键漏了指纹，换实现前后的记录会并成一行。
 

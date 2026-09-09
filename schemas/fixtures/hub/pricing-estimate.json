@@ -1,0 +1,27 @@
+{
+  "deploymentId": "deployment.apexnova.mdl00000000000000000000001",
+  "model": "glm-5.2",
+  "currency": "USD",
+  "billingMode": "token",
+  "listAmount": "0.000077",
+  "discountRate": "1",
+  "discount": {
+    "rate": "1",
+    "source": "none",
+    "appliesTo": null,
+    "expiresAt": null
+  },
+  "amount": "0.000077",
+  "assumptions": {
+    "usage": {
+      "inputTokens": 13,
+      "outputTokens": 32,
+      "itemAttrs": {},
+      "estimate": true
+    },
+    "unit": 1000000,
+    "pricedAt": "2026-09-03T21:30:53.976Z"
+  },
+  "priceVersion": "2026-08-29T14:01:54.244Z",
+  "estimateOnly": true
+}
