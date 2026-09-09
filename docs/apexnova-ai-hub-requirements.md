@@ -768,24 +768,30 @@ Hub 澄清 `none`（没交签名）与 `unverified`（交了但未验）是分�
 
 现网 `api.apexnova-consulting.com`，采集者账号已开通（13 个 scope 全部授予）。对 `glm-5.2` × OpenCode × `openai-responses` 跑了一轮真实采集并 `compatibility sync` 上行，实扣 `0.002273 USD`（估价 `0.001820`）。链路成立：记录被接收（`created: true`），Hub 的 `derived` 报 `supportsCurrentVerdict: true`、`fingerprint.match: "match"`、`signatureStatus: "none"`；重跑同一条得到 `created: false`，幂等如约。
 
-**已在现网确认的**：46/46 deployment 带指纹且 `implementationChangedAt` 全为 `null`（12D.1 的初值修复到位）；`settlementStatus` 逐条返回；被拒的无效请求为 `not-billable`；估价响应确实带 `discount{rate:"0.5", source:"promo", appliesTo:"model", expiresAt:"2026-09-30T23:59:00.000Z"}`——**印证 12D.2(1)：这块在响应里，不在 OpenAPI 的 `Estimate` schema 里**。
+**已在现网确认的**：46/46 deployment 带指纹且 `implementationChangedAt` 全为 `null`（12D.1 的初值修复到位）；`settlementStatus` 逐条返回，包括被拒的无效请求与被中断的流式请求（都是 `not-billable`，后者见 12E.1 的更正）；估价响应确实带 `discount{rate:"0.5", source:"promo", appliesTo:"model", expiresAt:"2026-09-30T23:59:00.000Z"}`——**印证 12D.2(1)：这块在响应里，不在 OpenAPI 的 `Estimate` schema 里**。
 
-### 12E.1 `(c)` 中断计费没有兑现
+### 12E.1 `(c)` 已经兑现，是我们读不出来（更正）
 
-套件的 7 个请求里有 2 个在用量里查不到（按 requestId 查返回 0 条，不是 `pending`、不是 `not-billable`）：
+**本节原本断言「中断的流式请求在 Hub 侧没有记录」，该断言是错的，已撤回。** Hub 复核后指出台账行八条全在，逐条核对属实：
 
-| requestId | 探针 | 判定 |
+| 请求 | `settlementStatus` | `abortedAt` |
 | --- | --- | --- |
-| `92babfcb-9193-4f44-ab3a-8e6b4d60ed50` | 无效凭据（401，鉴权前失败） | 与 Hub 说明一致，**预期行为** |
-| `98627d46-92ed-4a9b-816b-9675b6f86699` | 客户端中断的流式请求 | **与 §J(c) 的承诺不符** |
+| 8 轮采集中被中断的流式请求，全部 | `not-billable` | 2 条有；另 6 条为 `null` |
 
-Hub 在 §J(c) 与 12C.2(c) 给的是「保留计费 + 补 `abortedAt` 记录，且带 requestId 可按 requestId 查到」。实际是：**20 分钟后按 requestId 查仍然是空结果**。这正是 12A.5(c)+(d) 原本要消除的那种「同一种请求有时查得到有时查不到」——(d) 只在 Hub 写了行的请求上成立，中断的那条根本没有行。
+原因在我们这侧：`control-plane-client.ts` 的 `promoCovered` 与 `balanceCovered` 只判了 `undefined` 没判 `null`，而契约里这三个金额字段都是 `["string","null"]`。`money(null)` 抛异常，**整条记录被吞掉**。同一个函数里 `amount` 与 `discountRate` 判对了，所以已结算的记录不受影响——它们那两个字段是字符串，正好绕过了这个洞。于是暴露出来的正是未结算与不计费的那些行，也就是 (d) 要说明的那一类。
 
-需求不变，重申一次：**中断的流式请求必须有一条可按 requestId 查到的用量记录**，`settlementStatus` 明确、`abortedAt` 有值，金额按已产出 token 计或为 0 都可以，唯独不能是空结果。
+两层放大让一个解析缺陷变成了对 Hub 的指控，两层都值得记下来：
 
-**同日追加的证据：8 轮 8 次。** 当天对 4 个 Deployment × 2 个 Agent 共跑了 8 轮采集，每一轮恰好有一条请求查不到，逐轮核对都是 `protocol.cancellation` 那条被中断的流式请求。跨两条协议、四个 Deployment 稳定复现，因此不是偶发丢失，而是这条路径上根本没有写记录。
+1. **对账把解析失败当成了「还没结算」。** 逐 requestId 对账时 `catch` 之后一律归入 `stillOpen`，「读不出来」与「Hub 还没写」因此不可分；
+2. **验证时用「查不到」当证据。** 复查脚本读的是 `data.items` 的长度，没有先看信封的 `ok`——错误信封里没有 `data`，于是解析失败被读成了「返回 0 条」。**一个查询结果只有在能区分「没有行」和「读不了行」时才算证据**，八轮复现放大的是同一个盲点，不是八份独立证据。
 
-Connect 侧的处置：401 那条不再等它结算（套件现在单独标出鉴权前失败的 requestId，见 12E.3），中断那条仍如实停在「未结算」并点名——在 Hub 补上记录之前，这是唯一诚实的呈现。
+已修：三个金额字段一律容忍 `null`，并补上此前根本没解析的 `apiKeyId` / `apiKeyName` / `apiKeyKind`（`usage` 的每一行此前都把 key 显示成 `-`）。修完复查，八条记录全部读出，`settlementStatus` 与 `abortedAt` 如上。
+
+**影响面**：计费金额不受影响——那八条都是 `not-billable`，本来就不进账，Evidence 里记的 `billed` 金额是对的；受影响的只是记录摘要里「已结算 / 不计费」的条数分类（每轮少算一条不计费、多算一条未结算）。能力结论完全不涉及。
+
+Hub 同时修了 `abortedAt` 恒为 `null` 的问题（客户端 abort 与「上游没报 usage」此前都记成 `missing_usage`，现改用请求的 abort 信号分辨），已部署——上表里那 6 条 `null` 是修复之前写下的。
+
+**12A.5 的 (c) 与 (d) 到此可以关闭。**
 
 ### 12E.2 套件登记的幂等性有 bug
 
@@ -795,11 +801,12 @@ Connect 侧的处置：401 那条不再等它结算（套件现在单独标出�
 
 影响不阻塞提交（记录照常上行），但 `derived.staleReason` 永远不会是 `suite-major-superseded`，12A.3 的套件维度就是空的。Connect 侧已按契约问题报出而不是重试。
 
-### 12E.3 Connect 这侧同时修掉的两个洞
+### 12E.3 Connect 这侧同时修掉的洞
 
 1. **目录里的 `null` 会让整份目录读不了**（`ea6e05e`）。`implementationFingerprint` 与 `implementationChangedAt` 的解析只认 `undefined` 不认 `null`，而现网 46 个 deployment 的 `changedAt` 全是 `null`——`models`、`connect`、`run`、`refresh` 会一起报 `INVALID_RESPONSE`。是我们的缺陷，赶在跑之前修掉了；
 2. **`compatibility explain` 的 subject 键没带指纹**。12C.2(a) 把指纹并进了 Verdict 与矩阵的 subject 身份，但 explain 在 `run-cli` 里有自己的一份键，漏了——同一个 Deployment 换实现前后的两条记录会并成一行，并且显示后读到的那一条。已修，explain 现在与矩阵一致，并显示指纹前 12 位；
-3. **鉴权前失败的 requestId 不再等它结算**。套件新增 `preAuthRequestIds`，采集报告把它单列为「refused before authentication, never in the ledger」，不再计进「未结算」——否则每一轮都会留下一条永远不会消失的警告，警告就不再有意义了。
+3. **用量记录里的 `null` 金额会让整条记录被吞**（见 12E.1）。三个金额字段一律容忍 `null`，并补上从未解析过的 `apiKeyId` / `apiKeyName` / `apiKeyKind`；
+4. **鉴权前失败的 requestId 不再等它结算**。套件新增 `preAuthRequestIds`，采集报告把它单列为「refused before authentication, never in the ledger」，不再计进「未结算」——否则每一轮都会留下一条永远不会消失的警告，警告就不再有意义了。
 
 `apexnova usage` 同时加了 `--request-id`：逐 requestId 对账是 Connect 的基本动作，此前 CLI 反而只能按时间段查。
 

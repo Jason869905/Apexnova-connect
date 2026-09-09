@@ -129,7 +129,7 @@ Hub 答复了[需求 12C.5](apexnova-ai-hub-requirements.md) 提的八个问题�
 - `[passed]` **指纹与初值**：46/46 deployment 带指纹，`implementationChangedAt` 全为 `null`，`compatibility refresh` 报「没有到期、也没有实现变更」；新采的记录 subject 带上了 `29870b6039ab19ad`；
 - `[passed]` **`settlementStatus`**：4 条已结算、1 条 `not-billable`（被拒的无效请求）、未结算的金额为 `null`；
 - `[observed]` **估价响应带 `discount{rate,source,appliesTo,expiresAt}`**（`0.5` / `promo` / `model` / `2026-09-30`），但 OpenAPI 的 `Estimate` schema 里没有这一块，请 Hub 补；
-- `[finding]` **中断的流式请求仍然查不到**：`98627d46-92ed-4a9b-816b-9675b6f86699` 20 分钟后按 requestId 查返回 0 条——不是 `pending`、不是 `not-billable`，是空结果。与 §J(c) 承诺的「保留计费 + `abortedAt` + 可按 requestId 查到」不符，(c) 未兑现；
+- `[corrected]` **「中断的流式请求查不到」是误判，已撤回**：台账行八条全在，`settlementStatus: not-billable`，两条带 `abortedAt`。我们的用量解析把 `promoCovered` / `balanceCovered` 的 `null` 当成错误，整条记录被吞，而对账又把解析失败归入「还没结算」。已修，(c) 与 (d) 关闭，详见[需求 12E.1](apexnova-ai-hub-requirements.md)；
 - `[finding]` **套件登记不幂等**：同一份定义第二次登记返回 `409 suite_version_immutable`（第三次同样），文档与 OpenAPI 都写的是同定义返回 200。不阻塞提交，但 `staleReason` 永远不会是 `suite-major-superseded`；
 - `[expected]` 鉴权前失败（401）的 requestId 查不到，与 Hub 说明一致。套件现在单独标出它，不再计进「未结算」；
 - `[fixed]` Connect 侧两个洞：目录 `null` 解析会让整份目录读不了（`ea6e05e`）；`compatibility explain` 的 subject 键漏了指纹，换实现前后的记录会并成一行。
@@ -142,7 +142,7 @@ M3 的最后一条退出条件（跑通一次真实同步）**已满足**。
 
 - `[passed]` **结论与 9 月 8 日首批逐条一致**：Claude Code 在 `glm-5.2`/`glm-5.1`/`deepseek-v4-pro-0813` 上 `compatible`、`qwen3.8-flash` `partial`；OpenCode 四个全部 `partial`（都卡在 `agent.structured-output`）。跨一天、两条协议、四个 Deployment 复现了同样的判定；
 - `[passed]` 每条新记录的 subject 都带上了目录指纹，矩阵按实现分行，与旧记录并列而不是覆盖它们；
-- `[finding]` **中断的流式请求 8 轮 8 次都查不到**。每一轮恰好有一条未结算的请求，逐轮核对都是 `protocol.cancellation` 那条——这把 12E.1 从单次观测变成了稳定行为：**不是偶发，是 `(c)` 没有实现**；
+- `[corrected]` 每一轮恰好有一条请求被报成「未结算」，逐轮核对都是 `protocol.cancellation` 那条。当时读成了「Hub 八轮八次都没写行」，实际是同一个解析缺陷被复现了八次——**同一个盲点重复八次不是八份证据**。行都在，见上；
 - `[observed]` `qwen3.8-flash` × Claude Code 有两条 `not-billable`（其余各一条）：除了被拒的无效请求，强制 `tool_choice` 那条也被上游拒了，与 9 月 8 日记录的该模型行为一致。
 
 公开矩阵现在有 16 行：8 条带指纹的新记录，加上 8 条 9 月 8 日采集、目录当时还没有指纹的旧记录。两者是不同的 subject（不同实现），不能合并显示——成对的行逐条给出同样的 Verdict，这本身就是一次跨日复现。

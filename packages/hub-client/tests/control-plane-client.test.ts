@@ -316,6 +316,60 @@ describe("HubControlPlaneClient", () => {
     expect(result?.amount).toBeUndefined();
   });
 
+  it("reads a record whose money fields are all null", async () => {
+    // A not-billable row carries null for amount, promoCovered and
+    // balanceCovered. Refusing one of them takes the whole record down, and a
+    // record that cannot be parsed is indistinguishable, to the caller, from a
+    // request Hub never wrote a row for.
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      items: [{
+        id: "use_00000000000000000000000003",
+        requestId: "98627d46-92ed-4a9b-816b-9675b6f86699",
+        at: "2026-09-09T15:10:16.000Z",
+        status: null,
+        resolvedModel: "glm-5.2",
+        source: "api",
+        usage: {},
+        currency: "USD",
+        amount: null,
+        promoCovered: null,
+        balanceCovered: null,
+        discountRate: null,
+        apiKeyId: null,
+        apiKeyName: null,
+        apiKeyKind: null,
+        settlementStatus: "not-billable",
+        abortedAt: "2026-09-09T15:10:16.254Z",
+      }],
+      nextCursor: null,
+    }));
+
+    const result = await client(fetch).usage("98627d46-92ed-4a9b-816b-9675b6f86699");
+
+    expect(result).toMatchObject({ settlementStatus: "not-billable", abortedAt: "2026-09-09T15:10:16.254Z" });
+    expect(result?.amount).toBeUndefined();
+    expect(result?.promoCovered).toBeUndefined();
+    expect(result?.status).toBeUndefined();
+  });
+
+  it("reads which key a usage record was billed to", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      items: [{
+        id: "use_4", requestId: "req_4", at: "2026-09-09T15:10:16.000Z", status: "success",
+        resolvedModel: "glm-5.2", source: "api", usage: { inputTokens: 3 }, currency: "USD", amount: "0.000100",
+        apiKeyId: "rtc_1", apiKeyName: "OpenCode capability suite", apiKeyKind: "runtime",
+        settlementStatus: "settled",
+      }],
+      nextCursor: null,
+    }));
+
+    await expect(client(fetch).usage("req_4")).resolves.toMatchObject({
+      apiKeyId: "rtc_1",
+      apiKeyName: "OpenCode capability suite",
+      apiKeyKind: "runtime",
+    });
+  });
+
   it("rejects a settlement status it does not know", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
       items: [{

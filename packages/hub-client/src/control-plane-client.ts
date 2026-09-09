@@ -199,6 +199,12 @@ function settlementStatus(value: unknown): UsageSettlementStatus {
   return status as UsageSettlementStatus;
 }
 
+function apiKeyKind(value: unknown): "user" | "runtime" {
+  const kind = string(value, "usage record.apiKeyKind", 32);
+  if (kind !== "user" && kind !== "runtime") throw invalid("usage record.apiKeyKind");
+  return kind;
+}
+
 function parseUsageRecord(value: unknown): HubUsageRecord {
   const item = object(value, "usage record");
   // Null until billing settles: whether a request succeeded is only known once
@@ -243,9 +249,16 @@ function parseUsageRecord(value: unknown): HubUsageRecord {
     ...(item.amount === null || item.amount === undefined ? {} : { amount: money(item.amount, "usage record.amount") }),
     ...(item.settlementStatus === null || item.settlementStatus === undefined ? {} : { settlementStatus: settlementStatus(item.settlementStatus) }),
     ...(item.abortedAt === null || item.abortedAt === undefined ? {} : { abortedAt: timestamp(item.abortedAt, "usage record.abortedAt") }),
-    ...(item.promoCovered === undefined ? {} : { promoCovered: money(item.promoCovered, "usage record.promoCovered") }),
-    ...(item.balanceCovered === undefined ? {} : { balanceCovered: money(item.balanceCovered, "usage record.balanceCovered") }),
+    // Every money field on this record is nullable in the contract, and a null
+    // in any one of them must not take the whole record down: rejecting the
+    // record is indistinguishable, from the caller's side, from Hub never
+    // having written it.
+    ...(item.promoCovered === null || item.promoCovered === undefined ? {} : { promoCovered: money(item.promoCovered, "usage record.promoCovered") }),
+    ...(item.balanceCovered === null || item.balanceCovered === undefined ? {} : { balanceCovered: money(item.balanceCovered, "usage record.balanceCovered") }),
     ...(item.discountRate === null || item.discountRate === undefined ? {} : { discountRate: money(item.discountRate, "usage record.discountRate") }),
+    ...(item.apiKeyId === null || item.apiKeyId === undefined ? {} : { apiKeyId: string(item.apiKeyId, "usage record.apiKeyId", 256) }),
+    ...(item.apiKeyName === null || item.apiKeyName === undefined ? {} : { apiKeyName: string(item.apiKeyName, "usage record.apiKeyName", 256) }),
+    ...(item.apiKeyKind === null || item.apiKeyKind === undefined ? {} : { apiKeyKind: apiKeyKind(item.apiKeyKind) }),
   };
 }
 
