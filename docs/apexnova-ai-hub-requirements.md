@@ -493,6 +493,8 @@ X-Apexnova-Deployment-Id
 
 `POST /v1/recommendations` 读取 Agent、场景、预算、区域和能力约束，输出候选、排除原因、Evidence、价格版本、置信度和显式商业推广标记。
 
+约束能力目前受目录数据限制：区域见 12I，隐私见 12J，预算见 12H——三者都不是 Connect 侧能补的。
+
 响应形状按 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 的 **`schemaVersion` 0.2**：该版本新增必填的 `profileVersion`（[ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)）。`scenarioId` 与 `ruleVersion` 不足以区分同一 Scenario 的两个 profile——profile 改版会改变 requirements 与 priorities 顺序，因此两份基于不同要求集的推荐在缺这个字段时是无法区分的文档。该接口尚未开工，所以本次变更不产生迁移成本。
 
 ### H4：显式路由
@@ -895,6 +897,45 @@ M4 的 `recommend` 需要按价格排序，第一次真的去读目录的 `prici
 Connect 这侧的处置（不等 Hub）：`recommend` 把「`input` 与 `output` 都为零」判定为**没有价格**而不是零价，该 Deployment 的 `cost` 分数为 0 并说明原因；当本轮所有候选都没有可用价格时，整个 `cost` 分项被丢弃并在输出里说明——按 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md) 的规则，没有度量来源的分项不参与排序，也不给默认分。
 
 修好之后 Connect 无需改代码：非零价格会自动重新参与排序。另一条备选路径是逐 Deployment 调估价接口取价，但那是 46 次请求换一次排序，只有在目录长期不提供价格时才值得做。
+
+**2026-09-10 补充：这条的影响面比首次记录时大。** `recommend --max-price` 原本只对「有价格」的候选生效，于是零价候选从上限旁边静默通过——一个被设置却什么也没排除的预算约束（见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 决策 2）。改正之后，价格未知的 Deployment 在设了上限时判为不通过，因此**目前只要用户设置 `--max-price`，本轮就没有任何候选**。这不是过滤器坏了，正是 12H 的实际代价：**在目录给出真实价格之前，预算约束在产品里是不可用的。**
+
+## 12I. 公共目录没有任何区域信息（2026-09-10，M4 约束退出条件核对时发现）
+
+路线图给 M4 的退出条件之一是「用户可以强制模型白名单、预算、区域和隐私约束」，M5 的范围里也直接写着「Deployment 健康、余额、**区域**和价格约束」。两处都需要一个能比较的区域属性，而目录里没有。
+
+2026-09-10 对现网目录逐项核对：
+
+- `HubCatalogDeployment` 没有任何区域属性，46 个 Deployment 的原始 JSON 里也没有任何名字含 region / zone / location / geo / jurisdiction 的键；
+- `providers` 数组只有一个条目，且只有 `id`、`kind`、`name` 三个字段；
+- 协议 `baseUrl` 不构成替代信号：全部 85 个协议入口共用同一个 host（`api.apexnova-consulting.com`），路径只区分协议，不区分区域。
+
+**需求**：公共目录为每个 Deployment 发布一个**可比较的区域标识**。形状不限（`region: "cn-north"` 这类稳定枚举即可），但需要满足两条：跨 Deployment 可比较，以及在 Deployment 的实现变化时保持语义稳定——否则它无法进入任何硬约束。
+
+如果某些 Deployment 的区域**不确定或不宜披露**，请显式给出「未知」而不是省略该字段。这与 12H 的道理相同：一个缺失的字段与一个明确的「未知」，对消费方是两件事——前者只能猜，后者可以据实拒绝。
+
+Connect 这侧的处置（不等 Hub）：`recommend` **不提供** `--region`，并在 [`cli-spec.md`](cli-spec.md) 与 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 里写明「不是 Connect 未做，是数据不存在」。不会用 `baseUrl` 或指纹去猜区域——猜出来的区域约束比没有约束更危险。
+
+## 12J. 隐私约束只能表达一半：模型发布方有，实际运营方没有（2026-09-10）
+
+同一条退出条件里的「隐私约束」，目录支持其中一半：
+
+- **模型发布方，目录给了。** `model.publisher` / `publisherName` 存在且已被解析，现网 46 个 Deployment 覆盖 12 个发布方。因此「不要用某发布方的模型」这类约束**今天就能实现**，Connect 已实现为 `recommend --exclude-publisher`；
+- **实际运行模型的运营方，目录不给。** 46 个 Deployment 的 `providerId` 全部是 `provider.apexnova-ai-hub`、`kind: "platform"`，`providers` 数组里只有这一条。因此「不要让某运营方看到我的代码」无从表达，也无从校验。
+
+这两件事经常被混成一句「隐私」，但它们的消费方式完全不同：前者是关于用谁的模型，后者是关于请求实际经过谁的手。**只有后者能回答合规问题。**
+
+**需求**：让用户能够表达并使 Hub 强制执行一条与数据处理方有关的约束。具体形状由 Hub 决定，以下任一即可：
+
+1. 公开每个 Deployment 的上游运营方身份；
+2. 不公开身份，但发布一个**稳定可比较的数据处理属性**（司法辖区、是否有子处理方、是否用于训练等），使约束可以针对属性而不是针对名字；
+3. 都不公开，改为**由 Hub 在服务端接收并执行该约束**——请求里带上约束，返回只包含满足它的 Deployment，并在响应里说明哪些被排除以及依据。
+
+我们不预设 Hub 必须披露运营方身份：抽象掉上游本来就是这个平台的价值之一。但**「不可比较、不可校验、也不可委托执行」这三者不能同时成立**，否则隐私约束在产品里只能是一句无法兑现的承诺。
+
+若走第 3 条，它天然属于 H3（`POST /v1/recommendations`）与 H4（显式路由）的接口范围，届时需要在响应里给出被排除项及理由——与 Connect 本地推荐现在的做法一致。
+
+Connect 这侧的处置（不等 Hub）：发布方那一半已实现；运营方那一半在 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 里如实记为「依赖 Hub」，不会用不可逆指纹去区分运营方——指纹只保证「实现变了」，不承载身份，拿它当身份用会得到一个看起来精确的错误答案。
 
 ## 13. 非功能要求
 
