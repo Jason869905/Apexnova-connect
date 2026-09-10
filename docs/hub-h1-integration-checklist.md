@@ -178,6 +178,21 @@ M3 的最后一条退出条件（跑通一次真实同步）**已满足**。
 
 - `[observed]` 七轮**全部零条未结算**（此前每轮固定一条）。`promoCovered` 的 `null` 修复之后，被中断的流式请求正常读作 `not-billable`，对账第一次是干净的。
 
+## M4 Windows 证据的发布与验证（2026-09-10，Windows 11 与 Linux/WSL2，`api.apexnova-consulting.com`）
+
+[ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md) 决策 5 把「补 Windows 采集」列为 M4 第一批任务。**采集本身在 2026-09-09 20:33–20:37 UTC 就已完成并上行**，本次做的是把它发布进公开矩阵、复核服务端状态，并验证 `recommend` 在该平台上确实成立。本次没有新的推理请求，因此不产生新计费。
+
+- `[passed]` **8 条 Windows 记录已在 Hub 上**：`compatibility sync` 报 `24 of 24 (0 new, 24 already held by Hub)`，逐条 `existing`、`supportsCurrentVerdict: true`、`fingerprint.match`。12 条早期 id 形式按契约被跳过。**这同时是指纹稳定性的第二平台复核**——M3 收口所依赖的那条前提（[ADR 0006](decisions/0006-m3-closure.md)），在跨平台的记录上再次对得上；
+- `[corrected]` 本次开始时判断「Windows 证据还没同步」，依据是本地找不到同步痕迹。**CLI 根本不保存同步账本，所以那个依据不成立**；实际状态由 `sync` 的回执给出，不是由本地文件的缺席推出来的；
+- `[passed]` **`recommend` 在 `windows-x64` 上有支撑，且不借用别的平台**：Claude Code 2.1.233 与 OpenCode 1.18.29 均为 `4 eligible of 46 considered`，逐条引用的是 Windows 记录本身（例如 OpenCode 第一名引 `ev.sha256.ac0710a5…`）。排序与 Linux 一致：Claude Code 三个满分加 `qwen3.8-flash` 0.556，OpenCode 三个 0.778 加 `qwen3.8-flash` 0.556。ADR 0007 决策 5 的闭环合上；
+- `[passed]` **判定跨平台复现**：8 对 subject 的 9 项能力逐格一致——Claude Code 在 `glm-5.2`/`glm-5.1`/`deepseek-v4-pro-0813` 上 `compatible`、`qwen3.8-flash` `partial`；OpenCode 四个全部 `partial`。**其中只有 OpenCode 是纯平台对照**（两侧同为 1.18.29）；Claude Code 两侧分别是 Windows 2.1.233 与 Linux 2.1.261，同时差了一个 Agent 版本，因此那四对不能当作平台单变量的结论；
+- `[fixed]` **Windows 采集暴露了矩阵渲染的身份缺陷**（`79f370f`）：能力表只带 agent、deployment、protocol 三列，而 subject 身份一直包含 platform 和 Agent 版本，于是 Windows 行与 Linux 行渲染成逐字节相同的两行。同批修正：Evidence 列表补全整个 subject（含 integration 及其版本），排序补到 subject 全字段——此前排到 protocol 就停，其余交给证据库遍历顺序，重新生成可能重排没人动过的行；
+- `[fixed]` **`EvidenceSubject.scenarioId` 自 M0 声明至今无人读写**（`3714369`）：Scenario Quality 在 M4 之后引入，届时一条按 Scenario 采的记录会被当作对 Agent 的一般性结论，矩阵也会把两个 Scenario 并成一行。根因是同一条身份规则在仓库里有三份拷贝（verdict 匹配、矩阵、`explain`），加字段只会改到想起来的那一份；现已收敛为 `subjectIdentity` 一处。公开矩阵重新生成后除时间戳外逐字节不变——库里没有任何记录带 Scenario，这正是修它的时机；
+- `[observed]` **一次 `recommend claude-code` 偶发返回 `AGENT_VERSION_UNKNOWN`**，而同一环境下 `detect` 正常报出 2.1.233，其后多次重跑均成功。**原因未查实，不做推断。** 但它暴露的东西是确定的：`installedVersionOf` 用 `catch { return undefined }` 吞掉全部异常，于是「没装」和「这次检测失败了」输出成同一句话，而这两种情况用户要做的事不同。未修；
+- `[method]` 本次 Windows 侧是**从 WSL 调用 Windows 原生 node 跑打包版 CLI**（`process.platform` 为 `win32`，state root 落在 `%LOCALAPPDATA%\Apexnova\connect`）。这不等同于在 Windows 终端里的原生会话，但登录（Windows Credential Manager）、`detect`、目录读取与 `recommend` 全部走的是 Windows 路径。9 月 9 日的采集本身是在原生会话里完成的。
+
+macOS 仍无实机，按 [ADR 0006](decisions/0006-m3-closure.md) 继续挂在未决依赖上，`recommend` 在该平台如实返回无证据。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：
