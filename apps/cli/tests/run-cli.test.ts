@@ -1911,19 +1911,46 @@ describe("CLI", () => {
     expect(output.data.candidates[0].reasons.join(" ")).toContain("does not carry over");
   });
 
-  it("refuses to recommend when the Agent version cannot be read", async () => {
+  it("refuses to recommend for an Agent that is not installed, and says that is why", async () => {
     const { root } = await withEvidence();
     const capture = captureIo();
     const { productVersion: _version, ...withoutVersion } = installed;
 
     const result = await runCli(["recommend", "opencode", "--json"], {
-      // Not installed here, so there is no version to match evidence against.
       ...explainDependencies(root, "2026-09-20T10:00:00.000Z", { ...withoutVersion, status: "not-found" }),
       io: capture.io,
       hubService: mockHub(),
     });
 
     expect(result.exitCode).toBe(EXIT_CODES.unavailable);
-    expect(JSON.parse(capture.stdout()).error.code).toBe("AGENT_VERSION_UNKNOWN");
+    const error = JSON.parse(capture.stdout()).error;
+    expect(error.code).toBe("AGENT_NOT_FOUND");
+    expect(error.message).toContain("was not found in the current environment");
+  });
+
+  it("tells a failed version probe apart from an Agent that is not there", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+    const { productVersion: _version, ...withoutVersion } = installed;
+
+    const result = await runCli(["recommend", "opencode", "--json"], {
+      // Found, but nothing answered the version probe -- the state `detect`
+      // reports as "installed" plus a warning. Reported as "not installed" it
+      // sends the reader to install something that is already there.
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z", {
+        ...withoutVersion,
+        status: "installed",
+        warnings: ["The executable was found but its version command did not complete successfully."],
+      }),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.unavailable);
+    const error = JSON.parse(capture.stdout()).error;
+    expect(error.code).toBe("AGENT_VERSION_UNKNOWN");
+    expect(error.message).toContain("is present but its version could not be read");
+    expect(error.message).toContain("not the same as it being absent");
+    expect(error.message).toContain("version command did not complete successfully");
   });
 });

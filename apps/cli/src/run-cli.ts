@@ -11,6 +11,7 @@ import {
   type AgentInspection,
   type AgentIntegration,
   type ChangePlan,
+  type DetectionResult,
   type DiagnosticCheck,
 } from "@apexnova-connect/integration-sdk";
 import { IntegrationChangeError } from "@apexnova-connect/core";
@@ -866,16 +867,70 @@ function platformTag(dependencies: CliDependencies): string {
 }
 
 /** A probe failure must not stop the command: it only costs the version note. */
+/**
+ * Why a version is or is not in hand. `catch { return undefined }` used to
+ * collapse five different situations into one, and the sentence built from it
+ * said "not installed here, or its version could not be read" -- with the
+ * reader left to guess which. They are not the same problem: an absent product
+ * has to be installed, a version probe that failed has to be retried, and a
+ * product outside the supported range must not be worked around at all.
+ */
+type AgentVersionLookup =
+  | { readonly status: "known"; readonly version: string }
+  | { readonly status: "not-found" }
+  | { readonly status: "unsupported"; readonly reason: string }
+  | { readonly status: "no-version"; readonly detail: string }
+  | { readonly status: "detection-failed"; readonly cause: string };
+
 async function installedVersionOf(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   integration: AgentIntegration,
-): Promise<string | undefined> {
+): Promise<AgentVersionLookup> {
+  let detection: DetectionResult;
   try {
-    const detection = await detectForCommand(parsed, dependencies, integration);
-    return "productVersion" in detection ? detection.productVersion : undefined;
-  } catch {
-    return undefined;
+    detection = await detectForCommand(parsed, dependencies, integration);
+  } catch (error) {
+    return {
+      status: "detection-failed",
+      cause: error instanceof Error ? error.message : "the detection probe failed",
+    };
+  }
+  if (detection.status === "not-found") return { status: "not-found" };
+  if (detection.status === "unsupported") {
+    return { status: "unsupported", reason: detection.unsupportedReason };
+  }
+  if (detection.productVersion !== undefined) {
+    return { status: "known", version: detection.productVersion };
+  }
+  // Found, but nothing answered the version probe. `detect` already says so in
+  // its warnings, so the reason is carried rather than restated.
+  const detail = detection.status === "config-only"
+    ? "only a configuration file was found, so there is no executable to read a version from"
+    : detection.warnings[0] ?? "the version probe returned nothing";
+  return { status: "no-version", detail };
+}
+
+function knownVersion(lookup: AgentVersionLookup): string | undefined {
+  return lookup.status === "known" ? lookup.version : undefined;
+}
+
+/** One sentence naming which of the four it was, for whoever has to act on it. */
+function versionUnavailableReason(lookup: AgentVersionLookup, displayName: string): string {
+  // The pieces this quotes come from a detection warning or an error message,
+  // and those usually end in a full stop of their own.
+  const trimmed = (text: string): string => text.replace(/\s*\.\s*$/, "");
+  switch (lookup.status) {
+    case "known":
+      return "";
+    case "not-found":
+      return `${displayName} was not found in the current environment.`;
+    case "unsupported":
+      return `${displayName} is outside the version range this integration supports: ${trimmed(lookup.reason)}.`;
+    case "no-version":
+      return `${displayName} is present but its version could not be read: ${trimmed(lookup.detail)}. That is not the same as it being absent.`;
+    case "detection-failed":
+      return `Detecting ${displayName} failed: ${trimmed(lookup.cause)}. The product may well be installed; this says the probe did not finish.`;
   }
 }
 
@@ -1409,9 +1464,12 @@ async function executeCompatibilityRefresh(
       continue;
     }
     const integration = registry.resolve(candidate.subject.agentId);
-    const agentVersion = await installedVersionOf(parsed, dependencies, integration);
+    const lookup = await installedVersionOf(parsed, dependencies, integration);
+    const agentVersion = knownVersion(lookup);
     if (agentVersion === undefined) {
-      plan.push({ ...base, skipped: `${integration.manifest.displayName} is not installed here` });
+      // A record that should be re-collected is being skipped, so the reason has
+      // to say whether the fix is to install something or to try again.
+      plan.push({ ...base, skipped: versionUnavailableReason(lookup, integration.manifest.displayName) });
       continue;
     }
     if (!deployment) {
@@ -1610,14 +1668,22 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
     });
   }
 
-  const agentVersion = await installedVersionOf(parsed, dependencies, integration);
+  const lookup = await installedVersionOf(parsed, dependencies, integration);
+  const agentVersion = knownVersion(lookup);
   if (agentVersion === undefined) {
     // Evidence is collected against an Agent version. Recommending without one
-    // would mean picking whichever records happen to be in the store.
+    // would mean picking whichever records happen to be in the store -- but
+    // which of the four reasons stopped us decides what the reader does next,
+    // so each one gets its own code and its own sentence.
     throw new CliError({
-      code: "AGENT_VERSION_UNKNOWN",
-      message: `${integration.manifest.displayName} is not installed here, or its version could not be read. Compatibility evidence is per Agent version, so there is nothing to recommend from.`,
-      exitCode: EXIT_CODES.unavailable,
+      code: lookup.status === "unsupported"
+        ? "PRODUCT_VERSION_UNSUPPORTED"
+        : lookup.status === "not-found"
+          ? "AGENT_NOT_FOUND"
+          : "AGENT_VERSION_UNKNOWN",
+      message: `${versionUnavailableReason(lookup, integration.manifest.displayName)} Compatibility evidence is per Agent version, so there is nothing to recommend from.`,
+      exitCode: lookup.status === "unsupported" ? EXIT_CODES.conflict : EXIT_CODES.unavailable,
+      details: { agentId: integration.manifest.id, detection: lookup.status },
     });
   }
 
@@ -2124,7 +2190,14 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
       ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
       ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
     });
-    const installedVersion = await installedVersionOf(parsed, dependencies, integration);
+    const lookup = await installedVersionOf(parsed, dependencies, integration);
+    const installedVersion = knownVersion(lookup);
+    // `explain` still reports the stored records, but it must not imply they
+    // describe what is installed when it could not find out what is installed.
+    const versionNote = lookup.status === "no-version" || lookup.status === "detection-failed"
+      ? `${versionUnavailableReason(lookup, integration.manifest.displayName)}${records.length === 0 ? "" : " Whether the evidence below applies to it cannot be established."}`
+      : undefined;
+    if (versionNote !== undefined) warnings.push(versionNote);
 
     const subjects = new Map<string, EvidenceSubject>();
     for (const record of records) subjects.set(subjectIdentity(record.subject), record.subject);
@@ -2149,16 +2222,20 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
       agentId: integration.manifest.id,
       displayName: integration.manifest.displayName,
       ...(installedVersion === undefined ? {} : { installedVersion }),
+      ...(versionNote === undefined ? {} : { versionNote }),
       subjects: explained,
     });
   }
 
+  // Human mode prints `human` and nothing else, so a note that only reached
+  // `warnings` would be visible to `--json` and to no one else.
   const human = agents
     .map((agent) => {
+      const note = agent.versionNote === undefined ? [] : [`  Note: ${agent.versionNote}`];
       if (agent.subjects.length === 0) {
-        return `${agent.displayName}: no compatibility evidence has been collected.`;
+        return [`${agent.displayName}: no compatibility evidence has been collected.`, ...note].join("\n");
       }
-      return agent.subjects
+      return [...note, agent.subjects
         .map((entry) => {
           const subject = entry.subject;
           const cited = [
@@ -2183,7 +2260,7 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
               : [`  Note: collected on ${subject.platform}, running on ${runningOn}.`]),
           ].join("\n");
         })
-        .join("\n\n");
+        .join("\n\n")].join("\n");
     })
     .join("\n\n");
 
