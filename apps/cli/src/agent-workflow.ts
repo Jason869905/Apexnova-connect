@@ -145,7 +145,7 @@ export function selectProtocol(
  * when they name exactly one deployment, because guessing which of several the
  * user meant is how a request ends up served by a model they did not pick.
  */
-function selectDeploymentByReference(
+export function selectDeploymentByReference(
   catalog: HubCatalogSnapshot,
   reference: string,
 ): HubCatalogDeployment | undefined {

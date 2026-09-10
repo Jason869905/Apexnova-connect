@@ -87,6 +87,7 @@ import {
   configureAgent,
   connectionIntent,
   detectForCommand,
+  selectDeploymentByReference,
   hubProtocolsFor,
   launchAgent,
   requireAvailable,
@@ -135,6 +136,7 @@ Usage:
   apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
   apexnova compatibility matrix [--agent <id>] [--deployment <id>] [--protocol <id>]
   apexnova recommend <agent> [--scenario <id>] [--deployment <id>] [--max-price <per-1M>]
+                             [--model-allowlist <ref,...>] [--exclude-publisher <name,...>]
   apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
   apexnova inspect <agent> [--config <path>]
@@ -157,6 +159,8 @@ Global options:
   --reason <why>         Why an evidence record is being revoked (required)
   --scenario <id>        Scenario to rank for (default coding-general)
   --max-price <amount>   Blended price ceiling per million tokens for recommend
+  --model-allowlist <refs>  Consider only these deployments (id, alias; comma-separated)
+  --exclude-publisher <names>  Never recommend models from these publishers
   --request-id <id>      Reconcile one request by its Hub request ID
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
@@ -183,6 +187,11 @@ writes that Agent's provider configuration, and launches it. Use --rotating for
 short-lived credentials or --key <id> to bind an existing key for per-tool usage
 tracking. Run "apexnova agents" to list the Agents this build supports.
 `;
+
+/** A repeated-value flag taken as one comma-separated list, empties dropped. */
+function splitList(value: string): readonly string[] {
+  return value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
+}
 
 function valueAfter(args: readonly string[], index: number, option: string): string {
   const value = args[index + 1];
@@ -217,6 +226,8 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let reason: string | undefined;
   let requestIdFilter: string | undefined;
   let scenarioId: string | undefined;
+  let modelAllowlist: readonly string[] | undefined;
+  let excludePublishers: readonly string[] | undefined;
   let maxPrice: string | undefined;
   let dryRun = false;
   let list = false;
@@ -347,6 +358,14 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         requestIdFilter = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--model-allowlist":
+        modelAllowlist = splitList(valueAfter(args, index, arg));
+        index += 1;
+        break;
+      case "--exclude-publisher":
+        excludePublishers = splitList(valueAfter(args, index, arg));
+        index += 1;
+        break;
       case "--scenario":
         scenarioId = valueAfter(args, index, arg);
         index += 1;
@@ -436,6 +455,8 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(reason ? { reason } : {}),
     ...(requestIdFilter ? { requestId: requestIdFilter } : {}),
     ...(scenarioId ? { scenarioId } : {}),
+    ...(modelAllowlist ? { modelAllowlist } : {}),
+    ...(excludePublishers ? { excludePublishers } : {}),
     ...(maxPrice ? { maxPrice } : {}),
     dryRun,
     list,
@@ -1689,9 +1710,15 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
 
   const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
   const protocols = [...hubProtocolsFor(integration)];
+  const publisherOf = new Map(
+    catalog.models.map((model) => [model.id, model.publisherName ?? model.publisher]),
+  );
   const candidates: RecommendationCandidate[] = catalog.deployments.map((deployment) => ({
     deploymentId: deployment.id,
     displayName: deployment.displayName,
+    ...(publisherOf.get(deployment.modelId) === undefined
+      ? {}
+      : { publisher: publisherOf.get(deployment.modelId)! }),
     protocols: deployment.protocols.map((entry) => entry.protocol),
     availability: deployment.availability.status,
     ...(deployment.pricing === undefined
@@ -1712,9 +1739,33 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
   }));
 
   const store = evidenceStore(dependencies);
+  if (parsed.deployment !== undefined && parsed.modelAllowlist !== undefined) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "--deployment and --model-allowlist both narrow the candidate set; pass one of them.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  // References are resolved against the catalog here rather than matched as
+  // strings in the engine: `glm-5.2` is an alias, and an allowlist that silently
+  // matches nothing is the same failure as a price ceiling that excludes nobody.
+  const allowlist = parsed.modelAllowlist?.map((reference) => {
+    const deployment = selectDeploymentByReference(catalog, reference);
+    if (deployment === undefined) {
+      throw new CliError({
+        code: "DEPLOYMENT_NOT_FOUND",
+        message: `The allowlist names ${reference}, which is not in the visible Hub catalog.`,
+        exitCode: EXIT_CODES.unavailable,
+        details: { reference },
+      });
+    }
+    return deployment.id;
+  });
   const constraints = {
     ...(parsed.deployment === undefined ? {} : { deploymentIds: [parsed.deployment] }),
+    ...(allowlist === undefined ? {} : { deploymentIds: allowlist }),
     ...(parsed.maxPrice === undefined ? {} : { maxBlendedPricePerMillion: parsed.maxPrice }),
+    ...(parsed.excludePublishers === undefined ? {} : { excludePublishers: parsed.excludePublishers }),
   };
   const result = recommend({
     scenario: profile,

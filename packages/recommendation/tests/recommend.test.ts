@@ -289,6 +289,65 @@ describe("recommend", () => {
     expect(result.unmeasured.map((entry) => entry.priority)).not.toContain("context");
   });
 
+  it("excludes a publisher the run refuses, and says which", () => {
+    const result = recommend(options({
+      candidates: [
+        candidate("deployment.cheap", { publisher: "Zhipu AI" }),
+        candidate("deployment.other", { publisher: "DeepSeek" }),
+      ],
+      evidence: [evidenceFor("deployment.cheap"), evidenceFor("deployment.other")],
+      constraints: { excludePublishers: ["zhipu ai"] },
+    }));
+
+    const byId = new Map(result.candidates.map((entry) => [entry.deploymentId, entry]));
+    // Matched case-insensitively: nobody should have to guess the catalog's
+    // capitalisation to keep their code away from a publisher.
+    expect(byId.get("deployment.cheap")?.eligible).toBe(false);
+    expect(byId.get("deployment.cheap")?.reasons[0]).toContain("Published by Zhipu AI");
+    expect(byId.get("deployment.other")?.eligible).toBe(true);
+  });
+
+  it("will not pass a deployment whose publisher the catalog does not name", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.cheap", { publisher: undefined })],
+      evidence: [evidenceFor("deployment.cheap")],
+      constraints: { excludePublishers: ["Anthropic"] },
+    }));
+
+    // Same rule as the price ceiling: it cannot be shown not to be the excluded
+    // publisher, and a constraint that lets the unprovable through is not one.
+    expect(result.candidates[0]?.eligible).toBe(false);
+    expect(result.candidates[0]?.reasons[0]).toContain("does not name a publisher");
+  });
+
+  it("leaves an unnamed publisher alone when no publisher was excluded", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.cheap", { publisher: undefined })],
+      evidence: [evidenceFor("deployment.cheap")],
+    }));
+
+    expect(result.candidates[0]?.eligible).toBe(true);
+  });
+
+  it("considers only the deployments an allowlist names", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.cheap"), candidate("deployment.other"), candidate("deployment.third")],
+      evidence: [
+        evidenceFor("deployment.cheap"),
+        evidenceFor("deployment.other"),
+        evidenceFor("deployment.third"),
+      ],
+      constraints: { deploymentIds: ["deployment.cheap", "deployment.third"] },
+    }));
+
+    // Not "ranked lower": the ones outside the list never entered, so they are
+    // absent from the record rather than sitting in it as excluded.
+    expect(result.candidates.map((entry) => entry.deploymentId)).toEqual([
+      "deployment.cheap",
+      "deployment.third",
+    ]);
+  });
+
   it("produces the same bytes twice for the same input", () => {
     const input = options({
       candidates: [candidate("deployment.b"), candidate("deployment.a"), candidate("deployment.c")],

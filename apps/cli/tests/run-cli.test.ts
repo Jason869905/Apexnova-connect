@@ -1874,6 +1874,47 @@ describe("CLI", () => {
     expect(top.reasons.join("\n")).toContain(`windows-${process.arch}`);
   });
 
+  it("resolves an allowlist through the catalog, and refuses a name it does not carry", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    const bad = await runCli(["recommend", "opencode", "--model-allowlist", "deployment.nova,not-a-model"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    // An allowlist that silently matches nothing is the same failure as a price
+    // ceiling that excludes nobody: the constraint was set and did not apply.
+    expect(bad.exitCode).toBe(EXIT_CODES.unavailable);
+
+    const ok = captureIo();
+    const good = await runCli(["recommend", "opencode", "--model-allowlist", "deployment.nova", "--json"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: ok.io,
+      hubService: mockHub(),
+    });
+
+    expect(good.exitCode).toBe(EXIT_CODES.success);
+    const data = JSON.parse(ok.stdout()).data;
+    expect(data.candidates).toHaveLength(1);
+    // The constraints that were applied are recorded on the document, so a
+    // reader can tell a narrow ranking from a narrow catalog.
+    expect(data.constraints).toMatchObject({ deploymentIds: ["deployment.nova"] });
+  });
+
+  it("refuses --deployment and --model-allowlist together rather than guessing", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    const result = await runCli(
+      ["recommend", "opencode", "--deployment", "deployment.nova", "--model-allowlist", "deployment.nova"],
+      { ...explainDependencies(root, "2026-09-20T10:00:00.000Z"), io: capture.io, hubService: mockHub() },
+    );
+
+    expect(result.exitCode).toBe(EXIT_CODES.usage);
+  });
+
   it("says on every run that the ranking only ever saw the Apexnova catalog", async () => {
     const { root } = await withEvidence();
     const capture = captureIo();

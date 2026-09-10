@@ -28,6 +28,12 @@ export interface RecommendationCandidate {
   readonly contextWindow?: number;
   /** The implementation at recommendation time; part of the evidence subject. */
   readonly implementationFingerprint?: string;
+  /**
+   * Who publishes the model, as the catalog names it. Not who operates it: the
+   * public catalog reports one platform Provider for everything, so this
+   * answers "whose model is this" and cannot answer "who sees the request".
+   */
+  readonly publisher?: string;
 }
 
 export interface RecommendOptions {
@@ -52,6 +58,8 @@ export interface RecommendationConstraints {
   readonly deploymentIds?: readonly string[];
   /** Blended price ceiling per million tokens, as a decimal string. */
   readonly maxBlendedPricePerMillion?: string;
+  /** Publishers whose models must not be recommended, matched case-insensitively. */
+  readonly excludePublishers?: readonly string[];
 }
 
 export interface ScoredDimension {
@@ -242,6 +250,9 @@ export function recommend(options: RecommendOptions): RecommendationResult {
   const ceiling = options.constraints?.maxBlendedPricePerMillion === undefined
     ? undefined
     : Number(options.constraints.maxBlendedPricePerMillion);
+  const excluded = new Set(
+    (options.constraints?.excludePublishers ?? []).map((publisher) => publisher.toLowerCase()),
+  );
 
   const assessed: readonly AssessedCandidate[] = considered.map((candidate): AssessedCandidate => {
     const reasons: string[] = [];
@@ -261,6 +272,31 @@ export function recommend(options: RecommendOptions): RecommendationResult {
         reasons: [`The catalog reports the deployment as ${candidate.availability}.`],
         evidenceRefs: [] as readonly string[],
       };
+    }
+    if (excluded.size > 0) {
+      const publisher = candidate.publisher?.toLowerCase();
+      if (publisher === undefined) {
+        // Same rule as the price ceiling and as a required capability: a
+        // deployment whose publisher the catalog does not name cannot be shown
+        // not to be one of the excluded ones, and a constraint that lets the
+        // unprovable through is not a constraint.
+        return {
+          candidate,
+          eligible: false,
+          reasons: [
+            `The catalog does not name a publisher, so this deployment cannot be shown not to be published by ${[...excluded].sort().join(", ")}.`,
+          ],
+          evidenceRefs: [] as readonly string[],
+        };
+      }
+      if (excluded.has(publisher)) {
+        return {
+          candidate,
+          eligible: false,
+          reasons: [`Published by ${candidate.publisher}, which this run excludes.`],
+          evidenceRefs: [] as readonly string[],
+        };
+      }
     }
     const blended = blendedPricePerMillion(candidate.pricing);
     if (ceiling !== undefined && blended === undefined) {
