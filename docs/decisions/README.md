@@ -16,3 +16,4 @@
 - [ADR 0008：非 Apexnova Provider 的候选来源属于 M5](0008-non-apexnova-candidates-belong-to-m5.md)
 - [ADR 0009：Recommendation 记录 Scenario 的 profileVersion（schemaVersion 0.2）](0009-recommendation-schema-carries-the-profile-version.md)
 - [ADR 0010：M4 约束退出条件的逐项状态](0010-m4-constraint-exit-condition-status.md)
+- [ADR 0011：M4 里程碑评审](0011-m4-milestone-review.md)
