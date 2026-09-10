@@ -14,3 +14,4 @@
 - [ADR 0006：M3 收口](0006-m3-closure.md)
 - [ADR 0007：M4 启动的首批 Scenario 与 Recommendation 产出路径](0007-m4-scope-and-recommendation-path.md)
 - [ADR 0008：非 Apexnova Provider 的候选来源属于 M5](0008-non-apexnova-candidates-belong-to-m5.md)
+- [ADR 0009：Recommendation 记录 Scenario 的 profileVersion（schemaVersion 0.2）](0009-recommendation-schema-carries-the-profile-version.md)

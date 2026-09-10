@@ -493,6 +493,8 @@ X-Apexnova-Deployment-Id
 
 `POST /v1/recommendations` 读取 Agent、场景、预算、区域和能力约束，输出候选、排除原因、Evidence、价格版本、置信度和显式商业推广标记。
 
+响应形状按 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 的 **`schemaVersion` 0.2**：该版本新增必填的 `profileVersion`（[ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)）。`scenarioId` 与 `ruleVersion` 不足以区分同一 Scenario 的两个 profile——profile 改版会改变 requirements 与 priorities 顺序，因此两份基于不同要求集的推荐在缺这个字段时是无法区分的文档。该接口尚未开工，所以本次变更不产生迁移成本。
+
 ### H4：显式路由
 
 路由只为尚未发送的新请求选择公共 Deployment。实际响应必须揭示公共 Provider/Model/Deployment，不绕过用户的 Workspace、预算或模型策略。

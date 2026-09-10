@@ -11,6 +11,7 @@ import {
 
 import {
   CODING_GENERAL,
+  RECOMMENDATION_SCHEMA_VERSION,
   RecommendationError,
   recommend,
   recommendationRecord,
@@ -90,6 +91,33 @@ describe("recommendationRecord", () => {
     for (const entry of record.candidates) {
       expect(Object.keys(entry).filter((key) => !allowedCandidate.has(key))).toEqual([]);
     }
+  });
+
+  it("names the Scenario profile that produced it, not just the Scenario", () => {
+    const record = recommendationRecord(recommend(options()));
+
+    expect(record).toMatchObject({
+      schemaVersion: RECOMMENDATION_SCHEMA_VERSION,
+      scenarioId: "coding-general",
+      profileVersion: CODING_GENERAL.profileVersion,
+    });
+
+    // Two profiles of one Scenario require different capabilities and order the
+    // priorities differently. Without this field both documents say
+    // "coding-general, coding.v1" and nothing distinguishes the requirement sets
+    // they rest on -- the same identity gap the evidence subject already closed.
+    const revised = recommendationRecord(
+      recommend(options({ scenario: { ...CODING_GENERAL, profileVersion: "2.0.0" } })),
+    );
+    expect(revised.profileVersion).toBe("2.0.0");
+    expect(revised.id).not.toBe(record.id);
+  });
+
+  it("refuses a record with no profile version, now that the schema requires one", () => {
+    const record = recommendationRecord(recommend(options()));
+    const { profileVersion: _dropped, ...without } = record;
+
+    expect(validateRecommendation(without)).toMatchObject({ valid: false });
   });
 
   it("carries the platform and each dimension's numbers into reasons", () => {

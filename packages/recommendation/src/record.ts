@@ -26,11 +26,19 @@ export interface RecommendationRecordCandidate {
   readonly sponsored: boolean;
 }
 
+/**
+ * Bumped from 0.1 when `profileVersion` became required. A document that must
+ * name the profile behind it is not the same contract as one that need not, and
+ * this field is how a reader tells which one they are holding.
+ */
+export const RECOMMENDATION_SCHEMA_VERSION = "0.2";
+
 export interface RecommendationRecord {
   readonly schemaVersion: string;
   readonly id: string;
   readonly agentId: string;
   readonly scenarioId: string;
+  readonly profileVersion: string;
   readonly catalogVersion: string;
   readonly ruleVersion: string;
   readonly constraints?: Readonly<Record<string, unknown>>;
@@ -150,9 +158,10 @@ export function recommendationRecord(
   }
 
   const withoutId = {
-    schemaVersion: "0.1",
+    schemaVersion: RECOMMENDATION_SCHEMA_VERSION,
     agentId: result.agentId,
     scenarioId: result.scenarioId,
+    profileVersion: result.profileVersion,
     catalogVersion: result.catalogVersion,
     ruleVersion: result.ruleVersion,
     ...(constraints === undefined || Object.keys(constraints).length === 0

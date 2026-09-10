@@ -27,6 +27,7 @@ export type {
 } from "./recommend.js";
 
 export {
+  RECOMMENDATION_SCHEMA_VERSION,
   assertRecommendation,
   recommendationRecord,
   validateRecommendation,

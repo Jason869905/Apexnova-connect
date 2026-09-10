@@ -394,7 +394,7 @@ apexnova recommend opencode --deployment <id>          # 只看某一个
 - 每个候选列出各分项的分数、权重、依据文字与所引用的 Evidence ID；`sponsored` 恒为 `false` 且不是打分输入；
 - **候选只来自 Apexnova 目录，并且每次运行都写在输出里**：目录之外的 Provider 不是「排得靠后」，而是根本没有参与。第二候选来源按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 属于 M5——它真正缺的不是一份候选列表，而是一条不经 Hub 签发凭据、不经 Hub 计费的证据采集路径。
 
-输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`；排序确定（同分按 deploymentId 字典序），同一输入两次运行逐字节相同。
+输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`（后者自 schema `0.2` 起必填，见 [ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)：同一 Scenario 的两个 profile 要求的能力与优先级顺序不同，缺了它两份文档无法区分）；排序确定（同分按 deploymentId 字典序），同一输入两次运行逐字节相同。
 
 `--json` 的 `data` **就是 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 冻结的那个对象**，由 `recommendationRecord()` 产出并在返回前用 ajv 校验，校验不过就报错而不是发出去。两处后果需要知道：
 

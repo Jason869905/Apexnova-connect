@@ -3,12 +3,18 @@
   "$id": "https://schemas.apexnova.dev/connect/recommendation.schema.json",
   "title": "Model Deployment Recommendation",
   "type": "object",
-  "required": ["schemaVersion", "id", "agentId", "scenarioId", "catalogVersion", "ruleVersion", "candidates", "createdAt", "expiresAt"],
+  "required": ["schemaVersion", "id", "agentId", "scenarioId", "profileVersion", "catalogVersion", "ruleVersion", "candidates", "createdAt", "expiresAt"],
   "properties": {
     "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
     "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
     "agentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
     "scenarioId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "profileVersion": {
+      "description": "The version of the Scenario profile that produced this ranking. Required because `scenarioId` and `ruleVersion` do not distinguish two profiles of the same Scenario: a profile revision changes the required capabilities and the priority order, so two rankings resting on different requirement sets would otherwise be indistinguishable documents. Added in schemaVersion 0.2.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
     "catalogVersion": { "type": "string", "minLength": 1, "maxLength": 160 },
     "ruleVersion": { "type": "string", "minLength": 1, "maxLength": 160 },
     "constraints": { "type": "object" },

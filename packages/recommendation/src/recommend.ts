@@ -81,6 +81,8 @@ export interface RecommendationResult {
   readonly id: string;
   readonly agentId: string;
   readonly scenarioId: string;
+  /** Which revision of that Scenario ranked this, since a revision changes what is required. */
+  readonly profileVersion: string;
   readonly catalogVersion: string;
   readonly ruleVersion: string;
   readonly platform: string;
@@ -424,6 +426,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     id: options.scenario.id,
     agentId: options.agentId,
     scenarioId: options.scenario.id,
+    profileVersion: options.scenario.profileVersion,
     catalogVersion: options.catalogVersion,
     ruleVersion: options.scenario.scoringRuleVersion,
     platform: options.platform,
