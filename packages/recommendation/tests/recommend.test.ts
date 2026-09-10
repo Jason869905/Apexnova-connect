@@ -254,6 +254,39 @@ describe("recommend", () => {
     expect(JSON.stringify(result.candidates[0]?.dimensions)).not.toContain("sponsor");
   });
 
+  it("names every priority nothing measures, instead of leaving it off the list", () => {
+    const result = recommend(options());
+
+    // Dropping them from `priorities` scored them at zero without saying so,
+    // which reads as "this Scenario does not care" rather than "nobody measured
+    // it" -- the same substitution ADR 0007 refused when it refused a default
+    // score. availability is here too: it filters candidates and scores none.
+    expect(result.unmeasured.map((entry) => entry.priority)).toEqual([
+      "availability",
+      "latency",
+      "quality",
+      "privacy",
+    ]);
+    expect(result.unmeasured.every((entry) => entry.why.length > 0)).toBe(true);
+  });
+
+  it("gives an unmeasured priority no weight, so naming it cannot move the ranking", () => {
+    const scoredOnly = { ...CODING_GENERAL, priorities: ["compatibility", "cost", "context"] as const };
+
+    const withUnmeasured = recommend(options());
+    const withoutThem = recommend(
+      options({ scenario: { ...scoredOnly, priorities: [...scoredOnly.priorities] } }),
+    );
+
+    // `weightsFor` drops what nothing measures before it computes any weight, so
+    // the two rankings have to agree on every number. If they ever stop
+    // agreeing, naming a priority has started diluting the ones that are real.
+    expect(withUnmeasured.candidates.map((entry) => entry.score)).toEqual(
+      withoutThem.candidates.map((entry) => entry.score),
+    );
+    expect(withUnmeasured.candidates[0]?.dimensions).toEqual(withoutThem.candidates[0]?.dimensions);
+  });
+
   it("only asks for capabilities the registry defines", () => {
     expect(() => assertScenarioIsSatisfiable(CODING_GENERAL)).not.toThrow();
     expect(() =>

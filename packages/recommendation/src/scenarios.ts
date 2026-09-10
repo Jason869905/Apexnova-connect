@@ -80,7 +80,28 @@ export const CODING_GENERAL: ScenarioProfile = {
   ],
   // Compatibility first on purpose: a cheaper deployment that cannot call
   // tools is not a cheaper way to do this job, it is a different job.
-  priorities: ["compatibility", "cost", "context"],
+  //
+  // The list is everything this Scenario cares about, not the subset something
+  // can score today. `weightsFor` drops the ones nothing measures before it
+  // computes any weight, so naming them here costs no weight and buys the thing
+  // ADR 0007 asked for: the Recommendation says out loud that quality, latency
+  // and privacy went unmeasured, and that availability filtered candidates
+  // without scoring them. Leaving them out scored them at zero silently, which
+  // reads as "this Scenario does not care" rather than "nobody measured it".
+  //
+  // Their position after the scored three is not yet a ranking and must not be
+  // read as one -- it carries no weight while they stay unmeasured. Where each
+  // belongs in the order is decided when it becomes measurable, and that is a
+  // `profileVersion` change, not an edit.
+  priorities: [
+    "compatibility",
+    "cost",
+    "context",
+    "availability",
+    "latency",
+    "quality",
+    "privacy",
+  ],
   applicability: "Text-generation deployments reachable over a protocol the Agent speaks.",
   scoringRuleVersion: SCORING_RULE_VERSION,
 };

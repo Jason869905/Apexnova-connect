@@ -389,7 +389,7 @@ apexnova recommend opencode --deployment <id>          # 只看某一个
 
 - **硬约束是过滤不是扣分**：required 能力实测失败、或没有当前平台的实时证据，该 Deployment 直接 `eligible: false` 并给出排除理由，不参与排序。总分不得掩盖必需能力的失败；
 - **平台是证据 subject 的一部分**：Linux 上的结论不适用于 Windows。当前平台没有证据时，命令**如实报「无证据」并提示去采集**，而不是借用别处的结论；
-- **没有度量来源的分项不参与排序**，并在输出里逐条说明原因（`quality` 缺 Scenario Quality Pack、`latency` 缺 Operational Evidence、`privacy` 因目录只给不可逆指纹而无法区分）。**不给默认分**——默认分等于让「没测过」以「中等」的身份进入排序；
+- **没有度量来源的分项照样列在 Scenario 的 `priorities` 里**，并在每次输出里逐条说明原因（`quality` 缺 Scenario Quality Pack、`latency` 缺 Operational Evidence、`privacy` 因目录只给不可逆指纹而无法区分、`availability` 是 Hub 声明因而只过滤不计分）。权重在计算前就把它们剔除，**因此列出它们不会稀释任何被计分项的权重**；把它们从列表里删掉才是问题——那等于静默给零分，读起来像「这个 Scenario 不在乎」而不是「没人测过」。**同样不给默认分**——默认分等于让「没测过」以「中等」的身份进入排序；
 - **某个分项在本轮所有候选上都没有数据时整项丢弃**并说明（例如目录当前对所有 Deployment 都发布 `0` 价格），而不是给所有人打零分却仍占权重；
 - 每个候选列出各分项的分数、权重、依据文字与所引用的 Evidence ID；`sponsored` 恒为 `false` 且不是打分输入；
 - **候选只来自 Apexnova 目录，并且每次运行都写在输出里**：目录之外的 Provider 不是「排得靠后」，而是根本没有参与。第二候选来源按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 属于 M5——它真正缺的不是一份候选列表，而是一条不经 Hub 签发凭据、不经 Hub 计费的证据采集路径。
