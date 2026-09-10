@@ -25,3 +25,17 @@ export type {
   RecommendationResult,
   ScoredDimension,
 } from "./recommend.js";
+
+export {
+  assertRecommendation,
+  recommendationRecord,
+  validateRecommendation,
+  RecommendationError,
+} from "./record.js";
+
+export type {
+  RecommendationRecord,
+  RecommendationRecordCandidate,
+  RecommendationValidationIssue,
+  RecommendationValidationResult,
+} from "./record.js";

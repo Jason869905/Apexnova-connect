@@ -90,6 +90,14 @@ export interface RecommendationResult {
   readonly candidates: readonly RecommendationCandidateResult[];
   readonly summary: string;
   readonly createdAt: string;
+  /**
+   * When the ranking stops standing. It rests on the evidence it cites, so it
+   * expires with the first of those records -- the same rule `createEvidence`
+   * uses on its own statements. A ranking that cites nothing has nothing to
+   * outlive, so it expires where it was created rather than claiming a window
+   * it cannot support.
+   */
+  readonly expiresAt: string;
 }
 
 function clamp01(value: number): number {
@@ -424,5 +432,18 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     candidates,
     summary,
     createdAt: options.now.toISOString(),
+    expiresAt: earliestExpiry(options.evidence, candidates) ?? options.now.toISOString(),
   };
+}
+
+function earliestExpiry(
+  evidence: readonly CompatibilityEvidence[],
+  candidates: readonly RecommendationCandidateResult[],
+): string | undefined {
+  const cited = new Set(candidates.flatMap((candidate) => candidate.evidenceRefs));
+  const expiries = evidence
+    .filter((record) => cited.has(record.id))
+    .map((record) => record.expiresAt)
+    .sort();
+  return expiries[0];
 }

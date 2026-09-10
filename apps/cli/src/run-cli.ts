@@ -48,6 +48,7 @@ import {
 import {
   CODING_GENERAL,
   recommend,
+  recommendationRecord,
   scenario as scenarioProfile,
   type RecommendationCandidate,
 } from "@apexnova-connect/recommendation";
@@ -1645,6 +1646,10 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
   }));
 
   const store = evidenceStore(dependencies);
+  const constraints = {
+    ...(parsed.deployment === undefined ? {} : { deploymentIds: [parsed.deployment] }),
+    ...(parsed.maxPrice === undefined ? {} : { maxBlendedPricePerMillion: parsed.maxPrice }),
+  };
   const result = recommend({
     scenario: profile,
     agentId: integration.manifest.id,
@@ -1657,10 +1662,7 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
     candidates,
     evidence: await store.list({ agentId: integration.manifest.id }),
     now: new Date(currentTime(dependencies)),
-    constraints: {
-      ...(parsed.deployment === undefined ? {} : { deploymentIds: [parsed.deployment] }),
-      ...(parsed.maxPrice === undefined ? {} : { maxBlendedPricePerMillion: parsed.maxPrice }),
-    },
+    constraints,
   });
 
   const eligible = result.candidates.filter((candidate) => candidate.eligible);
@@ -1702,7 +1704,14 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
       : ["", "Excluded:", ...excluded.map((candidate) => `  ${candidate.displayName} — ${candidate.reasons[0] ?? "no reason recorded"}`)]),
   ].join("\n");
 
-  return { data: result, warnings: warnings as readonly string[], human };
+  // `data` is the Recommendation itself, so it is the shape
+  // `recommendation.schema.json` freezes rather than whatever the renderer
+  // found convenient. The wider view stays in `human`, which no contract binds.
+  return {
+    data: recommendationRecord(result, constraints),
+    warnings: warnings as readonly string[],
+    human,
+  };
 }
 
 /**

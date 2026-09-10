@@ -396,6 +396,13 @@ apexnova recommend opencode --deployment <id>          # 只看某一个
 
 输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`；排序确定（同分按 deploymentId 字典序），同一输入两次运行逐字节相同。
 
+`--json` 的 `data` **就是 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 冻结的那个对象**，由 `recommendationRecord()` 产出并在返回前用 ajv 校验，校验不过就报错而不是发出去。两处后果需要知道：
+
+- schema 的两个对象都是 `additionalProperties: false`，因此**平台、候选显示名、分项的分数与权重没有各自的字段**，它们写进 `reasons` 的文本里（ADR 0007 决策 3 指定的就是这个字段）。人读的输出不受此限，仍然分列显示；
+- `candidates` 是 `minItems: 1`。什么都没纳入考虑时（例如 `--deployment` 指向目录里没有的 id）**不产出记录而是报错**——空推荐等于宣称一个没人做过的选择。
+
+`id` 形如 `rec.sha256.<64 hex>`，是对记录内容的哈希，与 Evidence 同一套办法：同一份排行算两次是同一份文档。`expiresAt` 取所引用 Evidence 里最早的那个到期时间；一条 Evidence 都没引用时取 `createdAt`，因为它没有任何可以凭借的东西。
+
 M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、`--model-allowlist`、`--verified-only`，**首批都未实现**：优先级由 Scenario 的 `priorities` 顺序决定而不是命令行覆盖；区域与 Provider 在只有一个公共 Provider、且目录只给不可逆指纹的前提下无从区分；`--verified-only` 没有意义，因为没有实测证据的 Deployment 本来就不会被推荐。这些在第二个 Scenario 或第二个候选来源出现时再重新评估。
 
 ### `apexnova doctor [agent]`

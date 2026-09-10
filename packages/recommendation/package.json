@@ -13,12 +13,15 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@apexnova-connect/capabilities": "workspace:*",
-    "@apexnova-connect/schemas": "workspace:*"
+    "@apexnova-connect/schemas": "workspace:*",
+    "ajv": "8.20.0"
   }
 }

@@ -18,6 +18,7 @@ import {
   type CapabilitySupport,
   type EvidenceSubject,
 } from "@apexnova-connect/capabilities";
+import { validateRecommendation } from "@apexnova-connect/recommendation";
 import {
   openCodeIntegration,
   resolveOpenCodeExecutable,
@@ -1852,15 +1853,25 @@ describe("CLI", () => {
     expect(output.data).toMatchObject({
       scenarioId: "coding-general",
       ruleVersion: "coding.v1",
-      platform: `windows-${process.arch}`,
       catalogVersion: "cat_1",
     });
+    // What goes out is the Recommendation the schema freezes, not the renderer's
+    // convenience shape: it validates, it is content-addressed, and it carries
+    // the `expiresAt` the schema has always required.
+    expect(validateRecommendation(output.data)).toMatchObject({ valid: true });
+    expect(output.data.id).toMatch(/^rec\.sha256\.[0-9a-f]{64}$/);
+    expect(output.data.expiresAt).toBe(record.expiresAt);
+    expect(output.data.platform).toBeUndefined();
+
     const top = output.data.candidates[0];
     expect(top).toMatchObject({ deploymentId: "deployment.nova", rank: 1, eligible: true, sponsored: false });
     expect(top.evidenceRefs).toContain(record.id);
-    // The number that produced the ranking is on the page beside the ranking.
-    expect(top.dimensions.map((entry: { priority: string }) => entry.priority)).toContain("compatibility");
-    expect(top.dimensions[0].detail).toContain("preferred capabilities supported");
+    // The schema has no field for a dimension's score and weight, so they are
+    // written into `reasons` rather than dropped -- the numbers that produced
+    // the ranking stay beside the ranking either way.
+    expect(top.reasons.join("\n")).toContain("compatibility scored 0.67 at weight 0.67");
+    expect(top.reasons.join("\n")).toContain("preferred capabilities supported");
+    expect(top.reasons.join("\n")).toContain(`windows-${process.arch}`);
   });
 
   it("says on every run that the ranking only ever saw the Apexnova catalog", async () => {

@@ -1,0 +1,160 @@
+import { describe, expect, it } from "vitest";
+
+import recommendationSchema from "@apexnova-connect/schemas/recommendation" with { type: "json" };
+import {
+  CAPABILITY_DEFINITIONS,
+  createEvidence,
+  type CapabilitySupport,
+  type CompatibilityEvidence,
+  type EvidenceSubject,
+} from "@apexnova-connect/capabilities";
+
+import {
+  CODING_GENERAL,
+  RecommendationError,
+  recommend,
+  recommendationRecord,
+  validateRecommendation,
+  type RecommendOptions,
+  type RecommendationCandidate,
+} from "../src/index.js";
+
+const NOW = new Date("2026-09-20T10:00:00.000Z");
+const OBSERVED_AT = "2026-09-15T10:00:00.000Z";
+
+const subject: EvidenceSubject = {
+  agentId: "opencode",
+  agentVersion: "1.18.29",
+  integrationId: "opencode",
+  integrationVersion: "0.1.0",
+  deploymentId: "deployment.cheap",
+  protocol: "openai-responses",
+  platform: "linux-x64",
+};
+
+function evidenceFor(
+  deploymentId: string,
+  overrides: Readonly<Record<string, CapabilitySupport>> = {},
+): CompatibilityEvidence {
+  return createEvidence({
+    sourceType: "maintainer-test",
+    subject: { ...subject, deploymentId },
+    observedAt: OBSERVED_AT,
+    outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({
+      capabilityId: definition.id,
+      support: overrides[definition.id] ?? "supported",
+    })),
+  });
+}
+
+function candidate(deploymentId: string): RecommendationCandidate {
+  return {
+    deploymentId,
+    displayName: deploymentId,
+    protocols: ["openai-responses"],
+    availability: "available",
+    pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "0.6", output: "2.2" },
+    contextWindow: 128_000,
+  };
+}
+
+function options(overrides: Partial<RecommendOptions> = {}): RecommendOptions {
+  return {
+    scenario: CODING_GENERAL,
+    agentId: "opencode",
+    agentVersion: "1.18.29",
+    integrationId: "opencode",
+    integrationVersion: "0.1.0",
+    platform: "linux-x64",
+    agentProtocols: ["openai-responses"],
+    catalogVersion: "cat_1",
+    candidates: [candidate("deployment.cheap")],
+    evidence: [evidenceFor("deployment.cheap")],
+    now: NOW,
+    ...overrides,
+  };
+}
+
+describe("recommendationRecord", () => {
+  it("emits exactly the fields the frozen schema allows, and no others", () => {
+    const record = recommendationRecord(recommend(options()));
+
+    expect(validateRecommendation(record)).toMatchObject({ valid: true });
+    // The drift this replaces was silent because nothing compared the two. The
+    // published object is checked against the schema's own property list, so a
+    // field invented in code fails here rather than in whatever reads it.
+    const allowed = new Set(Object.keys(recommendationSchema.properties));
+    expect(Object.keys(record).filter((key) => !allowed.has(key))).toEqual([]);
+    const candidateProperties = recommendationSchema.properties.candidates.items.properties;
+    const allowedCandidate = new Set(Object.keys(candidateProperties));
+    for (const entry of record.candidates) {
+      expect(Object.keys(entry).filter((key) => !allowedCandidate.has(key))).toEqual([]);
+    }
+  });
+
+  it("carries the platform and each dimension's numbers into reasons", () => {
+    const record = recommendationRecord(recommend(options()));
+
+    const reasons = record.candidates[0]!.reasons.join("\n");
+    // The schema has no field for either, and dropping them would leave a rank
+    // with nothing behind it.
+    expect(reasons).toContain("linux-x64");
+    expect(reasons).toContain("compatibility scored 1.00 at weight");
+  });
+
+  it("carries an unmeasured priority into reasons rather than losing it", () => {
+    const scenario = { ...CODING_GENERAL, priorities: ["compatibility", "quality", "cost"] as const };
+    const result = recommend(options({ scenario: { ...scenario, priorities: [...scenario.priorities] } }));
+
+    expect(result.unmeasured.map((entry) => entry.priority)).toContain("quality");
+    // Top-level `unmeasured` has nowhere to live under the frozen schema, so it
+    // reaches the reader through the field ADR 0007 named: `reasons`.
+    const record = recommendationRecord(result);
+    expect(record.candidates[0]!.reasons.join("\n")).toContain("Not measured — quality");
+  });
+
+  it("expires with the first evidence it rests on", () => {
+    const evidence = evidenceFor("deployment.cheap");
+    const record = recommendationRecord(recommend(options({ evidence: [evidence] })));
+
+    expect(record.expiresAt).toBe(evidence.expiresAt);
+  });
+
+  it("expires where it was created when it rests on nothing", () => {
+    // No evidence, so every candidate is ineligible and nothing is cited. A
+    // window it cannot support would be a claim about records that do not exist.
+    const record = recommendationRecord(recommend(options({ evidence: [] })));
+
+    expect(record.expiresAt).toBe(record.createdAt);
+    expect(record.candidates.every((entry) => !entry.eligible)).toBe(true);
+  });
+
+  it("gives the same ranking the same id, and a changed one a different id", () => {
+    const first = recommendationRecord(recommend(options()));
+    const second = recommendationRecord(recommend(options()));
+
+    expect(first.id).toMatch(/^rec\.sha256\.[0-9a-f]{64}$/);
+    expect(second.id).toBe(first.id);
+
+    const changed = recommendationRecord(recommend(options({ catalogVersion: "cat_2" })));
+    expect(changed.id).not.toBe(first.id);
+  });
+
+  it("records the constraints that were applied", () => {
+    const constraints = { maxBlendedPricePerMillion: "5.0" };
+    const record = recommendationRecord(recommend(options({ constraints })), constraints);
+
+    expect(record.constraints).toEqual(constraints);
+    expect(validateRecommendation(record)).toMatchObject({ valid: true });
+  });
+
+  it("refuses to publish a recommendation that considered nothing", () => {
+    // `candidates` is minItems: 1. An empty ranking cannot be expressed, and
+    // inventing one would assert a choice nobody made.
+    const empty = recommend(options({ candidates: [] }));
+
+    expect(empty.candidates).toEqual([]);
+    expect(() => recommendationRecord(empty)).toThrowError(RecommendationError);
+    expect(() => recommendationRecord(empty)).toThrowError(/considered nothing|no recommendation to record/i);
+  });
+});
