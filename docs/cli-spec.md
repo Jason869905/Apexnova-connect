@@ -411,7 +411,7 @@ M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、
 - `--model-allowlist`：`RecommendationConstraints.deploymentIds` 本来就是数组，缺的是命令行入口而不是能力（今天只暴露单个 `--deployment`）；
 - `--verified-only`：没有意义，因为没有实测证据的 Deployment 本来就不会被推荐。
 
-**`--max-price` 今天静默无效**：过滤只对有价格的候选生效，而目录当前对全部 Deployment 发布 `pricing: 0`（需求 12H），被按规则读作「没有价格」，因此每个候选都从上限旁边绕过去了。这是缺陷而不是未实现，处置见 ADR 0010 决策 2。
+**`--max-price` 对价格未知的 Deployment 判为不通过**（ADR 0010 决策 2）：约束的语义是「证明得了才通过」，与 required 能力 `unknown` 不算通过是同一条规则。目录当前对全部 Deployment 发布 `pricing: 0`（需求 12H）并被读作「没有价格」，因此**只要设了 `--max-price`，当前本轮就没有候选**——这是 12H 的实际影响，不是过滤器坏了。零候选时输出会报出最大的一组排除理由及其计数。
 
 ### `apexnova doctor [agent]`
 

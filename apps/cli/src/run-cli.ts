@@ -1755,7 +1755,9 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
     "Candidates come from the Apexnova catalog only. A Provider outside it is not ranked lower here; it is not considered at all.",
     ...result.unmeasured.map((entry) => `Not measured — ${entry.priority}: ${entry.why}`),
     "",
-    ...(eligible.length === 0 ? ["No deployment has live evidence for every required capability."] : []),
+    // The summary names what actually excluded them; asserting a cause here as
+    // well is how the ceiling case came to be reported as an evidence problem.
+    ...(eligible.length === 0 ? [result.summary] : []),
     ...eligible.flatMap((candidate) => [
       `${candidate.rank}. ${candidate.displayName}  score ${candidate.score?.toFixed(3)}  confidence ${candidate.confidence?.toFixed(2)}  ${candidate.protocol}`,
       `     ${candidate.deploymentId}`,

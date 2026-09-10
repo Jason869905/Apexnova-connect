@@ -230,6 +230,65 @@ describe("recommend", () => {
     expect(result.candidates[0]?.reasons[0]).toContain("above the 1 ceiling");
   });
 
+  it("refuses to count an unpriced deployment as inside a price ceiling", () => {
+    // The catalog publishes zero for every deployment (12H), which `recommend`
+    // reads as no price. Letting those through made `--max-price` match
+    // everything while reading as "filtered to your budget": the ceiling had no
+    // effect and nothing said so. Required capabilities already work this way --
+    // unknown is not a pass -- and a budget is no different.
+    const result = recommend(options({
+      candidates: [candidate("deployment.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("deployment.unpriced")],
+      constraints: { maxBlendedPricePerMillion: "1" },
+    }));
+
+    expect(result.candidates[0]?.eligible).toBe(false);
+    expect(result.candidates[0]?.reasons[0]).toContain("no usable price");
+    expect(result.candidates[0]?.reasons[0]).toContain("Unknown is not within budget");
+  });
+
+  it("leaves an unpriced deployment alone when no ceiling was asked for", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("deployment.unpriced")],
+    }));
+
+    // Nothing was claimed about price, so nothing has to be proven about it.
+    expect(result.candidates[0]?.eligible).toBe(true);
+    expect(result.unmeasured.map((entry) => entry.priority)).toContain("cost");
+  });
+
+  it("names what actually excluded everything, rather than one fixed cause", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("deployment.unpriced")],
+      constraints: { maxBlendedPricePerMillion: "1" },
+    }));
+
+    // The summary used to say "none with live evidence for every required
+    // capability" however they were excluded, so a ceiling that removed
+    // everything was reported as an evidence problem.
+    expect(result.summary).toContain("none eligible");
+    expect(result.summary).toContain("no usable price");
+    expect(result.summary).not.toContain("live evidence");
+  });
+
+  it("does not call a dimension unmeasured on the strength of an empty set", () => {
+    const result = recommend(options({
+      candidates: [candidate("deployment.priced")],
+      evidence: [evidenceFor("deployment.priced")],
+      constraints: { maxBlendedPricePerMillion: "0.0001" },
+    }));
+
+    expect(result.candidates.every((entry) => !entry.eligible)).toBe(true);
+    // Nothing eligible means no set to look in. "No eligible deployment has a
+    // price" is vacuously true and would report every runtime dimension as
+    // unmeasured; what happened is that nothing got that far, and the exclusion
+    // reasons are where that belongs.
+    expect(result.unmeasured.map((entry) => entry.priority)).not.toContain("cost");
+    expect(result.unmeasured.map((entry) => entry.priority)).not.toContain("context");
+  });
+
   it("produces the same bytes twice for the same input", () => {
     const input = options({
       candidates: [candidate("deployment.b"), candidate("deployment.a"), candidate("deployment.c")],

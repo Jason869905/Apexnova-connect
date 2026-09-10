@@ -263,6 +263,21 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       };
     }
     const blended = blendedPricePerMillion(candidate.pricing);
+    if (ceiling !== undefined && blended === undefined) {
+      // A ceiling asks to be shown the deployment fits in it, and a deployment
+      // the catalog prices at nothing shows no such thing. Letting it through
+      // made `--max-price` silently match everything while reading as "filtered
+      // to your budget" -- the same rule required capabilities already follow:
+      // unknown is not a pass.
+      return {
+        candidate,
+        eligible: false,
+        reasons: [
+          `The catalog publishes no usable price, so this deployment cannot be shown to be within the ${ceiling} ceiling. Unknown is not within budget.`,
+        ],
+        evidenceRefs: [] as readonly string[],
+      };
+    }
     if (ceiling !== undefined && blended !== undefined && blended > ceiling) {
       return {
         candidate,
@@ -325,16 +340,21 @@ export function recommend(options: RecommendOptions): RecommendationResult {
   // candidate zero would keep the weight while carrying no information; scoring
   // them all one would rank on a number the bill contradicts.
   const eligibleEntries = assessed.filter((entry) => entry.eligible);
+  // With nothing eligible there is no set to look in, and "no eligible
+  // deployment has a price" would report every dimension as unmeasured on the
+  // strength of an empty set. Nothing was measured because nothing got that
+  // far, which is a different statement and belongs to the exclusion reasons.
+  const anyEligible = eligibleEntries.length > 0;
   const unavailable = new Set<ScenarioPriority>();
   const runtimeUnmeasured: { readonly priority: string; readonly why: string }[] = [];
-  if (!eligibleEntries.some((entry) => blendedPricePerMillion(entry.candidate.pricing) !== undefined)) {
+  if (anyEligible && !eligibleEntries.some((entry) => blendedPricePerMillion(entry.candidate.pricing) !== undefined)) {
     unavailable.add("cost");
     runtimeUnmeasured.push({
       priority: "cost",
       why: "the catalog publishes no usable price for any eligible deployment; ranking on a published zero would contradict what the estimate and the bill say",
     });
   }
-  if (!eligibleEntries.some((entry) => entry.candidate.contextWindow !== undefined)) {
+  if (anyEligible && !eligibleEntries.some((entry) => entry.candidate.contextWindow !== undefined)) {
     unavailable.add("context");
     runtimeUnmeasured.push({
       priority: "context",
@@ -418,7 +438,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
 
   const eligible = candidates.filter((candidate) => candidate.eligible);
   const summary = eligible.length === 0
-    ? `No deployment can be recommended for ${options.scenario.id} on ${options.platform}: ${candidates.length} considered, none with live evidence for every required capability.`
+    ? `No deployment can be recommended for ${options.scenario.id} on ${options.platform}: ${candidates.length} considered, none eligible.${commonestExclusion(candidates)}`
     : `${eligible[0]!.displayName} ranks first for ${options.scenario.id} on ${options.platform}, from ${eligible.length} eligible of ${candidates.length} considered.`;
 
   return {
@@ -437,6 +457,27 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     createdAt: options.now.toISOString(),
     expiresAt: earliestExpiry(options.evidence, candidates) ?? options.now.toISOString(),
   };
+}
+
+/**
+ * Naming one cause was wrong as soon as there was more than one: the summary
+ * said "none with live evidence" however they were excluded, so a price ceiling
+ * that removed everything was reported as an evidence problem. The reasons are
+ * templated, so the identical ones group, and the largest group is named with
+ * its count rather than presented as the only cause.
+ */
+function commonestExclusion(candidates: readonly RecommendationCandidateResult[]): string {
+  const counts = new Map<string, number>();
+  for (const candidate of candidates) {
+    const reason = candidate.reasons[0];
+    if (reason !== undefined) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  const ranked = [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+  const top = ranked[0];
+  if (top === undefined) return "";
+  return counts.size === 1
+    ? ` Every one: ${top[0]}`
+    : ` Most common (${top[1]} of ${candidates.length}): ${top[0]}`;
 }
 
 function earliestExpiry(
