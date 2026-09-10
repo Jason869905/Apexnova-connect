@@ -1680,6 +1680,11 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
   const human = [
     `${integration.manifest.displayName} ${agentVersion} · ${profile.id} ${profile.profileVersion} · ${result.platform} · rule ${result.ruleVersion}`,
     `Catalog ${result.catalogVersion}; ${eligible.length} eligible of ${result.candidates.length} considered.`,
+    // A ranking of four Apexnova deployments reads as "the best four there are"
+    // unless the boundary is on the page. ADR 0008 moved the second candidate
+    // source to M5; until it lands, the scope is stated on every run rather
+    // than left in a document.
+    "Candidates come from the Apexnova catalog only. A Provider outside it is not ranked lower here; it is not considered at all.",
     ...result.unmeasured.map((entry) => `Not measured — ${entry.priority}: ${entry.why}`),
     "",
     ...(eligible.length === 0 ? ["No deployment has live evidence for every required capability."] : []),

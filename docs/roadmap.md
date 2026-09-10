@@ -158,7 +158,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.4`。
 
-当前状态：进行中（首批范围见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)）。首批收窄为**一个 Scenario**（`coding-general` v1），候选只来自 Apexnova 目录，推荐在本地计算、Hub 托管 API 推迟。三个分项今天没有证据来源——`latency`（需要 Operational Evidence）、`quality`（需要 Scenario Quality Pack，M4 之后引入）、`privacy`（需要上游 Provider 身份，目录只给不可逆指纹）——因此**不参与排序且显式标为未测量**，不给默认分。M3 的证据原本全部是 `linux-x64`；**Windows 采集已完成并发布**（8 条 subject，`recommend` 在 `windows-x64` 上引用的是 Windows 记录本身，记录见 [Hub 联调清单](hub-h1-integration-checklist.md)），ADR 0007 决策 5 的第一批任务已合上。macOS 仍无实机，`recommend` 在该平台如实返回无证据。「允许推荐非 Apexnova Provider」需要目录之外的第二个候选来源，首批不可验证，已挂账。
+当前状态：进行中（首批范围见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)）。首批收窄为**一个 Scenario**（`coding-general` v1），候选只来自 Apexnova 目录，推荐在本地计算、Hub 托管 API 推迟。三个分项今天没有证据来源——`latency`（需要 Operational Evidence）、`quality`（需要 Scenario Quality Pack，M4 之后引入）、`privacy`（需要上游 Provider 身份，目录只给不可逆指纹）——因此**不参与排序且显式标为未测量**，不给默认分。M3 的证据原本全部是 `linux-x64`；**Windows 采集已完成并发布**（8 条 subject，`recommend` 在 `windows-x64` 上引用的是 Windows 记录本身，记录见 [Hub 联调清单](hub-h1-integration-checklist.md)），ADR 0007 决策 5 的第一批任务已合上。macOS 仍无实机，`recommend` 在该平台如实返回无证据。「允许推荐非 Apexnova Provider」的挂账已在 2026-09-10 结清：按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 移到 M5，不在 M4 收口时记为未满足。
 
 已完成：`packages/recommendation`（`coding-general` v1 Scenario、版本化打分规则 `coding.v1`、硬约束过滤与可解释排序）与 CLI [`recommend`](cli-spec.md)；Windows 采集的发布过程暴露并修好了两处 subject 身份缺陷——公开矩阵的能力表和 Evidence 列表不带 platform，以及 `scenarioId` 声明至今无人读写（Scenario Quality 引入后会把两个 Scenario 并成一行）。两者的根因相同：同一条身份规则曾有三份拷贝，现已收敛为 `subjectIdentity` 一处。首次消费目录价格时发现**公共目录对全部 46 个 Deployment 发布 `pricing: 0`**，与估价接口和实际计费矛盾，已作为需求 12H 提给 Hub；`recommend` 在此期间把零价判为「没有价格」，并在所有候选都无价时整项丢弃 `cost` 而不是给零分。
 
@@ -177,9 +177,10 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 - 相同输入和规则版本产生可重复结果；
 - 每个推荐都有分项理由、备选和排除原因；
-- 允许推荐非 Apexnova Provider；
 - 用户可以强制模型白名单、预算、区域和隐私约束；
 - 不存在隐藏商业评分项。
+
+「允许推荐非 Apexnova Provider」原为本阶段退出条件，按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) **移到 M5**：它真正缺的不是第二份候选列表（推荐引擎已经接收注入的候选数组），而是一条不经 Hub 签发凭据、不经 Hub 计费对账的证据采集路径——没有它，第二来源产出的候选因为没有实测证据只会一律 `eligible: false`，成为一种只能排除、不能推荐的假支持。措辞和验证标准不变，只换阶段；`recommend` 在此之前每次运行都声明候选只来自 Apexnova 目录。
 
 ## M5：Reliable Provider Routing
 
@@ -193,6 +194,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - Circuit Breaker；
 - 新请求边界上的受控选择；
 - 路由审计和实际计费来源；
+- 非 Apexnova 端点的证据采集路径与逐候选来源记录（[ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md)）；
 - Pro 高级策略和 Team 基础能力。
 
 退出条件：
@@ -201,7 +203,8 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - 每次路由可解释且可审计；
 - 切换失败不会破坏 Agent 配置；
 - 三个首批 Integration 达到 stable；
-- 用户始终能看到实际 Deployment 和计费主体。
+- 用户始终能看到实际 Deployment 和计费主体；
+- 允许推荐非 Apexnova Provider（自 M4 移入，见 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md)；推迟的理由已经用掉一次，不得再推迟）。
 
 ## M6：Domain Expansion
 

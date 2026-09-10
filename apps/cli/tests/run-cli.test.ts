@@ -1863,6 +1863,25 @@ describe("CLI", () => {
     expect(top.dimensions[0].detail).toContain("preferred capabilities supported");
   });
 
+  it("says on every run that the ranking only ever saw the Apexnova catalog", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    const result = await runCli(["recommend", "opencode"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    // Four ranked deployments read as "the best four there are" unless the
+    // boundary is on the page: a Provider outside the catalog is not ranked
+    // lower, it never entered. ADR 0008 keeps this stated until M5 supplies a
+    // second candidate source.
+    expect(capture.stdout()).toContain("Candidates come from the Apexnova catalog only");
+    expect(capture.stdout()).toContain("not considered at all");
+  });
+
   it("recommends nothing for a platform it has no evidence for, and says to collect some", async () => {
     // Evidence collected on Linux, recommendation asked for on Windows.
     const { root } = await withEvidence({}, { ...evidenceSubject, platform: "linux-x64" });
