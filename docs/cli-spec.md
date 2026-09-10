@@ -403,7 +403,15 @@ apexnova recommend opencode --deployment <id>          # 只看某一个
 
 `id` 形如 `rec.sha256.<64 hex>`，是对记录内容的哈希，与 Evidence 同一套办法：同一份排行算两次是同一份文档。`expiresAt` 取所引用 Evidence 里最早的那个到期时间；一条 Evidence 都没引用时取 `createdAt`，因为它没有任何可以凭借的东西。
 
-M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、`--model-allowlist`、`--verified-only`，**首批都未实现**：优先级由 Scenario 的 `priorities` 顺序决定而不是命令行覆盖；区域与 Provider 在只有一个公共 Provider、且目录只给不可逆指纹的前提下无从区分；`--verified-only` 没有意义，因为没有实测证据的 Deployment 本来就不会被推荐。这些在第二个 Scenario 或第二个候选来源出现时再重新评估。
+M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、`--model-allowlist`、`--verified-only`，**首批都未实现**。逐项状态见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md)，四项不是同一种情况：
+
+- `--priority`：优先级由 Scenario 的 `priorities` 顺序决定，不设命令行覆盖；
+- `--region`：目录里没有任何区域字段，**不是 Connect 未做，是数据不存在**，需要 Hub 发布；
+- `--provider` / 隐私约束：现网 46 个 Deployment 的 `providerId` 全是 `provider.apexnova-ai-hub`（`kind: platform`），**实际运行模型的上游运营方目录不给**；但 `model.publisher` 目录是给的（现网覆盖 12 个发布方），因此按发布方过滤有数据支撑。两者是不同的问题；
+- `--model-allowlist`：`RecommendationConstraints.deploymentIds` 本来就是数组，缺的是命令行入口而不是能力（今天只暴露单个 `--deployment`）；
+- `--verified-only`：没有意义，因为没有实测证据的 Deployment 本来就不会被推荐。
+
+**`--max-price` 今天静默无效**：过滤只对有价格的候选生效，而目录当前对全部 Deployment 发布 `pricing: 0`（需求 12H），被按规则读作「没有价格」，因此每个候选都从上限旁边绕过去了。这是缺陷而不是未实现，处置见 ADR 0010 决策 2。
 
 ### `apexnova doctor [agent]`
 
