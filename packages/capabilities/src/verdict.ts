@@ -7,6 +7,7 @@ import {
   CapabilityError,
   isStatementLive,
   isSuiteCurrent,
+  sameEvidenceSubject,
   type CapabilityStatement,
   type CapabilitySupport,
   type CompatibilityEvidence,
@@ -51,25 +52,6 @@ export interface VerdictOptions {
   readonly requirements?: readonly CapabilityRequirement[];
 }
 
-function sameSubject(left: EvidenceSubject, right: EvidenceSubject): boolean {
-  return (
-    left.agentId === right.agentId &&
-    left.agentVersion === right.agentVersion &&
-    left.integrationId === right.integrationId &&
-    left.integrationVersion === right.integrationVersion &&
-    left.deploymentId === right.deploymentId &&
-    left.protocol === right.protocol &&
-    left.platform === right.platform &&
-    // The fingerprint is part of the subject (12B.4), so it has to be part of
-    // subject identity too: a deployment that changed its implementation is a
-    // different question, and merging the two would let a result from the old
-    // implementation stand for the new one -- the exact silent drift 12A.5(a)
-    // was raised about. A record collected before the catalog carried a
-    // fingerprint has none, so it stands only for itself.
-    left.implementationFingerprint === right.implementationFingerprint
-  );
-}
-
 interface Observation {
   readonly statement: CapabilityStatement;
   readonly evidence: CompatibilityEvidence;
@@ -105,7 +87,7 @@ export function computeVerdict(options: VerdictOptions): CompatibilityVerdictRes
     levels.set(requirement.capabilityId, requirement.level);
   }
 
-  const candidates = options.evidence.filter((record) => sameSubject(record.subject, options.subject));
+  const candidates = options.evidence.filter((record) => sameEvidenceSubject(record.subject, options.subject));
   const superseded = supersededIds(candidates);
   const observations = new Map<string, Observation>();
   const claims = new Map<string, Observation>();

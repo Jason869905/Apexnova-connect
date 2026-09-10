@@ -132,6 +132,18 @@ describe("buildCompatibilityMatrix", () => {
     expect(capabilityRows.some((row) => row.includes("| linux-x64 |"))).toBe(true);
   });
 
+  it("keeps two Scenarios apart, and says which is which", () => {
+    const scoped = { ...subject, scenarioId: "coding-general" };
+    const evidence = [record(), record({ subject: scoped })];
+
+    const matrix = buildCompatibilityMatrix({ evidence, now: NOW });
+
+    expect(matrix.rows).toHaveLength(2);
+    const rendered = renderCompatibilityMatrix(matrix);
+    expect(rendered).toContain("opencode (scenario coding-general)");
+    expect(new Set(capabilitySection(rendered)).size).toBe(2);
+  });
+
   it("names the whole subject on every evidence line", () => {
     // Each field of subject identity, changed one at a time. Any of them makes a
     // different question, so none of them may share a line with the original.
@@ -144,6 +156,7 @@ describe("buildCompatibilityMatrix", () => {
       { ...subject, protocol: "anthropic-messages" },
       { ...subject, platform: "windows-x64" },
       { ...subject, implementationFingerprint: "impl-a1b2c3d4e5f6" },
+      { ...subject, scenarioId: "coding-general" },
     ];
     const evidence = [record(), ...variants.map((item) => record({ subject: item }))];
 

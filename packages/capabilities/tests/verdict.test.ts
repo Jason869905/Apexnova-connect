@@ -150,6 +150,25 @@ describe("computeVerdict", () => {
     expect(computeVerdict({ subject, evidence, now }).verdict).toBe("unknown");
   });
 
+  it("does not let a Scenario measurement answer for the Agent in general", () => {
+    const scoped = { ...subject, scenarioId: "coding-general" };
+    const evidence = [run({}, { subject: scoped })];
+    const now = new Date("2026-09-20T10:00:00.000Z");
+
+    expect(computeVerdict({ subject: scoped, evidence, now }).verdict).toBe("compatible");
+
+    // compatibility-evidence.md keeps Scenario Quality out of technical
+    // compatibility. Sharing a subject is how they would get mixed regardless:
+    // a result measured under one workload would stand for every other.
+    expect(computeVerdict({ subject, evidence, now }).verdict).toBe("unknown");
+    expect(
+      computeVerdict({ subject: { ...subject, scenarioId: "research-general" }, evidence, now }).verdict,
+    ).toBe("unknown");
+
+    // And the reverse: the general suite says nothing about a Scenario.
+    expect(computeVerdict({ subject: scoped, evidence: [run()], now }).verdict).toBe("unknown");
+  });
+
   it("takes the level from the Agent's requirements when they are supplied", () => {
     const evidence = [run({ "protocol.streaming-order": "unsupported" })];
     const now = new Date("2026-09-20T10:00:00.000Z");

@@ -36,7 +36,41 @@ export interface EvidenceSubject {
   readonly platform: string;
   /** The deployment's implementation at collection time, once the catalog exposes one. */
   readonly implementationFingerprint?: string;
+  /** The Scenario a result was measured under, once Scenario Quality exists. */
   readonly scenarioId?: string;
+}
+
+/**
+ * One subject, one question. Every field here narrows what a record is allowed
+ * to answer, so identity has to be computed in exactly one place: it was
+ * spelled out three times -- verdict matching, the matrix and `explain` -- and
+ * a field added to the type reached whichever of the three someone remembered.
+ *
+ * The optional fields stand only for themselves. A record carrying no
+ * implementation fingerprint says nothing about a deployment that has one: the
+ * fingerprint is part of the subject (12B.4), and merging the two would let a
+ * result from the old implementation stand for the new one, the silent drift
+ * 12A.5(a) was raised about. A record measured under a Scenario is likewise not
+ * a statement about the Agent in general -- `compatibility-evidence.md` keeps
+ * Scenario Quality out of technical compatibility on purpose, and sharing a
+ * subject is how the two get mixed anyway.
+ */
+export function subjectIdentity(subject: EvidenceSubject): string {
+  return [
+    subject.agentId,
+    subject.agentVersion,
+    subject.integrationId,
+    subject.integrationVersion,
+    subject.deploymentId,
+    subject.protocol,
+    subject.platform,
+    subject.implementationFingerprint ?? "",
+    subject.scenarioId ?? "",
+  ].join("\u0000");
+}
+
+export function sameEvidenceSubject(left: EvidenceSubject, right: EvidenceSubject): boolean {
+  return subjectIdentity(left) === subjectIdentity(right);
 }
 
 export interface CapabilityStatement {

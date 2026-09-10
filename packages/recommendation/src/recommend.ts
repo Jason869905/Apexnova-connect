@@ -113,6 +113,12 @@ function blendedPricePerMillion(pricing: RecommendationPricing | undefined): num
   return (perUnit / pricing.unit) * 1_000_000;
 }
 
+/**
+ * No `scenarioId`, deliberately. This asks a technical-compatibility question,
+ * and a Scenario-scoped measurement is a different subject: the Scenario here
+ * decides which capabilities are required and how they are weighed, not which
+ * records may answer.
+ */
 function subjectFor(options: RecommendOptions, candidate: RecommendationCandidate, protocol: string): EvidenceSubject {
   return {
     agentId: options.agentId,

@@ -1,5 +1,5 @@
 import { CAPABILITY_DEFINITIONS, CAPABILITY_SUITE_ID, CAPABILITY_SUITE_VERSION } from "./definitions.js";
-import type { CompatibilityEvidence, EvidenceSubject } from "./evidence.js";
+import { subjectIdentity, type CompatibilityEvidence, type EvidenceSubject } from "./evidence.js";
 import {
   computeVerdict,
   type CapabilityRequirement,
@@ -29,19 +29,6 @@ export interface MatrixOptions {
   readonly requirements?: readonly CapabilityRequirement[];
 }
 
-function subjectKey(subject: EvidenceSubject): string {
-  return [
-    subject.agentId,
-    subject.agentVersion,
-    subject.integrationId,
-    subject.integrationVersion,
-    subject.deploymentId,
-    subject.protocol,
-    subject.platform,
-    subject.implementationFingerprint ?? "-",
-  ].join(" ");
-}
-
 /**
  * The published order has to come from the subject alone. Comparing only agent,
  * deployment and protocol left the rest to the store's iteration order, so two
@@ -57,7 +44,8 @@ function compareSubjects(left: EvidenceSubject, right: EvidenceSubject): number 
     left.agentVersion.localeCompare(right.agentVersion) ||
     left.integrationId.localeCompare(right.integrationId) ||
     left.integrationVersion.localeCompare(right.integrationVersion) ||
-    (left.implementationFingerprint ?? "").localeCompare(right.implementationFingerprint ?? "")
+    (left.implementationFingerprint ?? "").localeCompare(right.implementationFingerprint ?? "") ||
+    (left.scenarioId ?? "").localeCompare(right.scenarioId ?? "")
   );
 }
 
@@ -69,7 +57,7 @@ function compareSubjects(left: EvidenceSubject, right: EvidenceSubject): number 
  */
 export function buildCompatibilityMatrix(options: MatrixOptions): CompatibilityMatrix {
   const subjects = new Map<string, EvidenceSubject>();
-  for (const record of options.evidence) subjects.set(subjectKey(record.subject), record.subject);
+  for (const record of options.evidence) subjects.set(subjectIdentity(record.subject), record.subject);
 
   const rows = [...subjects.values()]
     .map((subject) => {
@@ -129,9 +117,15 @@ function deploymentCell(subject: EvidenceSubject): string {
  */
 const IDENTITY_HEADER = ["Agent", "Version", "Deployment", "Protocol", "Platform"] as const;
 
+function agentCell(subject: EvidenceSubject): string {
+  return subject.scenarioId === undefined
+    ? subject.agentId
+    : `${subject.agentId} (scenario ${subject.scenarioId})`;
+}
+
 function identityCells(subject: EvidenceSubject): readonly string[] {
   return [
-    subject.agentId,
+    agentCell(subject),
     subject.agentVersion,
     deploymentCell(subject),
     subject.protocol,
@@ -167,7 +161,7 @@ function cell(capability: CapabilityVerdict | undefined): string {
 function evidenceSubjectLine(subject: EvidenceSubject): string {
   const integration = `integration ${subject.integrationId} ${subject.integrationVersion}`;
   return [
-    `${subject.agentId} ${subject.agentVersion}`,
+    `${agentCell(subject)} ${subject.agentVersion}`,
     deploymentCell(subject),
     subject.protocol,
     subject.platform,

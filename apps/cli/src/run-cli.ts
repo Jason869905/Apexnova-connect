@@ -39,6 +39,7 @@ import {
   parseRecording,
   renderCompatibilityMatrix,
   runCapabilitySuite,
+  subjectIdentity,
   type CapabilityOutcomeDetail,
   type EvidenceSubject,
   type SubjectVerdict,
@@ -857,23 +858,6 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
 
 function evidenceStore(dependencies: CliDependencies): FileEvidenceStore {
   return new FileEvidenceStore({ root: join(localStateRoot(dependencies), "evidence") });
-}
-
-function subjectKey(subject: EvidenceSubject): string {
-  return [
-    subject.agentId,
-    subject.agentVersion,
-    subject.integrationId,
-    subject.integrationVersion,
-    subject.deploymentId,
-    subject.protocol,
-    subject.platform,
-    // The implementation is part of the subject, so it is part of the key:
-    // without it a record from before a deployment changed and one from after
-    // collapse into a single row, and the row then reports whichever of the two
-    // was read last.
-    subject.implementationFingerprint ?? "",
-  ].join("\u0000");
 }
 
 function platformTag(dependencies: CliDependencies): string {
@@ -2129,7 +2113,7 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
     const installedVersion = await installedVersionOf(parsed, dependencies, integration);
 
     const subjects = new Map<string, EvidenceSubject>();
-    for (const record of records) subjects.set(subjectKey(record.subject), record.subject);
+    for (const record of records) subjects.set(subjectIdentity(record.subject), record.subject);
 
     const explained = [...subjects.values()].map((subject) => {
       const verdict = computeVerdict({ subject, evidence: records, now });
@@ -2171,7 +2155,7 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
             ),
           ];
           return [
-            `${agent.displayName} ${subject.agentVersion} · ${subject.deploymentId}${subject.implementationFingerprint ? ` (impl ${subject.implementationFingerprint.slice(0, 12)})` : ""} · ${subject.protocol} · ${subject.platform}: ${entry.verdict}`,
+            `${agent.displayName}${subject.scenarioId ? ` (scenario ${subject.scenarioId})` : ""} ${subject.agentVersion} · ${subject.deploymentId}${subject.implementationFingerprint ? ` (impl ${subject.implementationFingerprint.slice(0, 12)})` : ""} · ${subject.protocol} · ${subject.platform}: ${entry.verdict}`,
             ...entry.capabilities.map(
               (capability) =>
                 `  ${capability.capabilityId.padEnd(26)} ${capability.level.padEnd(9)} ${capability.support.padEnd(11)} ${capabilityNote(capability)}`,

@@ -32,6 +32,8 @@ export {
   validateCompatibilityEvidence,
 } from "./evidence.js";
 
+export { sameEvidenceSubject, subjectIdentity } from "./evidence.js";
+
 export type {
   CapabilityErrorCode,
   CapabilityOutcome,
