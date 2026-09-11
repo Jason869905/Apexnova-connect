@@ -158,7 +158,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.4`。
 
-当前状态：**二次评审完成，仍不关闭**（2026-09-11，见 [ADR 0013](decisions/0013-m4-second-review.md)；首次评审见 [ADR 0011](decisions/0011-m4-milestone-review.md)）。四条退出条件满足三条。未满足的仍是「用户可以强制模型白名单、预算和隐私约束」，但阻塞已收敛：白名单与预算均已实现且可用——**Hub 已交付需求 12H**，46 个 Deployment 中 34 个给出真实价格，`cost` 首次真正参与排序；只剩「运营方隐私」依赖需求 12J，是该条唯一的外部依赖。该条原含「区域」，已按 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md) 移除。另有两项内部缺陷须在收口前处理：launcher 的静默错配（根因未查实）与 Recommendation 有效期未计入分时价格。首批范围见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)。首批收窄为**一个 Scenario**（`coding-general` v1），候选只来自 Apexnova 目录，推荐在本地计算、Hub 托管 API 推迟。三个分项今天没有证据来源——`latency`（需要 Operational Evidence）、`quality`（需要 Scenario Quality Pack，M4 之后引入）、`privacy`（需要上游 Provider 身份，目录只给不可逆指纹）——因此**不参与排序且显式标为未测量**，不给默认分。M3 的证据原本全部是 `linux-x64`；**Windows 采集已完成并发布**（8 条 subject，`recommend` 在 `windows-x64` 上引用的是 Windows 记录本身，记录见 [Hub 联调清单](hub-h1-integration-checklist.md)），ADR 0007 决策 5 的第一批任务已合上。macOS 仍无实机，`recommend` 在该平台如实返回无证据。「允许推荐非 Apexnova Provider」的挂账已在 2026-09-10 结清：按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 移到 M5，不在 M4 收口时记为未满足。
+当前状态：**二次评审完成，仍不关闭**（2026-09-11，见 [ADR 0013](decisions/0013-m4-second-review.md)；首次评审见 [ADR 0011](decisions/0011-m4-milestone-review.md)）。四条退出条件现已全部满足——约束一条在 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md) 把隐私移到 M5 后变为「白名单与预算」，两项均已实现且可用（**Hub 已交付需求 12H**，46 个 Deployment 中 34 个给出真实价格，`cost` 首次真正参与排序）。**但 M4 仍不关闭**，剩下的两件都是 Connect 自己的（[ADR 0013](decisions/0013-m4-second-review.md) 第 5 节）：Recommendation 有效期未计入分时价格，以及 launcher 静默错配的根因未查实。关闭不再依赖任何外部交付。首批范围见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)。首批收窄为**一个 Scenario**（`coding-general` v1），候选只来自 Apexnova 目录，推荐在本地计算、Hub 托管 API 推迟。三个分项开工时没有证据来源——`latency`（需要 Operational Evidence）、`quality`（需要 Scenario Quality Pack，M4 之后引入）、`privacy`（发布方身份不能度量隐私强度，见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 的更正）——因此**不参与排序且显式标为未测量**，不给默认分；`cost` 已在 Hub 交付 12H 后转为真正参与排序。M3 的证据原本全部是 `linux-x64`；**Windows 采集已完成并发布**（8 条 subject，`recommend` 在 `windows-x64` 上引用的是 Windows 记录本身，记录见 [Hub 联调清单](hub-h1-integration-checklist.md)），ADR 0007 决策 5 的第一批任务已合上。macOS 仍无实机，`recommend` 在该平台如实返回无证据。「允许推荐非 Apexnova Provider」的挂账已在 2026-09-10 结清：按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 移到 M5，不在 M4 收口时记为未满足。
 
 已完成：`packages/recommendation`（`coding-general` v1 Scenario、版本化打分规则 `coding.v1`、硬约束过滤与可解释排序）与 CLI [`recommend`](cli-spec.md)；Windows 采集的发布过程暴露并修好了两处 subject 身份缺陷——公开矩阵的能力表和 Evidence 列表不带 platform，以及 `scenarioId` 声明至今无人读写（Scenario Quality 引入后会把两个 Scenario 并成一行）。两者的根因相同：同一条身份规则曾有三份拷贝，现已收敛为 `subjectIdentity` 一处。首次消费目录价格时发现**公共目录对全部 46 个 Deployment 发布 `pricing: 0`**，与估价接口和实际计费矛盾，已作为需求 12H 提给 Hub；`recommend` 在此期间把零价判为「没有价格」，并在所有候选都无价时整项丢弃 `cost` 而不是给零分。
 
@@ -177,8 +177,10 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 - 相同输入和规则版本产生可重复结果；
 - 每个推荐都有分项理由、备选和排除原因；
-- 用户可以强制模型白名单、预算和隐私约束；
+- 用户可以强制模型白名单和预算约束；
 - 不存在隐藏商业评分项。
+
+「隐私约束」原为上一条退出条件的一项，按 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md) **移到 M5**：它不是选错了对象，而是缺一个上游字段——Connect 侧的过滤路径已由 `--exclude-publisher` 证明成立，缺的是 Hub 发布可比较的数据处理属性（需求 12J，已选定形状并记为遗留）。措辞与验证标准不变，只换阶段。**代价要写明：这条退出条件原文是「模型白名单、预算、区域和隐私约束」四项，M4 收口实际验收的只有前两项**——区域被判定选错对象而移除，隐私移到 M5。
 
 「区域」原为上一条退出条件的第三项，按 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md) **移除**——不是推迟，是这条要求选错了对象：用户想从区域得到的要么是低延迟（可直接测量），要么是数据落在某个司法辖区（属于需求 12J 的数据处理属性），中间那个不可校验的目录标签不增加信息。区域保留的唯一位置是延迟证据的测量条件。隐私因此成为该条退出条件唯一的外部依赖。
 
@@ -206,7 +208,8 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - 切换失败不会破坏 Agent 配置；
 - 三个首批 Integration 达到 stable；
 - 用户始终能看到实际 Deployment 和计费主体；
-- 允许推荐非 Apexnova Provider（自 M4 移入，见 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md)；推迟的理由已经用掉一次，不得再推迟）。
+- 允许推荐非 Apexnova Provider（自 M4 移入，见 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md)；推迟的理由已经用掉一次，不得再推迟）；
+- 用户可以强制隐私约束（自 M4 移入，见 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md)；依赖 Hub 交付需求 12J 的数据处理属性，同样不得再推迟）。
 
 ## M6：Domain Expansion
 

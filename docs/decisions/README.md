@@ -19,3 +19,4 @@
 - [ADR 0011：M4 里程碑评审](0011-m4-milestone-review.md)
 - [ADR 0012：区域不是一条约束，是一个测量条件](0012-region-is-the-wrong-requirement.md)
 - [ADR 0013：M4 二次评审](0013-m4-second-review.md)
+- [ADR 0014：数据处理属性由 Hub 后续提供，隐私约束移到 M5](0014-data-handling-attributes-belong-to-m5.md)
