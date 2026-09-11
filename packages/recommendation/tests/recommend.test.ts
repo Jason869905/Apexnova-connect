@@ -187,9 +187,12 @@ describe("recommend", () => {
     expect(result.candidates[0]?.dimensions?.map((dimension) => dimension.priority)).toEqual(["compatibility", "context"]);
   });
 
-  it("treats a published price of zero as no price at all", () => {
-    // What the live catalog does today: every deployment is quoted at 0 while
-    // the estimate endpoint and the bill say otherwise.
+  it("treats a published price of zero as free, now that null carries the absence", () => {
+    // 12H was raised because the catalog quoted every deployment at 0, where it
+    // could not be told apart from "no price published" and would have ranked
+    // the dearest model first. Hub now publishes real prices and an explicit
+    // null for the projections that carry none, so a published zero means what
+    // it says -- one of the live ones is named "North Mini Code (free)".
     const free = { currency: "USD", billingMode: "token", unit: 1_000_000, input: "0", output: "0" };
     const result = recommend(options({
       candidates: [candidate("deployment.zero", { pricing: free }), candidate("deployment.cheap")],
@@ -198,9 +201,23 @@ describe("recommend", () => {
 
     const zero = result.candidates.find((entry) => entry.deploymentId === "deployment.zero")!;
     const cost = zero.dimensions!.find((dimension) => dimension.priority === "cost")!;
-    expect(cost.score).toBe(0);
-    // The one with a real price outranks the one quoted at zero.
-    expect(result.candidates[0]?.deploymentId).toBe("deployment.cheap");
+    expect(cost.score).toBe(1);
+    expect(cost.detail).toContain("0.0000 USD per million");
+    // Free beats cheap on cost, and cost is enough to decide it here.
+    expect(result.candidates[0]?.deploymentId).toBe("deployment.zero");
+  });
+
+  it("still refuses a price it cannot rank on", () => {
+    // Absent and negative are not zero: neither is a statement anyone can rank.
+    const negative = { currency: "USD", billingMode: "token", unit: 1_000_000, input: "-1", output: "-1" };
+    const result = recommend(options({
+      candidates: [candidate("deployment.negative", { pricing: negative })],
+      evidence: [evidenceFor("deployment.negative")],
+      constraints: { maxBlendedPricePerMillion: "5" },
+    }));
+
+    expect(result.candidates[0]?.eligible).toBe(false);
+    expect(result.candidates[0]?.reasons[0]).toContain("no usable price");
   });
 
   it("excludes what the Agent cannot speak to, or the catalog has withdrawn", () => {

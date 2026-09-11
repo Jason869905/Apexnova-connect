@@ -124,10 +124,22 @@ function clamp01(value: number): number {
  * means the price is not in this projection, and scoring it as the cheapest
  * possible option would rank on a number that contradicts the bill.
  */
+/**
+ * Zero is a price now. It was not always: requirement 12H was raised because the
+ * catalog published `0` for every deployment, where it was indistinguishable
+ * from "we do not publish one" and would have ranked the dearest model first.
+ * Hub has since shipped both halves -- real prices, and an explicit `null` for
+ * the projections that carry none -- so `null` holds the absence and a published
+ * `0` gets its meaning back. One of the deployments priced at zero is named
+ * "North Mini Code (free)".
+ *
+ * A negative or unparseable price is still no price: neither is a statement
+ * anyone can rank on.
+ */
 function blendedPricePerMillion(pricing: RecommendationPricing | undefined): number | undefined {
   if (pricing === undefined) return undefined;
   const perUnit = Number(pricing.input) * SCORING_RULE.inputShare + Number(pricing.output) * SCORING_RULE.outputShare;
-  if (!Number.isFinite(perUnit) || perUnit <= 0) return undefined;
+  if (!Number.isFinite(perUnit) || perUnit < 0) return undefined;
   return (perUnit / pricing.unit) * 1_000_000;
 }
 
