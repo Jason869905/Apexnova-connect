@@ -17,6 +17,8 @@ export interface RecommendationPricing {
   readonly unit: number;
   readonly input: string;
   readonly output: string;
+  /** When this quote stops being the price in force, where the catalog says so. */
+  readonly priceValidUntil?: string;
 }
 
 export interface RecommendationCandidate {
@@ -265,6 +267,9 @@ export function recommend(options: RecommendOptions): RecommendationResult {
   const excluded = new Set(
     (options.constraints?.excludePublishers ?? []).map((publisher) => publisher.toLowerCase()),
   );
+  // Every price this ranking actually read, so the result can say how long the
+  // reading stays true. A price that was never consulted cannot invalidate it.
+  const pricesUsed: string[] = [];
 
   const assessed: readonly AssessedCandidate[] = considered.map((candidate): AssessedCandidate => {
     const reasons: string[] = [];
@@ -311,6 +316,9 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       }
     }
     const blended = blendedPricePerMillion(candidate.pricing);
+    if (blended !== undefined && candidate.pricing?.priceValidUntil !== undefined) {
+      pricesUsed.push(candidate.pricing.priceValidUntil);
+    }
     if (ceiling !== undefined && blended === undefined) {
       // A ceiling asks to be shown the deployment fits in it, and a deployment
       // the catalog prices at nothing shows no such thing. Letting it through
@@ -503,7 +511,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     candidates,
     summary,
     createdAt: options.now.toISOString(),
-    expiresAt: earliestExpiry(options.evidence, candidates) ?? options.now.toISOString(),
+    expiresAt: horizon(earliestExpiry(options.evidence, candidates), pricesUsed, options.now),
   };
 }
 
@@ -526,6 +534,24 @@ function commonestExclusion(candidates: readonly RecommendationCandidateResult[]
   return counts.size === 1
     ? ` Every one: ${top[0]}`
     : ` Most common (${top[1]} of ${candidates.length}): ${top[0]}`;
+}
+
+/**
+ * The ranking stops standing when the first thing under it does. That is not
+ * only the evidence: the catalog prices some deployments by time of day, so a
+ * ranking computed at 17:00 can rest on a number that doubles at 22:00. Reading
+ * the price without its expiry produced documents claiming four weeks of
+ * validity from an input with six hours left.
+ *
+ * Never earlier than `createdAt`: a catalog quoting an already-stale validity
+ * should not make a document that was born expired.
+ */
+function horizon(evidenceExpiry: string | undefined, pricesUsed: readonly string[], now: Date): string {
+  const createdAt = now.toISOString();
+  const bounds = [...(evidenceExpiry === undefined ? [] : [evidenceExpiry]), ...pricesUsed].sort();
+  const earliest = bounds[0];
+  if (earliest === undefined) return createdAt;
+  return earliest < createdAt ? createdAt : earliest;
 }
 
 function earliestExpiry(

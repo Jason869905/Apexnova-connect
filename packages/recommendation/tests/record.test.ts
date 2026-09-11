@@ -148,6 +148,50 @@ describe("recommendationRecord", () => {
     expect(record.expiresAt).toBe(evidence.expiresAt);
   });
 
+  it("expires when the price it ranked on stops being the price", () => {
+    // The catalog quotes some deployments by time of day. A ranking computed at
+    // 17:00 on a number that doubles at 22:00 is not good for the four weeks its
+    // evidence has left, and used to claim exactly that.
+    const priced = {
+      ...candidate("deployment.cheap"),
+      pricing: {
+        currency: "USD",
+        billingMode: "token",
+        unit: 1_000_000,
+        input: "0.66",
+        output: "1.98",
+        priceValidUntil: "2026-09-20T22:00:00.000Z",
+      },
+    };
+    const evidence = evidenceFor("deployment.cheap");
+    const record = recommendationRecord(recommend(options({ candidates: [priced], evidence: [evidence] })));
+
+    expect(evidence.expiresAt > "2026-09-20T22:00:00.000Z").toBe(true);
+    expect(record.expiresAt).toBe("2026-09-20T22:00:00.000Z");
+  });
+
+  it("ignores the validity of a price it never read", () => {
+    // No ceiling, no evidence for it, so this candidate's price decided nothing.
+    const unused = {
+      ...candidate("deployment.unreachable"),
+      protocols: ["anthropic-messages"],
+      pricing: {
+        currency: "USD",
+        billingMode: "token",
+        unit: 1_000_000,
+        input: "0.66",
+        output: "1.98",
+        priceValidUntil: "2026-09-20T22:00:00.000Z",
+      },
+    };
+    const evidence = evidenceFor("deployment.cheap");
+    const record = recommendationRecord(
+      recommend(options({ candidates: [candidate("deployment.cheap"), unused], evidence: [evidence] })),
+    );
+
+    expect(record.expiresAt).toBe(evidence.expiresAt);
+  });
+
   it("expires where it was created when it rests on nothing", () => {
     // No evidence, so every candidate is ineligible and nothing is cited. A
     // window it cannot support would be a claim about records that do not exist.

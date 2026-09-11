@@ -243,6 +243,12 @@ function parseCatalogPricing(value: unknown): HubCatalogPricing | undefined {
     input: money(item.input, "deployment.pricing.input"),
     output: money(item.output, "deployment.pricing.output"),
     ...present("cachedInput", item.cachedInput === null || item.cachedInput === undefined ? undefined : money(item.cachedInput, "deployment.pricing.cachedInput")),
+    // The catalog prices some deployments by time of day, so the quoted price
+    // has an expiry. Reading the price without it produces rankings that claim
+    // to hold long after the number behind them has changed.
+    ...present("priceValidUntil", item.priceValidUntil === null || item.priceValidUntil === undefined
+      ? undefined
+      : timestamp(item.priceValidUntil, "deployment.pricing.priceValidUntil")),
   };
 }
 

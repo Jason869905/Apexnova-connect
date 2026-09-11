@@ -1751,6 +1751,9 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
             unit: deployment.pricing.unit,
             input: deployment.pricing.input,
             output: deployment.pricing.output,
+            ...(deployment.pricing.priceValidUntil === undefined
+              ? {}
+              : { priceValidUntil: deployment.pricing.priceValidUntil }),
           },
         }),
     ...(deployment.limits?.contextWindow === undefined ? {} : { contextWindow: deployment.limits.contextWindow }),

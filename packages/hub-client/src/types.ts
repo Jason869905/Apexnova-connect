@@ -184,6 +184,12 @@ export interface HubCatalogPricing {
   readonly input: string;
   readonly output: string;
   readonly cachedInput?: string;
+  /**
+   * When the quoted price stops being the one in force. Present where the
+   * catalog varies a price within the day, so a ranking computed from it is
+   * only good until then.
+   */
+  readonly priceValidUntil?: string;
 }
 
 export interface HubCatalogDeployment {

@@ -405,7 +405,7 @@ apexnova recommend claude-code --exclude-publisher "Zhipu AI"   # 不推荐该�
 - schema 的两个对象都是 `additionalProperties: false`，因此**平台、候选显示名、分项的分数与权重没有各自的字段**，它们写进 `reasons` 的文本里（ADR 0007 决策 3 指定的就是这个字段）。人读的输出不受此限，仍然分列显示；
 - `candidates` 是 `minItems: 1`。什么都没纳入考虑时（例如 `--deployment` 指向目录里没有的 id）**不产出记录而是报错**——空推荐等于宣称一个没人做过的选择。
 
-`id` 形如 `rec.sha256.<64 hex>`，是对记录内容的哈希，与 Evidence 同一套办法：同一份排行算两次是同一份文档。`expiresAt` 取所引用 Evidence 里最早的那个到期时间；一条 Evidence 都没引用时取 `createdAt`，因为它没有任何可以凭借的东西。
+`id` 形如 `rec.sha256.<64 hex>`，是对记录内容的哈希，与 Evidence 同一套办法：同一份排行算两次是同一份文档。`expiresAt` 取**这份排序所依赖的一切之中最早到期的那个**：所引用 Evidence 的到期时间，以及每一个**实际被读取过的价格**的 `priceValidUntil`（目录对部分 Deployment 按时段计价，价格一天内会变）。没读过的价格不参与——它没有影响过这次排序。两者都没有时取 `createdAt`，因为它没有任何可以凭借的东西；结果不会早于 `createdAt`，一份出生即过期的文档只会是目录给了过时有效期的产物。
 
 M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、`--model-allowlist`、`--verified-only`，**首批都未实现**。逐项状态见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md)，四项不是同一种情况：
 
