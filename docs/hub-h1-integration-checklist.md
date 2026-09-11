@@ -193,6 +193,29 @@ M3 的最后一条退出条件（跑通一次真实同步）**已满足**。
 
 macOS 仍无实机，按 [ADR 0006](decisions/0006-m3-closure.md) 继续挂在未决依赖上，`recommend` 在该平台如实返回无证据。
 
+## M4 推荐→连接→验证的首次闭环（2026-09-11，Linux/WSL2，`api.apexnova-consulting.com`）
+
+[ADR 0011](decisions/0011-m4-milestone-review.md) 第 3 问写明：`recommend` 的产出从未被喂给 `connect`，从推荐到连接这一步没有闭环。本次把它跑通，实扣 `0.000328 USD`。
+
+**用 OpenCode 而不是 Claude Code。** `connect claude-code` 会改写 `~/.claude/settings.json`，那是当时正在运行的那个 Claude Code 自己的配置——拿一个会把验收会话本身重定向的对象做验收，风险与收益不成比例。OpenCode 本机装着 1.18.29、有 `linux-x64` 证据，等价且不碰运行中的东西。
+
+- `[passed]` **交接没有摩擦**：`recommend opencode` 排第一的是 GLM-5.1（`deployment.apexnova.cmq4770nr0000edzis38w378a`，score 0.778，引用 `ev.sha256.f61ff31a…`），该 id 原样贴进 `connect --deployment` 即可，不需要任何转换；
+- `[passed]` `connect --dry-run` 只报一个操作（创建 `~/.config/opencode/opencode.jsonc`，505 字节）且不改状态；`--yes` 写入成功并签发 runtime credential；
+- `[passed]` **`verify opencode --live --yes` 对 GLM-5.1 真实推理通过**，请求 `cef34568-4e03-4788-9de7-1fcb9ba1f11a`，实扣 `0.000328 USD`（10 input / 97 output），非约束估价 `0.000898 USD`；
+- `[passed]` **账对得上**：余额 `60.273767` → `60.273439`，差额与 `verify` 报的实扣一分不差；
+- `[passed]` 回滚后配置文件消失、绑定删除、凭据撤销（`credential print` 返回 `RUNTIME_CREDENTIAL_NOT_FOUND`）、`restore --list` 无可恢复事务；
+- `[fixed]` **`restore --yes` 不带事务 id 时是静默空操作**，见下。
+
+因此「推荐 → 连接 → 真实调用 → 回滚」首次跑通，ADR 0011 第 3 问里那条缺口合上。仍未合上的是另一条：没有人验证过排第一的那个 Deployment**用起来确实更好**——那需要 Scenario Quality Pack，不是这次能给的。
+
+### `restore --yes` 曾经静默什么也不做
+
+`executeRestore` 的分支是 `if (parsed.list || transactionId === undefined)`：**没给事务 id 时无视 `--yes` 走列表分支并返回成功**。本次回滚第一次执行 `restore --yes` 就命中了——打印出一张事务表、退出码 0，而配置仍在磁盘上、runtime credential 仍然可用（`credential print` 仍能取出 secret）。
+
+这比一个普通的空操作更重：**用户请求了恢复、批准了恢复、拿到了成功，因而会认为凭据已经撤销，而它还活着。** 与本阶段修掉的 `--max-price` 静默无效是同一类（[ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 决策 2），但后果落在凭据上。
+
+修法：带 `--yes` 或 `--dry-run` 却不给事务 id 时报 `INVALID_ARGUMENT` 并列出当前可恢复的事务，不再落回列表分支。**不自动挑一个**——[`cli-spec.md`](cli-spec.md) 要求恢复按事务逆序显式执行，替用户挑可能回滚掉他没打算动的 integration。`restore` 与 `restore --list` 的列表行为不变。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：

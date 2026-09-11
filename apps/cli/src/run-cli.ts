@@ -756,6 +756,24 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
   const executor = new FileConfigExecutor({ allowedRoots, backupRoot });
   const transactionId = parsed.operands[0];
   const backups = await executor.listBackups();
+  if (transactionId === undefined && (parsed.yes || parsed.dryRun)) {
+    // Listing was the fallback for a missing operand, so `restore --yes` printed
+    // the transactions and exited 0 -- the user had asked to restore, approved
+    // it, and got a table. The configuration stayed written and the runtime
+    // credential stayed live while the exit code said it was done. A restore
+    // names the transaction it undoes: the spec's ordering rule is explicit, and
+    // picking one on the user's behalf could roll back an integration they
+    // never mentioned.
+    const restorable = backups.filter((item) => item.restorable);
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: restorable.length === 0
+        ? "restore needs a transaction ID, and there is nothing restorable. Run \"apexnova restore --list\" to see what exists."
+        : `restore needs a transaction ID; nothing was restored. Restorable now: ${restorable.map((item) => `${item.transactionId} (${item.integrationId})`).join(", ")}.`,
+      exitCode: EXIT_CODES.usage,
+      details: { restorable: restorable.map((item) => ({ transactionId: item.transactionId, integrationId: item.integrationId })) },
+    });
+  }
   if (parsed.list || transactionId === undefined) {
     return {
       data: { backups },

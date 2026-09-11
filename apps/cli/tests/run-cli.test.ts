@@ -1915,6 +1915,26 @@ describe("CLI", () => {
     expect(result.exitCode).toBe(EXIT_CODES.usage);
   });
 
+  it("refuses a restore that names no transaction instead of printing a table", async () => {
+    const capture = captureIo();
+
+    // `restore --yes` used to fall through to the listing branch and exit 0: the
+    // user had asked to restore and approved it, and the configuration stayed
+    // written while the runtime credential stayed live. A command that reports
+    // success must have done the thing.
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-restore-yes-"));
+    const result = await runCli(["restore", "--yes"], {
+      io: capture.io,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      cwd: root,
+      createRequestId: () => "local_restore_yes",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.usage);
+    expect(capture.stderr()).toContain("needs a transaction ID");
+  });
+
   it("says on every run that the ranking only ever saw the Apexnova catalog", async () => {
     const { root } = await withEvidence();
     const capture = captureIo();

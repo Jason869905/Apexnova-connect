@@ -254,6 +254,8 @@ apexnova restore <transaction-id> --dry-run
 apexnova restore <transaction-id>
 ```
 
+`--yes` 与 `--dry-run` 都要求给出事务 id；不给时报 `INVALID_ARGUMENT` 并列出当前可恢复的事务，**不会退化成列表**——一条报告成功的恢复命令必须真的恢复过。不带这两个标志的 `restore` 与 `restore --list` 仍是列表。
+
 恢复只撤销 Connect 管理的变更，并执行并发哈希检查。恢复必须按事务逆序执行；尝试跳过较新的切换事务会返回 `RESTORE_ORDER_CONFLICT`，不修改配置或凭据。
 
 顺序的判定来源是备份目录本身：同一 integration 中只有最新的事务可恢复，`restore --list` 会标出它，`--dry-run` 走同一检查。凭据绑定只承载凭据链，不参与顺序判定——绑定指向别的事务时（旧版本可能留下这种状态）配置照样恢复，CLI 撤销当前凭据、删除绑定并以警告说明该 profile 已断开，需要重新 `connect`。
