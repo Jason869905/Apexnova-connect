@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { EXIT_CODES, RuntimeBindingStore, runCli, type CliIo, type HubCommandService } from "../src/index.js";
 import { HubClientError } from "@apexnova-connect/hub-client";
 import { createIntegrationRegistry } from "@apexnova-connect/core";
+import { RoutingAuditLog, routingAuditPath } from "@apexnova-connect/routing";
 import {
   CAPABILITY_DEFINITIONS,
   CAPABILITY_SUITE_ID,
@@ -799,6 +800,23 @@ describe("CLI", () => {
     expect(await bindings.load("opencode", "default")).toBeNull();
     expect(active.size).toBe(0);
     expect(revokeRuntimeCredential.mock.calls.map((call) => call[1])).toEqual(["rtc_1", "rtc_2", "rtc_3"]);
+
+    // The log has to tell the same story the transactions do. Without an entry
+    // per restore it would show a switch to the second target and then, with
+    // nothing in between, a profile pointing somewhere else entirely.
+    const audit = await new RoutingAuditLog({
+      path: routingAuditPath(join(root, "Apexnova", "connect")),
+    }).list();
+    expect(audit.map((entry) => `${entry.event}/${entry.command}/${entry.grounds ?? "-"}`)).toEqual([
+      "selected/connect/explicit",
+      "selected/switch/explicit",
+      "selected/restore/restore",
+      "released/restore/-",
+    ]);
+    // Undoing the switch puts the first target back; undoing the first connect
+    // leaves none, and says so rather than recording a selection of nothing.
+    expect(audit[2]).toMatchObject({ deploymentId: "deployment.nova", protocol: "openai-responses" });
+    expect(audit[3]?.deploymentId).toBeUndefined();
   });
 
   it("restores the transaction the backups name even when the stored binding disagrees", async () => {

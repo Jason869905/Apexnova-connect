@@ -8,9 +8,9 @@ import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.
 
 export const ROUTING_AUDIT_SCHEMA_VERSION = "0.1";
 
-export type RoutingAuditEvent = "selected" | "attributed";
+export type RoutingAuditEvent = "selected" | "attributed" | "released";
 
-export type RoutingGrounds = "explicit" | "recommendation" | "existing" | "interactive";
+export type RoutingGrounds = "explicit" | "recommendation" | "existing" | "interactive" | "restore";
 
 export interface RoutingAttributionShare {
   readonly apiKeyId: string;

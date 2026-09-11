@@ -910,6 +910,47 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
     }
     if (!replacement) await bindings.delete(agentId, parsed.profile);
   }
+  // A restore changes the connection target, which is what this milestone
+  // defined a route to be, so it belongs in the log. Without it the log shows a
+  // switch to B and then, with no entry between, requests billed against A.
+  if (agentId !== undefined) {
+    try {
+      const restoredTarget = replacement ?? undefined;
+      await routingAuditLog(dependencies).append(
+        createRoutingAuditEntry(
+          restoredTarget
+            ? {
+                event: "selected",
+                agentId,
+                ...(integration ? { integrationId: integration.manifest.id } : {}),
+                profile: parsed.profile,
+                command: "restore",
+                deploymentId: restoredTarget.deploymentId,
+                protocol: restoredTarget.protocol,
+                grounds: "restore",
+                credentialId: restoredTarget.credentialId,
+                transactionId,
+                recordedAt: new Date(currentTime(dependencies)).toISOString(),
+              }
+            : {
+                // Undoing the first connect leaves no target at all. Recording
+                // that as a selection of nothing would be a record of something
+                // that did not happen.
+                event: "released",
+                agentId,
+                ...(integration ? { integrationId: integration.manifest.id } : {}),
+                profile: parsed.profile,
+                command: "restore",
+                transactionId,
+                recordedAt: new Date(currentTime(dependencies)).toISOString(),
+              },
+        ),
+      );
+    } catch {
+      warnings.push("The configuration was restored but the change was not written to the audit log.");
+    }
+  }
+
   return {
     data: { restored: true, transactionId, planId: receipt.planId, runtimeCredentialRestored, ...(runtimeCredentialRevoked === undefined ? {} : { runtimeCredentialRevoked }) },
     warnings,
