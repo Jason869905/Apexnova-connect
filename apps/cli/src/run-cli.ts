@@ -884,9 +884,18 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
     try {
       await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, binding.credentialId, compensationSignal(parsed));
       runtimeCredentialRevoked = true;
-    } catch {
-      runtimeCredentialRevoked = false;
-      warnings.push(`Runtime credential ${binding.credentialId} could not be revoked from Hub; revoke the device or credential manually.`);
+    } catch (cause) {
+      // Revocation is idempotent: a credential Hub no longer has is revoked,
+      // whoever did it. Reporting that as a failure sent the user to revoke
+      // something that was already gone -- observed twice on 2026-09-11, both
+      // times with the credential absent from the account afterwards -- and made
+      // a real failure indistinguishable from a redundant one.
+      if (cause instanceof HubClientError && cause.code === "NOT_FOUND") {
+        runtimeCredentialRevoked = true;
+      } else {
+        runtimeCredentialRevoked = false;
+        warnings.push(`Runtime credential ${binding.credentialId} could not be revoked from Hub; revoke the device or credential manually.`);
+      }
     }
     if (!replacement) await bindings.delete(agentId, parsed.profile);
   }

@@ -250,6 +250,23 @@ M1 在 Windows 上验过 launcher，Linux 侧没有。本次实测的结论是**
 
 Linux 侧的 launcher **不记为通过**。要能声称它成立，至少需要：查清 OpenCode 为何不加载我们写入的 provider；查清那枚 `myopencode` key 被 OpenCode 从哪里取到；并让 launcher 在「agent 实际使用的不是我们配置的 Deployment」时**失败而不是报成功**——最后这条是最重要的，因为前两条修好之后，静默错配的可能性依然存在。
 
+### 根因排查（同日晚）
+
+第三条已实现（`LAUNCH_ATTRIBUTION_MISMATCH`），并在同一条路径上**实测复现并拦截**：`run opencode -- run "…"` 仍然走到 `glm-5.2` 与 `myopencode`，但命令现在以退出码 7 失败并点名是谁服务了那两次请求。
+
+前两条查到了根因，是**我们这侧的协议错配**：
+
+- `[root cause]` **写进配置的 provider 包与凭据的协议对不上。** `providerPackage()` 对 `openai-responses` 写 `@ai-sdk/openai`。把包换成 `@ai-sdk/openai-compatible` 后，OpenCode 立刻选中我们的模型（`> build · glm-5.1`）并真的打到了 Apexnova，Hub 的拒绝一句话说清了问题：**`This credential is not allowed to use the openai-chat protocol.`** 也就是说 OpenCode 经该 provider 走的是 `/v1/chat/completions`（`openai-chat`），而我们签发的 runtime credential 只授权 `openai-responses`；
+- `[root cause]` 用 `@ai-sdk/openai` 时这次失败**不会以这种可读形式暴露**，只得到 OpenCode 的内部 `UnknownError`，于是 OpenCode 回落到别的 provider/模型——**静默错配由此产生**；
+- `[observed]` 那批不是我们写的 provider（`apex_agent`、`apexnova_ai_hub`、`huawei_maas`）来自 **OpenCode 的远端 v2 catalog**：`opencode debug v2` 显示 catalog 结构，且其内容在同一天内变过（后来只剩 `opencode`）。catalog 条目自带请求鉴权字段（`request.body.apiKey`）。**因此「Agent 只会使用 Connect 签发的凭据」这一点，Connect 无法单方面保证**——Agent 可以从自己的远端目录获得 provider 与凭据。这使对账检查不是权宜，而是这条路径上唯一能发现该类问题的机制，应长期保留；
+- `[not established]` `myopencode` 这枚 key 的 secret 具体存放在哪，仍未查实：OpenCode 的 auth store 报 `0 credentials`，其 data/state/cache 目录里 grep 不到该名字，shell 环境也没有相关变量。
+
+**尚未修复**：协议错配本身。修法涉及一个取舍——让 OpenCode 走 `openai-chat`（则需要 `openai-chat` 的能力证据，而现有 OpenCode 证据全是 `openai-responses`），还是让 `@ai-sdk/openai` 真正使用 Responses API。这是个影响证据口径的决定，单独提出。
+
+### 顺带修掉的第三处
+
+- `[fixed]` **`restore` 把「凭据已经不存在」报成「撤销失败」。** 两次观察到同一现象：CLI 报「需要手工撤销」，事后查账号该凭据并不在活动列表里。撤销本就是幂等的——Hub 已经没有的凭据就是已撤销，无论是谁撤的。现改为把 `NOT_FOUND` 视为已撤销，只有真正的失败才提示手工处理；否则真失败与冗余失败无法区分。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：
