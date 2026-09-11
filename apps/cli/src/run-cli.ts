@@ -893,7 +893,10 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
   return {
     data: { restored: true, transactionId, planId: receipt.planId, runtimeCredentialRestored, ...(runtimeCredentialRevoked === undefined ? {} : { runtimeCredentialRevoked }) },
     warnings,
-    human: `Restored transaction ${transactionId}.${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? " Runtime credential requires manual revocation." : ""}`,
+    // The credential ID only ever reached `warnings`, and human mode prints
+    // `human` alone -- so the one instruction the user was given ("revoke it
+    // yourself") came without the thing to revoke.
+    human: `Restored transaction ${transactionId}.${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? ` Runtime credential ${binding?.credentialId ?? "(id unknown)"} could not be revoked from Hub; revoke it there.` : ""}`,
   };
 }
 

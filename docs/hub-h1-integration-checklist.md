@@ -229,6 +229,27 @@ macOS 仍无实机，按 [ADR 0006](decisions/0006-m3-closure.md) 继续挂在�
 - `[passed]` 再恢复 `connect` 事务后回到连接前：配置文件消失、绑定删除、凭据撤销（`credential print` 返回 `RUNTIME_CREDENTIAL_NOT_FOUND`）、`restore --list` 无可恢复事务；
 - `[passed]` **账对得上**：余额 `60.273439` → `60.272816`，差 `0.000623 USD` = `0.000179` + `0.000444`，与两次 `verify` 各自报的实扣分别相符。
 
+## `run` launcher 在 Linux 上的首次实测：跑通了，但跑错了地方（2026-09-11）
+
+M1 在 Windows 上验过 launcher，Linux 侧没有。本次实测的结论是**不能声称 Linux 上的 launcher 已验收**：命令全程成功，agent 也答出了 `APEXNOVA_OK`，但那次请求既不是我们配置的 Deployment，也不是我们签发的凭据。
+
+- `[passed]` **凭据不落盘**：`run` 写出的 `~/.config/opencode/opencode.jsonc` 只含 `{env:APEXNOVA_API_KEY}` 占位，全文无 `anrt_` 前缀material。M1 那条「密钥不进入配置」在 Linux 上成立；
+- `[failed]` **我们写的 provider 没有被 OpenCode 加载**：`opencode models apexnova` 报 `Provider not found: apexnova`；`opencode models` 的 13 行里没有 `apexnova/glm-5.1`，却有 `apex_agent/`、`apexnova_ai_hub/`、`huawei_maas/` 这些不是我们写的条目。显式 `--model apexnova/glm-5.1` 时 OpenCode 抛内部 `UnknownError`（ref `err_fed31730`）。**根因未查实，本记录不做推断**；
+- `[failed]` **请求落到了别处，而每一步都报成功。** `run opencode -- run "…"` 返回了 `APEXNOVA_OK`，但 OpenCode 用的是 `glm-5.2`（我们配的是 `glm-5.1`），台账显示这 2 次请求记在 **`apiKeyName: "myopencode"`（`apiKeyId: cmtolxknn000ftg71yn7md4v2`）** 名下——一枚**预先存在的长期 API key**，不是 Connect 刚签发的 runtime credential（后者在台账里叫 `OpenCode (default)`，本轮零请求）。实扣 `0.005693 USD`，走的是一枚 **Connect 既不管理也无法撤销**的凭据。
+
+这一条比「launcher 没跑通」严重：CLI 报了 `Configured OpenCode with GLM-5.1`、launcher 报了 `OpenCode exited successfully`，而实际发生的是另一个模型经另一枚凭据完成的调用。**M5 的退出条件「用户始终能看到实际 Deployment 和计费主体」在这条路径上今天不成立**，而且它的失败方式是静默的。
+
+本机的 OpenCode auth store 是空的（`opencode providers list` 报 `0 credentials`），shell 环境里没有任何 `APEXNOVA*` 变量，磁盘上也只有我们写的那一份配置——那枚 key 从何处被 OpenCode 取到，尚未查清。
+
+### 顺带暴露的两处
+
+- `[fixed]` **`restore` 在撤销失败时把凭据 id 一起丢了。** 撤销失败只把 id 放进 `warnings`，而 human 模式只打印 `human`，于是用户得到的指令是「自己去撤销」却没有要撤销的东西。现已把 id 写进 human 文案。**尚未处理的另一半**：绑定在撤销失败时照样被删除，本地从此不再持有那个 id；
+- `[observed]` 本次 `restore` 报了「需要手工撤销」，但事后查询账号的 runtime credential 列表只剩一枚 2026-09-09 的能力套件凭据（早已过期），`run` 签发的那枚不在其中。**是撤销其实成功了还是别的原因，未查实。**
+
+### 结论
+
+Linux 侧的 launcher **不记为通过**。要能声称它成立，至少需要：查清 OpenCode 为何不加载我们写入的 provider；查清那枚 `myopencode` key 被 OpenCode 从哪里取到；并让 launcher 在「agent 实际使用的不是我们配置的 Deployment」时**失败而不是报成功**——最后这条是最重要的，因为前两条修好之后，静默错配的可能性依然存在。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：
