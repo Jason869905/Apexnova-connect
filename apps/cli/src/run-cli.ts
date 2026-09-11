@@ -89,6 +89,7 @@ import {
   connectionIntent,
   detectForCommand,
   routingAuditLog,
+  selectionInForce,
   selectDeploymentByReference,
   hubProtocolsFor,
   launchAgent,
@@ -2608,7 +2609,12 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
     warnings: result.warnings,
     human: [
       `Connected ${preview.integration.manifest.displayName} to ${deployment.displayName}.`,
-      `Runtime credential expires: ${result.binding.expiresAt}`,
+      // The exit condition is that the user can always see the real Deployment
+      // and the real billing subject. The display name is neither: it does not
+      // identify the deployment, and it says nothing about which credential the
+      // charges will land on.
+      `Deployment: ${deployment.id}`,
+      `Billed to runtime credential: ${result.binding.credentialId} (expires ${result.binding.expiresAt})`,
       ...(result.transactionId ? [`Restore transaction: ${result.transactionId}`] : []),
       `Launch with: apexnova run ${preview.integration.manifest.id}`,
     ].join("\n"),
@@ -2758,28 +2764,8 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   }
 
   // A launch that reused an existing binding made no selection of its own, so
-  // the attribution points at the decision that is still in force. Without this
-  // the log holds two sequences that never meet, and "auditable" would mean two
-  // files nobody can join.
-  if (selectionEntryId === undefined) {
-    try {
-      const entries = await routingAuditLog(dependencies).list();
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
-        const entry = entries[index]!;
-        if (
-          entry.event === "selected" &&
-          entry.agentId === agentId &&
-          entry.profile === parsed.profile &&
-          entry.deploymentId === binding.deploymentId
-        ) {
-          selectionEntryId = entry.id;
-          break;
-        }
-      }
-    } catch {
-      // An unreadable log leaves the attribution unlinked rather than unwritten.
-    }
-  }
+  // the attribution points at the decision that is still in force.
+  selectionEntryId ??= await selectionInForce(dependencies, agentId, parsed.profile, binding.deploymentId);
 
   // What a route cost is a second event, not an amendment to the first: it is
   // not known when the target is chosen, and rewriting the decision would lose
@@ -2992,6 +2978,51 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   } catch (error) {
     usageWarning = `Billing reconciliation skipped: ${normalizeError(error).code}. The requestId below is the source of truth for the real cost.`;
   }
+  // `verify --live` reconciles by requestId, so its attribution is exact where
+  // the launcher's is a time window: one request, named, and the ledger says
+  // which key paid for it. A settlement that has not landed is `unconfirmed`,
+  // never a confirmed zero.
+  const auditWarnings: string[] = [];
+  const selectionInForceId = await selectionInForce(dependencies, integration.manifest.id, parsed.profile, deployment.id);
+  try {
+    const billedKey = usage?.apiKeyId;
+    const status = billedKey === undefined
+      ? "unconfirmed" as const
+      : billedKey === binding.credentialId
+        ? "confirmed" as const
+        : "mismatched" as const;
+    await routingAuditLog(dependencies).append(
+      createRoutingAuditEntry({
+        event: "attributed",
+        agentId: integration.manifest.id,
+        integrationId: integration.manifest.id,
+        profile: parsed.profile,
+        command: "verify",
+        deploymentId: deployment.id,
+        credentialId: binding.credentialId,
+        ...(selectionInForceId === undefined ? {} : { selectionId: selectionInForceId }),
+        attribution: {
+          status,
+          ...(billedKey === undefined
+            ? {}
+            : {
+                requestCount: 1,
+                billedTo: [{
+                  apiKeyId: billedKey,
+                  ...(usage?.apiKeyName ? { apiKeyName: usage.apiKeyName } : {}),
+                  deploymentId: deployment.id,
+                  ...(inference.resolvedModel ? { resolvedModel: inference.resolvedModel } : {}),
+                  requestCount: 1,
+                }],
+              }),
+        },
+        recordedAt: new Date(currentTime(dependencies)).toISOString(),
+      }),
+    );
+  } catch {
+    auditWarnings.push("The verification completed but its billing attribution was not written to the audit log.");
+  }
+
   const billedLine = usage === undefined
     ? "Billed: not yet available"
     : usage.amount === undefined
@@ -3002,7 +3033,7 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
       : `Billed: ${usage.amount} ${usage.currency} (${usage.usage.inputTokens ?? 0} input + ${usage.usage.outputTokens ?? 0} output tokens)`;
   return {
     data: { valid: true, level: "live", ...configuration, estimate, estimateAssumptions: LIVE_VERIFY_ESTIMATE_USAGE, inference, ...(usage ? { usage } : {}) },
-    warnings: usageWarning ? [usageWarning] : [] as readonly string[],
+    warnings: [...(usageWarning ? [usageWarning] : []), ...auditWarnings] as readonly string[],
     human: [
       `${integration.manifest.displayName} live verification passed for ${inference.requestedModel}.`,
       `Deployment: ${inference.deploymentId}`,

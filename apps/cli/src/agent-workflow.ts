@@ -540,6 +540,39 @@ export function routingAuditLog(dependencies: CliDependencies): RoutingAuditLog 
   return new RoutingAuditLog({ path: routingAuditPath(localStateRoot(dependencies)) });
 }
 
+/**
+ * The `selected` entry a later event belongs to. A run or a verification that
+ * made no selection of its own still happened under one, and without the link
+ * the log would hold two sequences that never meet -- an attribution nobody can
+ * trace back to the decision it priced.
+ */
+export async function selectionInForce(
+  dependencies: CliDependencies,
+  agentId: string,
+  profile: string,
+  deploymentId: string,
+): Promise<string | undefined> {
+  let entries;
+  try {
+    entries = await routingAuditLog(dependencies).list();
+  } catch {
+    // An unreadable log leaves the later entry unlinked rather than unwritten.
+    return undefined;
+  }
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    if (
+      entry.event === "selected" &&
+      entry.agentId === agentId &&
+      entry.profile === profile &&
+      entry.deploymentId === deploymentId
+    ) {
+      return entry.id;
+    }
+  }
+  return undefined;
+}
+
 function defaultLaunch(plan: LaunchPlan): Promise<number> {
   return new Promise((resolveLaunch, reject) => {
     const child = spawn(plan.executable, [...plan.args], {
