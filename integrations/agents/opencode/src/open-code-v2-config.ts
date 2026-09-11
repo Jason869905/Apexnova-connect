@@ -13,6 +13,9 @@ import {
 } from "jsonc-parser";
 
 export const OPENCODE_PROVIDER_ID = "apexnova" as const;
+
+/** The schema pointer OpenCode writes into its own configuration. */
+export const OPENCODE_CONFIG_SCHEMA = "https://opencode.ai/config.json" as const;
 export const OPENCODE_PROVIDER_NAME = "Apexnova AI Hub" as const;
 
 export type OpenCodeProtocol = "openai-responses" | "openai-chat-completions";
@@ -277,7 +280,16 @@ export function planOpenCodeV2Config(
     );
   }
 
-  const source = options.existingContent ?? "{}\n";
+  // A file we create carries OpenCode's own schema pointer, because OpenCode
+  // adds it the first time it reads the file otherwise. Connect then sees its
+  // own configuration as modified and `restore` refuses to roll back a file it
+  // created -- observed three times on 2026-09-11, each needing the line removed
+  // by hand before the rollback would run. Writing what the product writes keeps
+  // the content stable across an Agent run.
+  //
+  // Only on create: adding it to a configuration the user already has would be
+  // an edit nobody asked for.
+  const source = options.existingContent ?? `{\n  "$schema": "${OPENCODE_CONFIG_SCHEMA}"\n}\n`;
   parseConfig(source);
 
   const provider = createProvider(

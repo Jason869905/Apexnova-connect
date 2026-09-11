@@ -283,17 +283,31 @@ Linux 侧的 launcher **不记为通过**。要能声称它成立，至少需要
 
 **仍未修的一处顺序问题**：拒绝发生在 `configureAgent` **之后**，所以一次被拒的 `run` 会留下已写入的配置和已签发的凭据（可用 `restore` 收回）。可启动性应当在动任何状态之前判定，但那需要在 Agent Discovery Contract 上留一个「能否启动」的前置检查，四个 Integration 都会受影响，单独提出。
 
-### 同一轮暴露的另一处：Agent 会改写 Connect 写的文件
+### 同一轮暴露的另一处：Agent 会改写 Connect 写的文件（已修复）
 
-`restore` 以 `CONFLICT` 拒绝回滚：`Configuration changed after apply`。对比后确认，改动是 **OpenCode 自己往配置里加了一行 `"$schema"`**，其余内容与 Connect 写入时一致。
+`restore` 以 `CONFLICT` 拒绝回滚：`Configuration changed after apply`。对比后确认，改动是 **OpenCode 自己往配置里加了一行 `"$schema"`**，其余内容与 Connect 写入时一致。同一现象当天复现三次，每次都要手工删掉那行 `restore` 才肯收尾。
 
-拒绝本身是对的——不删一个被改过的文件。但后果是用户**没有出路**：`restore` 不肯回滚，而文件又确实是 Connect 创建的。本次是手工去掉那行 `$schema` 后 `restore` 才正常收尾。
+拒绝本身是对的——不删一个被改过的文件。问题在于用户没有出路，而 Agent 规范化自己的配置文件是常态不是异常。
 
-这类情况需要一个正常路径：Agent 规范化或注解自己配置文件是常态，不是异常。
+修法：**Connect 创建配置时自己写上那个 schema 指针**，OpenCode 就没有东西可补，内容哈希在 Agent 跑过之后保持稳定。只在「创建」时写——往用户已有的配置里加一行，是没人要求过的改动。
 
 ### 顺带修掉的第三处
 
 - `[fixed]` **`restore` 把「凭据已经不存在」报成「撤销失败」。** 两次观察到同一现象：CLI 报「需要手工撤销」，事后查账号该凭据并不在活动列表里。撤销本就是幂等的——Hub 已经没有的凭据就是已撤销，无论是谁撤的。现改为把 `NOT_FOUND` 视为已撤销，只有真正的失败才提示手工处理；否则真失败与冗余失败无法区分。
+
+## OpenCode 在 Linux 上的端到端闭环（2026-09-11，M4 收口证据）
+
+PATH 修正并修掉上述两处之后，从推荐到回滚一次跑通，**全程无手工干预**：
+
+- `[passed]` `recommend opencode` 第一名 DeepSeek-V4-Pro-0813（score 0.800，`cost` 分项 0.90 —— Hub 交付 12H 后成本第一次真正参与排序）；
+- `[passed]` `connect --dry-run` 报一个操作、不改状态；`--yes` 写入并签发 runtime credential；
+- `[passed]` `verify opencode --live --yes` 通过，请求 `c85e1e33-28cc-41ee-bbb5-d52581949452`，实扣 `0.000090 USD`；
+- `[passed]` **`run opencode -- run "…"` 真实 Agent 进程返回 `APEXNOVA_OK`，模型是 `deepseek-v4-pro-0813`（即推荐的那一个）**，对账正面确认：`1 request billed to this launcher's credential on deployment.apexnova.cmt0bub5d0042139w2xobpghn`；
+- `[passed]` `restore` 一次成功，配置文件删除、绑定删除、凭据撤销——不再需要先手工处理 `$schema`。
+
+这条闭环是 [ADR 0011](decisions/0011-m4-milestone-review.md) 第 3 问点名的那条缺口的最后一段：此前只到 `verify`，launcher 那一段是坏的。
+
+仍未合上的一条不变：**没有人验证过排第一的 Deployment 用起来确实更好**——那需要 Scenario Quality Pack。
 
 ## 本机 Docker 验证记录（2026-09-05）
 
