@@ -56,6 +56,9 @@ importers:
       '@apexnova-connect/recommendation':
         specifier: workspace:*
         version: link:../../packages/recommendation
+      '@apexnova-connect/routing':
+        specifier: workspace:*
+        version: link:../../packages/routing
       '@inquirer/prompts':
         specifier: ^7.0.0
         version: 7.10.1(@types/node@24.13.3)
@@ -171,6 +174,15 @@ importers:
       '@apexnova-connect/capabilities':
         specifier: workspace:*
         version: link:../capabilities
+      '@apexnova-connect/schemas':
+        specifier: workspace:*
+        version: link:../../schemas
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+
+  packages/routing:
+    dependencies:
       '@apexnova-connect/schemas':
         specifier: workspace:*
         version: link:../../schemas

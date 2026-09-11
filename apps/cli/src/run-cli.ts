@@ -46,6 +46,7 @@ import {
   type SubjectVerdict,
   type SuiteProtocol,
 } from "@apexnova-connect/capabilities";
+import { createRoutingAuditEntry } from "@apexnova-connect/routing";
 import {
   CODING_GENERAL,
   recommend,
@@ -87,6 +88,7 @@ import {
   configureAgent,
   connectionIntent,
   detectForCommand,
+  routingAuditLog,
   selectDeploymentByReference,
   hubProtocolsFor,
   launchAgent,
@@ -2705,6 +2707,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   const existing = await bindings.load(agentId, parsed.profile);
   const needConfig = !existing || parsed.deployment !== undefined;
   let binding = existing;
+  let selectionEntryId: string | undefined;
   const configureWarnings: string[] = [];
   if (needConfig) {
     const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
@@ -2712,6 +2715,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     const protocol = selectProtocol(deployment, integration);
     const result = await configureAgent(parsed, dependencies, integration, deployment, protocol, catalog);
     binding = result.binding;
+    selectionEntryId = result.auditEntryId;
     configureWarnings.push(...result.warnings);
     if (!parsed.json) {
       io.stderr(`Configured ${integration.manifest.displayName} with ${deployment.displayName} (${deployment.inferenceAlias}).\n`);
@@ -2751,6 +2755,67 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     }
   } else {
     launchWarnings.push("The billing ledger could not be read before the run, so the requests it made were not attributed.");
+  }
+
+  // A launch that reused an existing binding made no selection of its own, so
+  // the attribution points at the decision that is still in force. Without this
+  // the log holds two sequences that never meet, and "auditable" would mean two
+  // files nobody can join.
+  if (selectionEntryId === undefined) {
+    try {
+      const entries = await routingAuditLog(dependencies).list();
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index]!;
+        if (
+          entry.event === "selected" &&
+          entry.agentId === agentId &&
+          entry.profile === parsed.profile &&
+          entry.deploymentId === binding.deploymentId
+        ) {
+          selectionEntryId = entry.id;
+          break;
+        }
+      }
+    } catch {
+      // An unreadable log leaves the attribution unlinked rather than unwritten.
+    }
+  }
+
+  // What a route cost is a second event, not an amendment to the first: it is
+  // not known when the target is chosen, and rewriting the decision would lose
+  // what was believed when it was made.
+  if (attribution !== undefined) {
+    const billedTo = [
+      ...(attribution.ours > 0 ? [{ apiKeyId: binding.credentialId, deploymentId: binding.deploymentId, requestCount: attribution.ours }] : []),
+      ...attribution.others.map((entry) => ({ apiKeyId: entry.key, requestCount: entry.requests })),
+    ];
+    const status = attribution.ours === 0 && attribution.others.length > 0
+      ? "mismatched" as const
+      : attribution.ours === 0
+        ? "unconfirmed" as const
+        : "confirmed" as const;
+    try {
+      await routingAuditLog(dependencies).append(
+        createRoutingAuditEntry({
+          event: "attributed",
+          agentId,
+          integrationId: integration.manifest.id,
+          profile: parsed.profile,
+          command: "run",
+          deploymentId: binding.deploymentId,
+          credentialId: binding.credentialId,
+          ...(selectionEntryId === undefined ? {} : { selectionId: selectionEntryId }),
+          attribution: {
+            status,
+            ...(status === "unconfirmed" ? {} : { requestCount: attribution.ours + attribution.others.reduce((sum, entry) => sum + entry.requests, 0) }),
+            ...(billedTo.length === 0 ? {} : { billedTo }),
+          },
+          recordedAt: new Date(currentTime(dependencies)).toISOString(),
+        }),
+      );
+    } catch {
+      launchWarnings.push("The run completed but its billing attribution was not written to the audit log.");
+    }
   }
 
   if (attribution && attribution.ours === 0 && attribution.others.length > 0) {

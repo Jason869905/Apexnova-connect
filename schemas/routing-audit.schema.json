@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.apexnova.dev/connect/routing-audit.schema.json",
+  "title": "Routing Audit Entry",
+  "description": "One immutable entry in the routing audit log. Entries are appended, never amended: a decision and what it later turned out to cost are two events, because the second is not known when the first is made. `selected` records which Deployment a connection target was set to and on what grounds; `attributed` records who the ledger says actually paid for the requests that followed.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "event", "agentId", "profile", "recordedAt"],
+  "properties": {
+    "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
+    "id": {
+      "type": "string",
+      "description": "Content hash of the entry, computed like an Evidence id over the entry with `id` removed.",
+      "pattern": "^audit\\.sha256\\.[0-9a-f]{64}$"
+    },
+    "event": { "enum": ["selected", "attributed"] },
+    "agentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "integrationId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "profile": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "command": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "providerId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "protocol": { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
+    "grounds": {
+      "description": "Why this Deployment and not another. `explicit` means the operator named it, `recommendation` means a ranking chose it, `existing` means the profile already pointed at it, `interactive` means it was picked from a list. Recording the outcome without this cannot answer why, which is what an auditable route has to answer.",
+      "enum": ["explicit", "recommendation", "existing", "interactive"]
+    },
+    "recommendationId": {
+      "type": "string",
+      "description": "The Recommendation this selection came from, when grounds is `recommendation`. Its own record carries the rule, the profile version and the evidence behind the ranking, so the audit cites it rather than copying it.",
+      "pattern": "^rec\\.sha256\\.[0-9a-f]{64}$"
+    },
+    "catalogVersion": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "transactionId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "changePlanId": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "credentialId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "selectionId": {
+      "type": "string",
+      "description": "The `selected` entry this attribution belongs to.",
+      "pattern": "^audit\\.sha256\\.[0-9a-f]{64}$"
+    },
+    "attribution": {
+      "type": "object",
+      "description": "What the billing ledger reported for the requests that followed the selection. Absent requests are not an absence of cost: settlement lags, and `unconfirmed` says so rather than claiming either outcome.",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["confirmed", "mismatched", "unconfirmed"] },
+        "requestCount": { "type": "integer", "minimum": 0 },
+        "billedTo": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["apiKeyId", "requestCount"],
+            "properties": {
+              "apiKeyId": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "apiKeyName": { "type": "string", "maxLength": 256 },
+              "deploymentId": { "type": "string", "maxLength": 256 },
+              "resolvedModel": { "type": "string", "maxLength": 256 },
+              "requestCount": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "recordedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }
+  },
+  "additionalProperties": false
+}

@@ -9,6 +9,12 @@ import {
   IntegrationChangeError,
   runIntegrationChange,
 } from "@apexnova-connect/core";
+import {
+  RoutingAuditLog,
+  createRoutingAuditEntry,
+  routingAuditPath,
+  type RoutingGrounds,
+} from "@apexnova-connect/routing";
 import { FileConfigExecutor } from "@apexnova-connect/config-engine";
 import { SecretValue } from "@apexnova-connect/credential-store";
 import {
@@ -348,6 +354,8 @@ export interface ConfigureResult {
   readonly binding: RuntimeCredentialBinding;
   readonly plan: ChangePlan;
   readonly transactionId?: string;
+  /** The `selected` audit entry this route was written as, when it could be written. */
+  readonly auditEntryId?: string;
   readonly warnings: readonly string[];
 }
 
@@ -454,7 +462,82 @@ export async function configureAgent(
     }
   }
 
-  return { binding, plan: outcome.plan, ...(transactionId ? { transactionId } : {}), warnings };
+  // The audit entry goes last, once the change is applied and the binding saved:
+  // it records a route that happened, not one that was attempted. A route that
+  // cannot be explained afterwards is what M5's exit condition is about, so the
+  // grounds are recorded beside the outcome -- "switched to X" alone answers
+  // which, never why.
+  const selection = await recordSelection(parsed, dependencies, integration, deployment, protocol, catalog, {
+    grounds: parsed.deployment !== undefined
+      ? "explicit"
+      : previous?.deploymentId === deployment.id
+        ? "existing"
+        : "interactive",
+    planId: outcome.plan.id,
+    credentialId: binding.credentialId,
+    ...(transactionId ? { transactionId } : {}),
+  });
+  if (selection.warning !== undefined) warnings.push(selection.warning);
+
+  return {
+    binding,
+    plan: outcome.plan,
+    ...(transactionId ? { transactionId } : {}),
+    ...(selection.entryId === undefined ? {} : { auditEntryId: selection.entryId }),
+    warnings,
+  };
+}
+
+/**
+ * Writing the audit must not undo a connection that already happened: the
+ * change is applied and the credential is live by this point, so a failure here
+ * is reported and the route stands. An unrecorded route is a gap in the log, and
+ * the warning says so rather than letting it pass in silence.
+ */
+async function recordSelection(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  integration: AgentIntegration,
+  deployment: HubCatalogDeployment,
+  protocol: HubCatalogProtocol,
+  catalog: HubCatalogSnapshot,
+  details: {
+    readonly grounds: RoutingGrounds;
+    readonly planId: string;
+    readonly credentialId: string;
+    readonly transactionId?: string;
+  },
+): Promise<{ readonly entryId?: string; readonly warning?: string }> {
+  try {
+    const entry = createRoutingAuditEntry({
+      event: "selected",
+      agentId: integration.manifest.id,
+      integrationId: integration.manifest.id,
+      profile: parsed.profile,
+      ...(parsed.command ? { command: parsed.command } : {}),
+      deploymentId: deployment.id,
+      providerId: deployment.providerId,
+      protocol: protocol.protocol,
+      grounds: details.grounds,
+      catalogVersion: catalog.catalogVersion,
+      changePlanId: details.planId,
+      credentialId: details.credentialId,
+      ...(details.transactionId ? { transactionId: details.transactionId } : {}),
+      recordedAt: new Date(currentTime(dependencies)).toISOString(),
+    });
+    await routingAuditLog(dependencies).append(entry);
+    return { entryId: entry.id };
+  } catch (cause) {
+    return {
+      warning: `The route was applied but not written to the audit log: ${
+        cause instanceof Error ? cause.message : "unknown error"
+      }`,
+    };
+  }
+}
+
+export function routingAuditLog(dependencies: CliDependencies): RoutingAuditLog {
+  return new RoutingAuditLog({ path: routingAuditPath(localStateRoot(dependencies)) });
 }
 
 function defaultLaunch(plan: LaunchPlan): Promise<number> {

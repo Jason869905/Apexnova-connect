@@ -24,9 +24,9 @@
   },
   "dependencies": {
     "@apexnova-connect/capabilities": "workspace:*",
+    "@apexnova-connect/config-engine": "workspace:*",
     "@apexnova-connect/core": "workspace:*",
     "@apexnova-connect/credential-store": "workspace:*",
-    "@apexnova-connect/config-engine": "workspace:*",
     "@apexnova-connect/hub-client": "workspace:*",
     "@apexnova-connect/integration-claude-code": "workspace:*",
     "@apexnova-connect/integration-codex": "workspace:*",
@@ -34,6 +34,7 @@
     "@apexnova-connect/integration-opencode": "workspace:*",
     "@apexnova-connect/integration-sdk": "workspace:*",
     "@apexnova-connect/recommendation": "workspace:*",
+    "@apexnova-connect/routing": "workspace:*",
     "@inquirer/prompts": "^7.0.0"
   }
 }
