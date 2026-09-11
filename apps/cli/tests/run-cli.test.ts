@@ -537,6 +537,157 @@ describe("CLI", () => {
     expect(revoke).toHaveBeenCalledWith("default", "rtc_1", expect.any(AbortSignal));
   });
 
+  describe("a switch that fails", () => {
+    // The exit condition is that a failed switch does not damage the Agent
+    // configuration. Until now only the success path had been exercised, so
+    // each of the three places a switch can fail is injected here and the
+    // profile is asserted back at where it started -- configuration, binding and
+    // which credential Hub still has.
+    async function connectedProfile(name: string) {
+      const root = await mkdtemp(join(tmpdir(), `apexnova-cli-switch-${name}-`));
+      const configPath = join(root, "opencode.jsonc");
+      await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
+      const credentials = memoryCredentials();
+      const bindings = new RuntimeBindingStore(credentials);
+      const baseCatalog = await mockHub().catalog("default", new AbortController().signal);
+      const catalog = {
+        ...baseCatalog,
+        deployments: baseCatalog.deployments.map((deployment) => ({
+          ...deployment,
+          protocols: [
+            ...deployment.protocols,
+            { protocol: "openai-chat", baseUrl: "https://api.example.test/v1/chat/completions" },
+          ],
+        })),
+      };
+      const active = new Set<string>();
+      let sequence = 0;
+      const createRuntimeCredential: HubCommandService["createRuntimeCredential"] = async () => {
+        sequence += 1;
+        const credentialId = `rtc_${sequence}`;
+        active.add(credentialId);
+        return { credentialId, expiresAt: "2099-09-05T12:00:00Z", deviceId: "device_1", secret: SecretValue.from(`runtime-secret-${sequence}`) };
+      };
+      const revokeRuntimeCredential = vi.fn(async (_profile: string, credentialId: string) => { active.delete(credentialId); });
+      const hub = mockHub({
+        catalog: async () => catalog,
+        createRuntimeCredential,
+        revokeRuntimeCredential,
+        runtimeCredentials: async () => [...active].map((credentialId) => ({
+          credentialId,
+          name: "OpenCode",
+          prefix: "anrt_test...test",
+          deviceId: "device_1",
+          protocols: ["openai-responses", "openai-chat"],
+          publicDeploymentIds: ["deployment.nova"],
+          expiresAt: "2099-09-05T12:00:00Z",
+          createdAt: "2026-09-05T12:00:00Z",
+        })),
+      });
+      const common = {
+        hubService: hub,
+        credentialStore: credentials,
+        registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+        platform: "win32" as const,
+        environment: { LOCALAPPDATA: root },
+        homeDirectory: root,
+        cwd: root,
+        createRequestId: () => `local_switch_${name}`,
+      };
+
+      const connected = await runCli(
+        ["connect", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-responses", "--yes", "--json"],
+        { ...common, io: captureIo().io },
+      );
+      expect(connected.exitCode).toBe(EXIT_CODES.success);
+
+      return {
+        common,
+        configPath,
+        bindings,
+        active,
+        revokeRuntimeCredential,
+        configBefore: await readFile(configPath, "utf8"),
+        bindingBefore: await bindings.load("opencode", "default"),
+      };
+    }
+
+    it("leaves everything alone when the new credential cannot be issued", async () => {
+      const profile = await connectedProfile("issue");
+      const capture = captureIo();
+
+      const result = await runCli(
+        ["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes"],
+        {
+          ...profile.common,
+          io: capture.io,
+          hubService: mockHub({
+            ...profile.common.hubService,
+            createRuntimeCredential: async () => { throw new Error("Hub refused to issue a credential"); },
+          }),
+        },
+      );
+
+      expect(result.exitCode).not.toBe(EXIT_CODES.success);
+      // Nothing was written, so there is nothing to undo.
+      expect(await readFile(profile.configPath, "utf8")).toBe(profile.configBefore);
+      expect(await profile.bindings.load("opencode", "default")).toEqual(profile.bindingBefore);
+      expect(profile.active.has("rtc_1")).toBe(true);
+    });
+
+    it("rolls the configuration back and revokes the new credential when verification fails", async () => {
+      const profile = await connectedProfile("verify");
+      const capture = captureIo();
+
+      const result = await runCli(
+        ["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes"],
+        {
+          ...profile.common,
+          io: capture.io,
+          registry: registryWith({
+            detect: async () => ({ ...installed, configPath: profile.configPath }),
+            verify: async () => ({ valid: false as const, reason: "the written configuration did not read back" }),
+          }),
+        },
+      );
+
+      expect(result.exitCode).toBe(EXIT_CODES.verification);
+      expect(await readFile(profile.configPath, "utf8")).toBe(profile.configBefore);
+      // The credential minted for the switch must not outlive the switch, and
+      // the one still in use must survive it.
+      expect(profile.active.has("rtc_2")).toBe(false);
+      expect(profile.active.has("rtc_1")).toBe(true);
+      expect(await profile.bindings.load("opencode", "default")).toEqual(profile.bindingBefore);
+    });
+
+    it("stays on the previous credential when the new binding cannot be saved", async () => {
+      const profile = await connectedProfile("binding");
+      const capture = captureIo();
+      const failingStore: CredentialStore = {
+        ...profile.common.credentialStore,
+        set: async (key, secret) => {
+          if (key.kind === "runtime-credential") throw new Error("credential store is unavailable");
+          return profile.common.credentialStore.set(key, secret);
+        },
+      };
+
+      const result = await runCli(
+        ["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes"],
+        { ...profile.common, io: capture.io, credentialStore: failingStore },
+      );
+
+      expect(result.exitCode).not.toBe(EXIT_CODES.success);
+      // A configuration pointing at a credential nobody stored is worse than a
+      // failed switch. The file goes back, the credential minted for the switch
+      // is revoked, and the profile is left on the one it already had -- which
+      // is what the rolled-back configuration points at.
+      expect(await readFile(profile.configPath, "utf8")).toBe(profile.configBefore);
+      expect(profile.active.has("rtc_2")).toBe(false);
+      expect(profile.active.has("rtc_1")).toBe(true);
+      expect(await profile.bindings.load("opencode", "default")).toEqual(profile.bindingBefore);
+    });
+  });
+
   it("reissues the previous runtime target when restoring a switch, then disconnects on the initial restore", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-restore-"));
     const configPath = join(root, "opencode.jsonc");
