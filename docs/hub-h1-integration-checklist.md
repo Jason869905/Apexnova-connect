@@ -270,7 +270,18 @@ Linux 侧的 launcher **不记为通过**。要能声称它成立，至少需要
 
 因此 `detect` 报出的版本来自 Windows 二进制、配置路径来自 Linux HOME，`connect` 把配置写到后者，launcher 启动前者——**Connect 配置了一个永远不会读它的安装**，Agent 于是按 Windows 配置运行，用的是那里的 `myopencode` 长期 key。这也解释了为什么 `myopencode` 的 secret 在 Linux 侧 grep 不到：它本来就不在这台「机器」上。
 
-**尚未修复。** 修法方向明确：检测必须产出**它实际探测到的那个可执行文件**，launcher 必须启动同一个，而不是各自再按 PATH 解析一次；在 WSL 上，PATH 上的 Windows `opencode` 不得与 Linux 的配置目录静默配对——两者不一致时应当拒绝，而不是挑一个。
+**已修复（同日）。** 不能靠让用户删掉另一份安装来解决——那不是修复，是绕开。做法是让这种不一致**说出来并拒绝**：
+
+- `foreignInstallation()` 按 PATH 顺序找 `opencode`，落在 `/mnt/<盘符>/` 下的判为另一个操作系统的安装。**PATH 上任何一个本机条目都会让它放行**——本机安装在场时，读我们这份配置的就是它；
+- `detect` 与 `doctor` 在只找得到 Windows 安装时给出警告，把「版本读自哪一份、配置写去哪一份」摆在同一句话里；
+- launcher 直接拒绝（`AGENT_NOT_FOUND`），并告诉用户两条出路：在本环境内安装，或把它的目录排到 Windows 条目之前。
+
+现网验证（Windows 那份仍在，本机 `~/.npm-global/bin` 此前不在 PATH 上）：
+
+- `[passed]` 未修正 PATH 时，`detect` 报出警告、`run` 以退出码 5 拒绝，**不再静默启动另一份**；
+- `[passed]` 把本机安装排到 PATH 之前后：`detect` 无警告、配置路径为本机那份；`run opencode -- run "…"` 真实返回 `APEXNOVA_OK`，并且**对账检查正面确认**：`1 request billed to this launcher's credential on deployment.apexnova.cmq4770nr0000edzis38w378a`。这是 launcher 第一次在 Linux 上被证明把请求送到了我们配置的 Deployment、用的是我们签发的凭据。
+
+**仍未修的一处顺序问题**：拒绝发生在 `configureAgent` **之后**，所以一次被拒的 `run` 会留下已写入的配置和已签发的凭据（可用 `restore` 收回）。可启动性应当在动任何状态之前判定，但那需要在 Agent Discovery Contract 上留一个「能否启动」的前置检查，四个 Integration 都会受影响，单独提出。
 
 ### 同一轮暴露的另一处：Agent 会改写 Connect 写的文件
 

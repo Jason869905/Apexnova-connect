@@ -52,6 +52,50 @@ describe("OpenCode discovery", () => {
     });
   });
 
+  it("warns when the only OpenCode on PATH belongs to another operating system", async () => {
+    const root = await createTestRoot();
+    // A WSL session: $PATH carries the Windows entries, so `opencode` resolves
+    // to the Windows install while the configuration goes to the Linux $HOME.
+    // Reporting a version read from one beside a config path belonging to the
+    // other is how `connect` came to write a file the Agent never reads.
+    const windowsBin = "/mnt/c/Users/other/AppData/Roaming/npm";
+
+    const result = await detectOpenCode(
+      {
+        workingDirectory: root,
+        homeDirectory: join(root, "home"),
+        environment: { PATH: windowsBin },
+        platform: "linux",
+      },
+      async () => ({ found: true, stdout: "opencode 1.18.29\n" }),
+      (path) => path === `${windowsBin}/opencode`,
+    );
+
+    expect(result.warnings.join(" ")).toContain("Windows installation");
+    expect(result.warnings.join(" ")).toContain("configure one installation and launch another");
+  });
+
+  it("says nothing when a native OpenCode is also on PATH", async () => {
+    const root = await createTestRoot();
+    const windowsBin = "/mnt/c/Users/other/AppData/Roaming/npm";
+    const nativeBin = "/usr/local/bin";
+
+    const result = await detectOpenCode(
+      {
+        workingDirectory: root,
+        homeDirectory: join(root, "home"),
+        environment: { PATH: `${windowsBin}:${nativeBin}` },
+        platform: "linux",
+      },
+      async () => ({ found: true, stdout: "opencode 1.18.29\n" }),
+      (path) => path === `${windowsBin}/opencode` || path === `${nativeBin}/opencode`,
+    );
+
+    // A native entry means the installation that reads this configuration is
+    // present; the Windows one beside it is not a problem to report.
+    expect(result.warnings).toEqual([]);
+  });
+
   it("reports config-only without guessing that the executable exists", async () => {
     const root = await createTestRoot();
     const configRoot = join(root, "xdg", "opencode");

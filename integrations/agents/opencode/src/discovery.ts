@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs";
 import { stat, readFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, posix, resolve } from "node:path";
 
 import {
   AgentIntegrationError,
@@ -20,6 +21,30 @@ const MAX_CONFIG_BYTES = 2 * 1024 * 1024;
 export const OPENCODE_AGENT_ID = "opencode" as const;
 export const OPENCODE_DISPLAY_NAME = "OpenCode" as const;
 export const OPENCODE_EXECUTABLE = "opencode" as const;
+
+/**
+ * A Windows drive mounted into a Linux filesystem. An executable under one of
+ * these is the Windows installation, which reads the Windows user's
+ * configuration rather than the one this context derives from `$HOME`.
+ */
+const WINDOWS_MOUNT = /^\/mnt\/[a-z]\//;
+
+export function foreignInstallation(
+  context: IntegrationContext,
+  pathExists: (path: string) => boolean = existsSync,
+): string | undefined {
+  if (context.platform === "windows") return undefined;
+  let foreign: string | undefined;
+  for (const directory of (context.environment.PATH ?? "").split(":").filter(Boolean)) {
+    const candidate = posix.join(directory, OPENCODE_EXECUTABLE);
+    if (!pathExists(candidate)) continue;
+    // A native entry anywhere on PATH wins: it is the installation that reads
+    // the configuration this context writes.
+    if (!WINDOWS_MOUNT.test(candidate)) return undefined;
+    foreign ??= candidate;
+  }
+  return foreign;
+}
 
 export type OpenCodeInspectionErrorCode = "CONFIG_TOO_LARGE" | "CONFIG_READ_FAILED";
 
@@ -124,6 +149,7 @@ async function isRegularFile(path: string): Promise<boolean> {
 export async function detectOpenCode(
   context: IntegrationContext,
   runVersionCommand?: CommandProbe,
+  pathExists: (path: string) => boolean = existsSync,
 ): Promise<DetectionResult> {
   const candidates = configCandidates(context);
   const explicitCandidate = candidates.find((candidate) => candidate.scope === "explicit");
@@ -155,6 +181,18 @@ export async function detectOpenCode(
     evidence.push(`configuration file found (${existingCandidate.scope})`);
   }
 
+  // The version above was read from whatever `$PATH` resolves, which in a WSL
+  // session can be the Windows installation while the configuration path below
+  // belongs to this environment's `$HOME`. Reporting the two side by side as if
+  // they were one product is what let `connect` write a file the launched Agent
+  // never reads.
+  const foreign = foreignInstallation(context, pathExists);
+  const warnings = foreign === undefined
+    ? []
+    : [
+        `The OpenCode on PATH is a Windows installation (${foreign}); it reads the Windows user's configuration, not ${preferredCandidate.path}. Connect would configure one installation and launch another, so the launcher refuses until a native OpenCode is on PATH.`,
+      ];
+
   return {
     agentId: OPENCODE_AGENT_ID,
     displayName: OPENCODE_DISPLAY_NAME,
@@ -164,7 +202,7 @@ export async function detectOpenCode(
     configExists: existingCandidate !== undefined,
     configScope: preferredCandidate.scope,
     evidence,
-    warnings: probe.warnings,
+    warnings: [...probe.warnings, ...warnings],
   };
 }
 

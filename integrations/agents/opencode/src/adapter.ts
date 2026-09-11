@@ -29,6 +29,7 @@ import {
   OPENCODE_AGENT_ID,
   OPENCODE_DISPLAY_NAME,
   OPENCODE_EXECUTABLE,
+  foreignInstallation,
 } from "./discovery.js";
 import { openCodeManifest } from "./manifest.js";
 import {
@@ -87,12 +88,29 @@ async function readExistingConfig(configPath: string, exists: boolean): Promise<
  * On Windows the npm shim is a `.cmd` that cannot be spawned with `shell:false`,
  * so the launcher resolves the fixed native target instead of interpolating any
  * user argument into a shell command line.
+ *
+ * On Linux the bare name used to be enough, which is how a WSL session came to
+ * configure one installation and launch another: `$PATH` there carries the
+ * Windows entries, so `opencode` resolved to the Windows install while the
+ * configuration went to the Linux `$HOME`. The Agent then ran on the Windows
+ * user's providers and a long-lived key Connect never issued, and every command
+ * reported success. Two installations are two products; picking one and
+ * configuring the other is the one outcome that must not happen quietly.
  */
 export function resolveOpenCodeExecutable(
   context: IntegrationContext,
   pathExists: (path: string) => boolean = existsSync,
 ): string {
-  if (context.platform !== "windows") return OPENCODE_EXECUTABLE;
+  if (context.platform !== "windows") {
+    const foreign = foreignInstallation(context, pathExists);
+    if (foreign !== undefined) {
+      throw new AgentIntegrationError(
+        "AGENT_NOT_FOUND",
+        `The only OpenCode on PATH is a Windows installation (${foreign}), which reads the Windows user's configuration rather than ${context.homeDirectory}. Connect would configure one installation and launch another. Install OpenCode inside this environment, or put its directory ahead of the Windows entries on PATH.`,
+      );
+    }
+    return OPENCODE_EXECUTABLE;
+  }
 
   const pathValue = context.environment.PATH ?? context.environment.Path ?? "";
   for (const directory of pathValue.split(";").filter(Boolean)) {
@@ -130,7 +148,7 @@ export function createOpenCodeIntegration(
     supportedProtocols: SUPPORTED_PROTOCOLS,
 
     detect(context: IntegrationContext): Promise<DetectionResult> {
-      return detectOpenCode(context, options.runVersionCommand);
+      return detectOpenCode(context, options.runVersionCommand, options.pathExists);
     },
 
     inspect(
@@ -232,7 +250,7 @@ export function createOpenCodeIntegration(
 
     async diagnose(context: IntegrationContext): Promise<readonly DiagnosticCheck[]> {
       const checks: DiagnosticCheck[] = [];
-      const detection = await detectOpenCode(context, options.runVersionCommand);
+      const detection = await detectOpenCode(context, options.runVersionCommand, options.pathExists);
       checks.push({
         id: `${OPENCODE_AGENT_ID}.discovery`,
         status: detection.status === "not-found" ? "fail" : "pass",
