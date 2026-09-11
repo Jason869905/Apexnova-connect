@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { EXIT_CODES, RuntimeBindingStore, runCli, type CliIo, type HubCommandService } from "../src/index.js";
 import { HubClientError } from "@apexnova-connect/hub-client";
 import { createIntegrationRegistry } from "@apexnova-connect/core";
-import { RoutingAuditLog, routingAuditPath } from "@apexnova-connect/routing";
+import { RoutingAuditLog, createRoutingAuditEntry, routingAuditPath } from "@apexnova-connect/routing";
 import {
   CAPABILITY_DEFINITIONS,
   CAPABILITY_SUITE_ID,
@@ -2228,6 +2228,61 @@ describe("CLI", () => {
 
     expect(result.exitCode).toBe(EXIT_CODES.usage);
     expect(capture.stderr()).toContain("needs a transaction ID");
+  });
+
+  it("reads the audit log back with each cost under the decision it paid for", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-audit-"));
+    const state = { platform: "win32" as const, environment: { LOCALAPPDATA: root }, homeDirectory: root };
+    const log = new RoutingAuditLog({ path: routingAuditPath(join(root, "Apexnova", "connect")) });
+    const selected = await log.append(createRoutingAuditEntry({
+      event: "selected",
+      agentId: "opencode",
+      profile: "default",
+      command: "connect",
+      deploymentId: "deployment.nova",
+      protocol: "openai-responses",
+      grounds: "recommendation",
+      recommendationId: `rec.sha256.${"c".repeat(64)}`,
+      credentialId: "rtc_1",
+      recordedAt: "2026-09-11T20:00:00.000Z",
+    }));
+    await log.append(createRoutingAuditEntry({
+      event: "attributed",
+      agentId: "opencode",
+      profile: "default",
+      command: "run",
+      selectionId: selected.id,
+      attribution: { status: "confirmed", requestCount: 2, billedTo: [{ apiKeyId: "rtc_1", requestCount: 2 }] },
+      recordedAt: "2026-09-11T20:05:00.000Z",
+    }));
+    await log.append(createRoutingAuditEntry({
+      event: "attributed",
+      agentId: "opencode",
+      profile: "default",
+      command: "verify",
+      attribution: { status: "mismatched", requestCount: 1, billedTo: [{ apiKeyId: "key_other", apiKeyName: "someone-else", requestCount: 1 }] },
+      recordedAt: "2026-09-11T20:06:00.000Z",
+    }));
+
+    const capture = captureIo();
+    const result = await runCli(["audit", "opencode"], {
+      ...state,
+      io: capture.io,
+      registry: registryWith(),
+      createRequestId: () => "local_audit",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = capture.stdout();
+    // The three questions a route has to answer, together: which deployment, on
+    // what grounds, and who actually paid.
+    expect(output).toContain("deployment.nova");
+    expect(output).toContain("chosen: recommendation (rec.sha256.");
+    expect(output).toContain("billed (run): confirmed — 2 on rtc_1");
+    // An attribution with no recorded decision is still a fact about spending.
+    // Dropping it would be the quiet omission the log exists to prevent.
+    expect(output).toContain("Not linked to any recorded route");
+    expect(output).toContain("someone-else");
   });
 
   it("says on every run that the ranking only ever saw the Apexnova catalog", async () => {

@@ -128,6 +128,8 @@ export interface ParsedArguments {
   /** Deployment references (id, alias or inference alias) the ranking is limited to. */
   /** Take the top of the ranking instead of naming a Deployment. */
   readonly best: boolean;
+  /** How many routes `audit` prints, newest first. */
+  readonly limit?: number;
   readonly modelAllowlist?: readonly string[];
   /** Model publishers whose deployments must not be recommended. */
   readonly excludePublishers?: readonly string[];

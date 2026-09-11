@@ -47,7 +47,7 @@ import {
   type SubjectVerdict,
   type SuiteProtocol,
 } from "@apexnova-connect/capabilities";
-import { createRoutingAuditEntry } from "@apexnova-connect/routing";
+import { createRoutingAuditEntry, type RoutingAuditEntry } from "@apexnova-connect/routing";
 import {
   CODING_GENERAL,
   recommend,
@@ -127,6 +127,7 @@ Usage:
   apexnova init [--hub-url <url>] [--client-id <id>] [--path-prefix <p>]
   apexnova login | logout | whoami | balance
   apexnova agents
+  apexnova audit [agent] [--limit <n>]   Read the routing audit log
   apexnova models [--agent <id>] [--protocol <id>] [--compatible-only]
   apexnova usage [--request-id <id>] [--key <id>] [--from <iso>] [--to <iso>] [--granularity hour|day|month]
   apexnova connect <agent> (--deployment <id> | --best) (--dry-run | --yes)
@@ -233,6 +234,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let requestIdFilter: string | undefined;
   let scenarioId: string | undefined;
   let best = false;
+  let limit: number | undefined;
   let modelAllowlist: readonly string[] | undefined;
   let excludePublishers: readonly string[] | undefined;
   let maxPrice: string | undefined;
@@ -365,6 +367,16 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         requestIdFilter = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--limit": {
+        const raw = valueAfter(args, index, arg);
+        const requested = Number(raw);
+        if (!Number.isSafeInteger(requested) || requested <= 0) {
+          throw new CliError({ code: "INVALID_ARGUMENT", message: "--limit takes a positive whole number.", exitCode: EXIT_CODES.usage });
+        }
+        limit = requested;
+        index += 1;
+        break;
+      }
       case "--best":
         best = true;
         break;
@@ -466,6 +478,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(requestIdFilter ? { requestId: requestIdFilter } : {}),
     ...(scenarioId ? { scenarioId } : {}),
     best,
+    ...(limit === undefined ? {} : { limit }),
     ...(modelAllowlist ? { modelAllowlist } : {}),
     ...(excludePublishers ? { excludePublishers } : {}),
     ...(maxPrice ? { maxPrice } : {}),
@@ -2267,6 +2280,88 @@ async function executeCompatibilityReplay(
 }
 
 /**
+ * Reads back the routing audit log. Entries nobody can read are a file, not an
+ * audit: the exit condition asks for routes that are explicable, and until this
+ * command existed the explanation lived only in JSON lines.
+ *
+ * Attributions are shown under the selection they belong to, because the three
+ * questions a route has to answer -- which Deployment, on what grounds, and who
+ * actually paid -- are answered by the pair and not by either alone.
+ */
+async function executeAudit(parsed: ParsedArguments, dependencies: CliDependencies) {
+  const requested = agentOperand(parsed, dependencies, { optional: true, command: "audit" });
+  const agentId = requested === undefined ? undefined : resolveIntegration(requested, dependencies).manifest.id;
+  const limit = parsed.limit ?? 20;
+
+  const entries = (await routingAuditLog(dependencies).list()).filter(
+    (entry) => (agentId === undefined || entry.agentId === agentId) && entry.profile === parsed.profile,
+  );
+
+  const attributionsBySelection = new Map<string, RoutingAuditEntry[]>();
+  const unlinked: RoutingAuditEntry[] = [];
+  for (const entry of entries) {
+    if (entry.event !== "attributed") continue;
+    if (entry.selectionId === undefined) {
+      // Shown on its own rather than dropped: an attribution nobody can trace
+      // back to a decision is still a fact about spending, and hiding it would
+      // be the quiet omission this log exists to prevent.
+      unlinked.push(entry);
+      continue;
+    }
+    const existing = attributionsBySelection.get(entry.selectionId) ?? [];
+    existing.push(entry);
+    attributionsBySelection.set(entry.selectionId, existing);
+  }
+
+  const routes = entries
+    .filter((entry) => entry.event === "selected" || entry.event === "released")
+    .reverse()
+    .slice(0, limit);
+
+  const human = entries.length === 0
+    ? `No routes have been recorded for profile ${parsed.profile}.`
+    : [
+        ...routes.map((entry) => {
+          const attributions = attributionsBySelection.get(entry.id) ?? [];
+          return [
+            entry.event === "released"
+              ? `${entry.recordedAt}  ${entry.agentId}  released${entry.command ? ` by ${entry.command}` : ""}`
+              : `${entry.recordedAt}  ${entry.agentId}  ${entry.deploymentId}`,
+            ...(entry.event === "released"
+              ? []
+              : [
+                  `  chosen: ${entry.grounds ?? "unrecorded"}${entry.recommendationId ? ` (${entry.recommendationId})` : ""}${entry.command ? ` by ${entry.command}` : ""}`,
+                  ...(entry.protocol ? [`  protocol: ${entry.protocol}${entry.catalogVersion ? `, catalog ${entry.catalogVersion}` : ""}`] : []),
+                  ...(entry.credentialId ? [`  credential: ${entry.credentialId}`] : []),
+                ]),
+            ...attributions.map((attribution) => {
+              const billed = (attribution.attribution?.billedTo ?? [])
+                .map((share) => `${share.requestCount} on ${share.apiKeyName ?? share.apiKeyId}`)
+                .join(", ");
+              return `  billed (${attribution.command ?? "?"}): ${attribution.attribution?.status}${billed ? ` \u2014 ${billed}` : ""}`;
+            }),
+          ].join("\n");
+        }),
+        ...(unlinked.length === 0
+          ? []
+          : ["", "Not linked to any recorded route:", ...unlinked.map((entry) => {
+              // Who was billed is the useful half. A line that gives only the
+              // status says something happened without saying to whom.
+              const billed = (entry.attribution?.billedTo ?? [])
+                .map((share) => `${share.requestCount} on ${share.apiKeyName ?? share.apiKeyId}`)
+                .join(", ");
+              return `  ${entry.recordedAt}  ${entry.agentId}  ${entry.attribution?.status}${billed ? ` \u2014 ${billed}` : ""}`;
+            })]),
+      ].join("\n\n");
+
+  return {
+    data: { profile: parsed.profile, entries: routes, unlinked },
+    warnings: [] as readonly string[],
+    human,
+  };
+}
+
+/**
  * Renders the published matrix from the evidence on hand. It is generated, not
  * maintained: a hand-written matrix is a claim nobody can trace, which is the
  * thing M3 exists to stop. Reads the local store only, so it costs nothing.
@@ -3440,6 +3535,9 @@ export async function runCli(
         break;
       case "agents":
         result = await executeAgents(parsed, dependencies);
+        break;
+      case "audit":
+        result = await executeAudit(parsed, dependencies);
         break;
       case "credential":
         result = await executeCredential(parsed, dependencies);
