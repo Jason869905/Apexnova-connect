@@ -186,7 +186,7 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
     })() }),
     // Required by the contract and dropped here until M4 needed it to score
     // cost -- the third field this whitelist parser has silently omitted.
-    ...(item.pricing === null || item.pricing === undefined ? {} : { pricing: parseCatalogPricing(item.pricing) }),
+    ...present("pricing", item.pricing === null || item.pricing === undefined ? undefined : parseCatalogPricing(item.pricing)),
     capabilities: strings(item.capabilities, "deployment.capabilities"),
     // Parsed rather than dropped: the evidence level beside each capability is
     // the whole point of the field, and a whitelist parser that skips it turns
@@ -218,8 +218,21 @@ function apiKeyKind(value: unknown): "user" | "runtime" {
 
 const BILLING_MODES: readonly HubCatalogPricing["billingMode"][] = ["token", "per_item", "duration", "flat"];
 
-function parseCatalogPricing(value: unknown): HubCatalogPricing {
+/**
+ * Returns undefined when the projection carries no price. Requirement 12H asked
+ * Hub for one of two things -- a real price, or an explicit null meaning "this
+ * projection does not publish one" -- and Hub shipped both: real prices for most
+ * deployments and `input`/`output` of null for the rest. Only the first shape
+ * was implemented here, so the whole catalog stopped parsing the day the second
+ * one arrived, and every command that reads the catalog failed with it.
+ *
+ * A null price is not an error and not a zero. It is the absence `recommend`
+ * already knows how to handle, so it is reported as an absent `pricing` block
+ * rather than a parse failure that takes the other 45 deployments down with it.
+ */
+function parseCatalogPricing(value: unknown): HubCatalogPricing | undefined {
   const item = object(value, "deployment.pricing");
+  if (item.input === null || item.output === null) return undefined;
   const billingMode = string(item.billingMode, "deployment.pricing.billingMode", 32);
   if (!BILLING_MODES.includes(billingMode as HubCatalogPricing["billingMode"])) throw invalid("deployment.pricing.billingMode");
   if (!Number.isSafeInteger(item.unit) || (item.unit as number) <= 0) throw invalid("deployment.pricing.unit");

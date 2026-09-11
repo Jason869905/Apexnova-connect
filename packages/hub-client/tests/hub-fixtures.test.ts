@@ -49,6 +49,32 @@ describe("Hub's published fixtures", () => {
     expect(deployment.limits?.contextWindow).toBeGreaterThan(0);
   });
 
+  it("reads a null price as no price, not as a broken catalog", async () => {
+    // Requirement 12H offered Hub two acceptable shapes: a real price, or an
+    // explicit null meaning this projection publishes none. Hub shipped both,
+    // and only the first was implemented -- so one null took the entire catalog
+    // down, and with it every command that reads one.
+    const snapshot = fixture("catalog-snapshot.json") as {
+      deployments: { pricing?: Record<string, unknown> }[];
+    };
+    const priced = snapshot.deployments[0]!;
+    const withNullPrice = {
+      ...snapshot,
+      deployments: [
+        { ...priced, id: "deployment.unpriced", pricing: { ...priced.pricing, input: null, output: null } },
+        priced,
+      ],
+    };
+
+    const parsed = await clientReturning(withNullPrice).catalog();
+
+    expect(parsed.deployments).toHaveLength(2);
+    expect(parsed.deployments[0]!.pricing).toBeUndefined();
+    // The rest of the catalog is unaffected: one deployment without a published
+    // price says nothing about the others.
+    expect(parsed.deployments[1]!.pricing).toBeDefined();
+  });
+
   it("parses a usage list whose unsettled row has no money at all", async () => {
     const result = await clientReturning(fixture("billing-usage.json")).usageQuery({});
     if ("granularity" in result) throw new Error("expected a usage list");
