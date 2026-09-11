@@ -126,6 +126,8 @@ export interface ParsedArguments {
   readonly requestId?: string;
   readonly scenarioId?: string;
   /** Deployment references (id, alias or inference alias) the ranking is limited to. */
+  /** Take the top of the ranking instead of naming a Deployment. */
+  readonly best: boolean;
   readonly modelAllowlist?: readonly string[];
   /** Model publishers whose deployments must not be recommended. */
   readonly excludePublishers?: readonly string[];

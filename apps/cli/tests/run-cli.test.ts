@@ -131,6 +131,21 @@ function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService 
   };
 }
 
+/**
+ * A state root of its own. Commands write into `localStateRoot`, and a test that
+ * leaves it unset writes into the developer's real one -- for the routing audit
+ * that means a fabricated route in the one file that must hold only what
+ * actually happened.
+ */
+async function isolatedState() {
+  const root = await mkdtemp(join(tmpdir(), "apexnova-cli-state-"));
+  return {
+    platform: "win32" as const,
+    environment: { LOCALAPPDATA: root },
+    homeDirectory: root,
+  };
+}
+
 function memoryCredentials(): CredentialStore {
   const values = new Map<string, SecretValue>();
   const name = (key: { integrationId: string; accountId: string; kind: string }) => `${key.integrationId}/${key.accountId}/${key.kind}`;
@@ -1099,6 +1114,11 @@ describe("CLI", () => {
       hubService: mockHub(),
       registry: registryWith({ detect: async () => installed, inspect: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, connection: { providerId: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }) }),
       verifyHubInference: live,
+      // An isolated state root: `verify --live` writes a routing audit entry,
+      // and a test that leaves that unset writes a fabricated route into the
+      // developer's own audit log -- which is the one file that must contain
+      // only things that really happened.
+      ...(await isolatedState()),
       createRequestId: () => "local_live",
     });
 
@@ -1130,6 +1150,7 @@ describe("CLI", () => {
       hubService: mockHub({ usage }),
       registry: registryWith({ detect: async () => installed, inspect: async () => ({ agentId: "opencode", configPath: installed.configPath, status: "configured", managed: true, connection: { providerId: "apexnova", protocol: "openai-responses", environmentVariables: ["APEXNOVA_API_KEY"], modelIds: ["nova"] }, warnings: [] }) }),
       verifyHubInference: live,
+      ...(await isolatedState()),
       createRequestId: () => "local_billed",
     });
 

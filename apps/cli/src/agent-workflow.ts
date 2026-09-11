@@ -373,6 +373,7 @@ export async function configureAgent(
   protocol: HubCatalogProtocol,
   catalog: HubCatalogSnapshot,
   mode: CredentialMode = "auto",
+  chosenBy?: { readonly grounds: RoutingGrounds; readonly recommendationId?: string },
 ): Promise<ConfigureResult> {
   const agentId = integration.manifest.id;
   const context = integrationContext(parsed, dependencies);
@@ -468,11 +469,12 @@ export async function configureAgent(
   // grounds are recorded beside the outcome -- "switched to X" alone answers
   // which, never why.
   const selection = await recordSelection(parsed, dependencies, integration, deployment, protocol, catalog, {
-    grounds: parsed.deployment !== undefined
+    grounds: chosenBy?.grounds ?? (parsed.deployment !== undefined
       ? "explicit"
       : previous?.deploymentId === deployment.id
         ? "existing"
-        : "interactive",
+        : "interactive"),
+    ...(chosenBy?.recommendationId === undefined ? {} : { recommendationId: chosenBy.recommendationId }),
     planId: outcome.plan.id,
     credentialId: binding.credentialId,
     ...(transactionId ? { transactionId } : {}),
@@ -503,6 +505,7 @@ async function recordSelection(
   catalog: HubCatalogSnapshot,
   details: {
     readonly grounds: RoutingGrounds;
+    readonly recommendationId?: string;
     readonly planId: string;
     readonly credentialId: string;
     readonly transactionId?: string;
@@ -519,6 +522,7 @@ async function recordSelection(
       providerId: deployment.providerId,
       protocol: protocol.protocol,
       grounds: details.grounds,
+      ...(details.recommendationId === undefined ? {} : { recommendationId: details.recommendationId }),
       catalogVersion: catalog.catalogVersion,
       changePlanId: details.planId,
       credentialId: details.credentialId,

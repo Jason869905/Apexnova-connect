@@ -19,6 +19,7 @@ import {
   HubClientError,
   verifyHubInference,
   type HubCatalogDeployment,
+  type HubCatalogSnapshot,
   type HubCatalogProtocol,
   type HubUsageRecord,
   type UsageQuery,
@@ -53,6 +54,7 @@ import {
   recommendationRecord,
   scenario as scenarioProfile,
   type RecommendationCandidate,
+  type RecommendationConstraints,
 } from "@apexnova-connect/recommendation";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
 import { CredentialStoreError, SecretValue } from "@apexnova-connect/credential-store";
@@ -127,7 +129,7 @@ Usage:
   apexnova agents
   apexnova models [--agent <id>] [--protocol <id>] [--compatible-only]
   apexnova usage [--request-id <id>] [--key <id>] [--from <iso>] [--to <iso>] [--granularity hour|day|month]
-  apexnova connect <agent> --deployment <id> (--dry-run | --yes)
+  apexnova connect <agent> (--deployment <id> | --best) (--dry-run | --yes)
   apexnova switch <agent> --deployment <id> (--dry-run | --yes)
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
@@ -156,6 +158,7 @@ Global options:
   --protocol <id>        Select or filter a protocol
   --compatible-only      Hide unavailable or unsupported deployments
   --deployment <id>      Select a public model deployment
+  --best                 Connect to the top of the ranking, and record why
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
   --record <path>        Write a replayable recording of a suite run
   --within <days>        Refresh evidence expiring within this many days (default 7)
@@ -229,6 +232,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let reason: string | undefined;
   let requestIdFilter: string | undefined;
   let scenarioId: string | undefined;
+  let best = false;
   let modelAllowlist: readonly string[] | undefined;
   let excludePublishers: readonly string[] | undefined;
   let maxPrice: string | undefined;
@@ -361,6 +365,9 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         requestIdFilter = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--best":
+        best = true;
+        break;
       case "--model-allowlist":
         modelAllowlist = splitList(valueAfter(args, index, arg));
         index += 1;
@@ -458,6 +465,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(reason ? { reason } : {}),
     ...(requestIdFilter ? { requestId: requestIdFilter } : {}),
     ...(scenarioId ? { scenarioId } : {}),
+    best,
     ...(modelAllowlist ? { modelAllowlist } : {}),
     ...(excludePublishers ? { excludePublishers } : {}),
     ...(maxPrice ? { maxPrice } : {}),
@@ -1710,9 +1718,26 @@ async function executeCompatibilityRefresh(
  * decided the order is in the output -- the dimensions with their numbers, the
  * evidence behind each one, and the priorities nothing measures yet.
  */
-async function executeRecommend(parsed: ParsedArguments, dependencies: CliDependencies) {
-  const requested = agentOperand(parsed, dependencies, { optional: false, command: "recommend" });
-  const integration = resolveIntegration(requested!, dependencies);
+interface RankedDeployments {
+  readonly result: ReturnType<typeof recommend>;
+  readonly profile: typeof CODING_GENERAL;
+  readonly agentVersion: string;
+  readonly constraints: RecommendationConstraints;
+  readonly catalog: HubCatalogSnapshot;
+}
+
+/**
+ * The one place the catalog is ranked. `recommend` reports it and
+ * `connect --best` acts on it; a second copy of these rules is how the audit
+ * would come to record a reason that was computed differently from the one the
+ * operator was shown.
+ */
+async function rankDeployments(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  integration: AgentIntegration,
+  existingCatalog?: HubCatalogSnapshot,
+): Promise<RankedDeployments> {
   const profile = parsed.scenarioId === undefined ? CODING_GENERAL : scenarioProfile(parsed.scenarioId);
   if (profile === undefined) {
     throw new CliError({
@@ -1741,7 +1766,7 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
     });
   }
 
-  const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
+  const catalog = existingCatalog ?? await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
   const protocols = [...hubProtocolsFor(integration)];
   const publisherOf = new Map(
     catalog.models.map((model) => [model.id, model.publisherName ?? model.publisher]),
@@ -1817,6 +1842,15 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
     now: new Date(currentTime(dependencies)),
     constraints,
   });
+
+
+  return { result, profile, agentVersion, constraints, catalog };
+}
+
+async function executeRecommend(parsed: ParsedArguments, dependencies: CliDependencies) {
+  const requested = agentOperand(parsed, dependencies, { optional: false, command: "recommend" });
+  const integration = resolveIntegration(requested!, dependencies);
+  const { result, profile, agentVersion, constraints } = await rankDeployments(parsed, dependencies, integration);
 
   const eligible = result.candidates.filter((candidate) => candidate.eligible);
   const excluded = result.candidates.filter((candidate) => !candidate.eligible);
@@ -2514,6 +2548,9 @@ interface AgentPlanResult {
   readonly deployment: HubCatalogDeployment;
   readonly protocol: string;
   readonly catalogVersion: string;
+  /** The ranking that chose this Deployment, when `--best` did the choosing. */
+  readonly recommendationId?: string;
+  readonly recommendationReasons?: readonly string[];
 }
 
 async function createAgentPlan(
@@ -2521,10 +2558,17 @@ async function createAgentPlan(
   dependencies: CliDependencies,
 ): Promise<AgentPlanResult> {
   const integration = requireIntegration(parsed, dependencies, parsed.command ?? "connect");
-  if (!parsed.deployment) {
+  if (parsed.best && parsed.deployment) {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: `${parsed.command ?? "connect"} requires --deployment <id>.`,
+      message: "--best and --deployment both choose the Deployment; pass one of them.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  if (!parsed.deployment && !parsed.best) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: `${parsed.command ?? "connect"} requires --deployment <id>, or --best to take the top of the ranking.`,
       exitCode: EXIT_CODES.usage,
     });
   }
@@ -2537,9 +2581,26 @@ async function createAgentPlan(
   rejectUnusableConfig(inspection, integration);
 
   const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
+  // `--best` runs the ranking here rather than accepting a Recommendation id
+  // from the command line. A cited id would be a claim this command cannot
+  // check -- rankings are not stored, so nothing could confirm that the id
+  // really ranked this Deployment -- and an audit entry whose grounds nobody
+  // verified is worse than none. Running it makes the link by construction.
+  const ranked = parsed.best ? await rankDeployments(parsed, dependencies, integration, catalog) : undefined;
+  const chosen = ranked?.result.candidates.find((candidate) => candidate.eligible);
+  if (ranked && chosen === undefined) {
+    throw new CliError({
+      code: "NO_ELIGIBLE_DEPLOYMENT",
+      message: `Nothing is recommendable for ${integration.manifest.displayName} on ${ranked.result.platform}: ${ranked.result.summary}`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+  const record = ranked ? recommendationRecord(ranked.result, ranked.constraints) : undefined;
   // --deployment is required above, so this takes the explicit branch and the
   // reference is resolved the one way, rather than a second copy of the rules.
-  const deployment = await resolveDeployment(parsed, dependencies, integration, catalog);
+  const deployment = chosen
+    ? catalog.deployments.find((item) => item.id === chosen.deploymentId)!
+    : await resolveDeployment(parsed, dependencies, integration, catalog);
   const protocol = selectProtocol(deployment, integration, parsed.protocol);
   const intent = connectionIntent(parsed, dependencies, integration, deployment, protocol, catalog);
   const plan = await integration.plan(context, detection, inspection, intent);
@@ -2547,6 +2608,21 @@ async function createAgentPlan(
   return {
     integration,
     plan,
+    ...(record === undefined ? {} : { recommendationId: record.id }),
+    ...(chosen === undefined || ranked === undefined
+      ? {}
+      : {
+          // The dimensions and their weights, not the candidate's caveats: the
+          // question this answers is why this Deployment ranked first, and a
+          // note about a preferred capability falling short does not answer it.
+          recommendationReasons: [
+            `Chosen by ${ranked.profile.id} ${ranked.profile.profileVersion} (rule ${ranked.result.ruleVersion}), score ${chosen.score?.toFixed(3)} of ${ranked.result.candidates.filter((candidate) => candidate.eligible).length} eligible`,
+            ...(chosen.dimensions ?? []).map(
+              (dimension) => `  ${dimension.priority.padEnd(14)} ${dimension.score.toFixed(2)} ×${dimension.weight.toFixed(2)}  ${dimension.detail}`,
+            ),
+            ...ranked.result.unmeasured.map((entry) => `  not measured — ${entry.priority}`),
+          ],
+        }),
     deployment,
     protocol: protocol.protocol,
     catalogVersion: catalog.catalogVersion,
@@ -2564,7 +2640,8 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
       human: [
         `Plan: ${plan.id}`,
         `Agent: ${preview.integration.manifest.displayName}`,
-        `Deployment: ${preview.deployment.id}`,
+          `Deployment: ${preview.deployment.id}`,
+        ...(preview.recommendationReasons ?? []).map((reason) => `  ${reason}`),
         `Protocol: ${preview.protocol}`,
         `Operations: ${plan.operations.length}`,
         ...plan.operations.map((operation) => `${operation.mode} ${operation.path} (${operation.contentBytes} bytes)`),
@@ -2592,6 +2669,9 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
     protocol,
     catalog,
     "runtime",
+    preview.recommendationId === undefined
+      ? undefined
+      : { grounds: "recommendation", recommendationId: preview.recommendationId },
   );
   const applied = agentPlanSummary(result.plan);
   return {
@@ -2614,6 +2694,10 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
       // identify the deployment, and it says nothing about which credential the
       // charges will land on.
       `Deployment: ${deployment.id}`,
+      // `--best` chose it, so the reasons travel with the outcome: a ranking
+      // that is only visible in a different command is not an explanation of
+      // this one.
+      ...(preview.recommendationReasons ?? []).map((reason) => `  ${reason}`),
       `Billed to runtime credential: ${result.binding.credentialId} (expires ${result.binding.expiresAt})`,
       ...(result.transactionId ? [`Restore transaction: ${result.transactionId}`] : []),
       `Launch with: apexnova run ${preview.integration.manifest.id}`,
