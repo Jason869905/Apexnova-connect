@@ -21,3 +21,4 @@
 - [ADR 0013：M4 二次评审](0013-m4-second-review.md)
 - [ADR 0014：数据处理属性由 Hub 后续提供，隐私约束移到 M5](0014-data-handling-attributes-belong-to-m5.md)
 - [ADR 0015：M4 收口](0015-m4-closure.md)
+- [ADR 0016：M5 启动的首批范围](0016-m5-scope-and-first-batch.md)

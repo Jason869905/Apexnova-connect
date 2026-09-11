@@ -190,6 +190,8 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v1.0`。
 
+当前状态：已启动（首批范围见 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md)）。**首批收窄为两件：显式 Provider 切换与路由审计**，不含 Gateway、Circuit Breaker、受控选择与 Team——那几项都要求 Connect 参与请求路径，而与审计语义同时做会让出问题时分不清是路由错了还是审计错了。今天没有 Gateway，一次「路由」就是一次连接目标的确定，审计要回答三句话：选了哪个 Deployment、依据是什么、实际由谁计费。**自 M4 移入的两条退出条件（非 Apexnova 候选来源、隐私约束）不进首批，但仍是退出条件**：两者的推迟理由都已用掉，收口时若未交付按未满足记录。
+
 范围：
 
 - Connection Profile 和显式 Provider 切换；
