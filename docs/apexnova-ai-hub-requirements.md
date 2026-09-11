@@ -493,7 +493,7 @@ X-Apexnova-Deployment-Id
 
 `POST /v1/recommendations` 读取 Agent、场景、预算、区域和能力约束，输出候选、排除原因、Evidence、价格版本、置信度和显式商业推广标记。
 
-约束能力目前受目录数据限制：区域见 12I，隐私见 12J，预算见 12H——三者都不是 Connect 侧能补的。
+约束能力目前受目录数据限制：隐私见 12J，预算见 12H——两者都不是 Connect 侧能补的。「区域」已不在约束范围内（12I 已撤回，见 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)）。
 
 响应形状按 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 的 **`schemaVersion` 0.2**：该版本新增必填的 `profileVersion`（[ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)）。`scenarioId` 与 `ruleVersion` 不足以区分同一 Scenario 的两个 profile——profile 改版会改变 requirements 与 priorities 顺序，因此两份基于不同要求集的推荐在缺这个字段时是无法区分的文档。该接口尚未开工，所以本次变更不产生迁移成本。
 
@@ -900,7 +900,7 @@ Connect 这侧的处置（不等 Hub）：`recommend` 把「`input` 与 `output`
 
 **2026-09-10 补充：这条的影响面比首次记录时大。** `recommend --max-price` 原本只对「有价格」的候选生效，于是零价候选从上限旁边静默通过——一个被设置却什么也没排除的预算约束（见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 决策 2）。改正之后，价格未知的 Deployment 在设了上限时判为不通过，因此**目前只要用户设置 `--max-price`，本轮就没有任何候选**。这不是过滤器坏了，正是 12H 的实际代价：**在目录给出真实价格之前，预算约束在产品里是不可用的。**
 
-## 12I. 公共目录没有任何区域信息（2026-09-10，M4 约束退出条件核对时发现）
+## 12I. 公共目录没有任何区域信息（2026-09-10 提出，**2026-09-11 撤回**）
 
 路线图给 M4 的退出条件之一是「用户可以强制模型白名单、预算、区域和隐私约束」，M5 的范围里也直接写着「Deployment 健康、余额、**区域**和价格约束」。两处都需要一个能比较的区域属性，而目录里没有。
 
@@ -916,6 +916,14 @@ Connect 这侧的处置（不等 Hub）：`recommend` 把「`input` 与 `output`
 
 Connect 这侧的处置（不等 Hub）：`recommend` **不提供** `--region`，并在 [`cli-spec.md`](cli-spec.md) 与 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 里写明「不是 Connect 未做，是数据不存在」。不会用 `baseUrl` 或指纹去猜区域——猜出来的区域约束比没有约束更危险。
 
+### 12I.1 本条已撤回（2026-09-11）
+
+**Hub 不需要为此做任何事。** 上面这条需求建立在一个未经检验的前提上：区域是用户需要的那个东西。检验之后它不成立，详见 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)。
+
+用户想从「区域」得到的，要么是**低延迟**——那应当直接测量，属于 Operational Evidence；要么是**数据落在某个司法辖区**——那正是 12J 要求的数据处理属性。两者都有比区域标识更直接的表达方式，中间那个标签不增加信息，而且**不可校验**：我们无法验证一个 Deployment 真的在它声称的区域。把一个不可校验的标签放进硬约束，会是继能力声明（M3）和 `pricing: 0`（12H）之后，第三次把目录声明当数据用。
+
+因此 M4 的退出条件已去掉「区域」，本条撤回，上面的原文保留以记录这个判断是怎么来的。**区域在本项目里保留的唯一位置是延迟证据的测量条件**（客户端在哪测的），不是 Deployment 的属性。
+
 ## 12J. 隐私约束只能表达一半：模型发布方有，实际运营方没有（2026-09-10）
 
 同一条退出条件里的「隐私约束」，目录支持其中一半：
@@ -924,6 +932,8 @@ Connect 这侧的处置（不等 Hub）：`recommend` **不提供** `--region`�
 - **实际运行模型的运营方，目录不给。** 46 个 Deployment 的 `providerId` 全部是 `provider.apexnova-ai-hub`、`kind: "platform"`，`providers` 数组里只有这一条。因此「不要让某运营方看到我的代码」无从表达，也无从校验。
 
 这两件事经常被混成一句「隐私」，但它们的消费方式完全不同：前者是关于用谁的模型，后者是关于请求实际经过谁的手。**只有后者能回答合规问题。**
+
+**2026-09-11：本条的分量上调。** 12I 撤回之后，原本想通过「区域」表达的合规诉求只能由本条承载，因此 12J 从「一条需求」变成**M4 那条约束退出条件唯一的外部依赖**（另一条「预算」依赖 12H）。
 
 **需求**：让用户能够表达并使 Hub 强制执行一条与数据处理方有关的约束。具体形状由 Hub 决定，以下任一即可：
 

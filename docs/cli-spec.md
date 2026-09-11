@@ -408,7 +408,7 @@ apexnova recommend claude-code --exclude-publisher "Zhipu AI"   # 不推荐该�
 M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、`--model-allowlist`、`--verified-only`，**首批都未实现**。逐项状态见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md)，四项不是同一种情况：
 
 - `--priority`：优先级由 Scenario 的 `priorities` 顺序决定，不设命令行覆盖；
-- `--region`：目录里没有任何区域字段，**不是 Connect 未做，是数据不存在**，需要 Hub 发布；
+- `--region`：**不会实现**（[ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)）。用户想从区域得到的要么是低延迟（直接测量，属 Operational Evidence），要么是数据落在某个司法辖区（属需求 12J 的数据处理属性）；中间那个目录标签不增加信息，且不可校验；
 - `--provider` / 隐私约束：现网 46 个 Deployment 的 `providerId` 全是 `provider.apexnova-ai-hub`（`kind: platform`），**实际运行模型的上游运营方目录不给**，这一半仍不可实现；按模型发布方过滤的那一半**已实现**为 `--exclude-publisher`（大小写不敏感，现网覆盖 12 个发布方）。目录不给出发布方的 Deployment 在设了该约束时判为不通过——无法证明它不是被排除的那个发布方，与价格上限同一条规则；
 - `--model-allowlist`：**已实现**，接受逗号分隔的 deployment id 或别名，逐个对目录解析；名字不在可见目录里直接报 `DEPLOYMENT_NOT_FOUND` 而不是静默匹配为空。与 `--deployment` 互斥（两者都在收窄候选集，同时给会产生歧义）；
 - `--verified-only`：没有意义，因为没有实测证据的 Deployment 本来就不会被推荐。
