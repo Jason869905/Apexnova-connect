@@ -2605,6 +2605,71 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
  * `apexnova run <agent>` configures on first use and then launches. Existing
  * connections skip planning entirely and go straight to the launcher.
  */
+
+interface LaunchAttribution {
+  readonly ours: number;
+  readonly others: readonly { readonly key: string; readonly requests: number; readonly detail: string }[];
+}
+
+/**
+ * What the billing ledger says served requests in a window, grouped by the key
+ * that paid. Buckets are hourly, so a snapshot is taken on both sides of the
+ * launch and only the difference is attributed to it -- otherwise anything else
+ * that ran earlier in the same hour would look like the Agent's doing.
+ */
+async function usageByKey(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  from: string,
+): Promise<Map<string, { requests: number; name?: string; detail: Set<string> }>> {
+  const result = await hubService(parsed, dependencies).usageQuery(
+    parsed.profile,
+    { from, granularity: "hour" },
+    operationSignal(parsed),
+  );
+  const byKey = new Map<string, { requests: number; name?: string; detail: Set<string> }>();
+  // `granularity` was asked for, so the aggregate shape is what comes back; the
+  // per-request shape has no bucket and is not what this compares.
+  const items = "granularity" in result ? result.items : [];
+  for (const item of items) {
+    const key = item.apiKeyId ?? "(unattributed)";
+    const entry = byKey.get(key) ?? { requests: 0, detail: new Set<string>() };
+    entry.requests += item.requestCount;
+    if (item.apiKeyName !== undefined) entry.name = item.apiKeyName;
+    entry.detail.add(`${item.resolvedModel ?? item.requestedModel ?? "unknown model"} on ${item.publicDeploymentId ?? "unknown deployment"}`);
+    byKey.set(key, entry);
+  }
+  return byKey;
+}
+
+/**
+ * The launcher exists to make the Agent talk to the Deployment we configured on
+ * the credential we issued. On 2026-09-11 it did neither and reported success:
+ * OpenCode answered from a different model through a pre-existing long-lived
+ * key, while every command printed success and the freshly minted credential
+ * served nothing. A launcher that cannot tell that apart is not providing the
+ * thing it exists for, so the run is reconciled against the ledger afterwards.
+ *
+ * Only positive evidence fails the run: requests appeared, none of them on our
+ * credential. An empty ledger proves nothing -- settlement lags -- and is
+ * reported as unconfirmed rather than treated as either outcome.
+ */
+function attributeLaunch(
+  before: Map<string, { requests: number; name?: string; detail: Set<string> }>,
+  after: Map<string, { requests: number; name?: string; detail: Set<string> }>,
+  credentialId: string,
+): LaunchAttribution {
+  let ours = 0;
+  const others: { key: string; requests: number; detail: string }[] = [];
+  for (const [key, entry] of after) {
+    const added = entry.requests - (before.get(key)?.requests ?? 0);
+    if (added <= 0) continue;
+    if (key === credentialId) ours += added;
+    else others.push({ key: entry.name ? `${entry.name} (${key})` : key, requests: added, detail: [...entry.detail].sort().join(", ") });
+  }
+  return { ours, others: others.sort((left, right) => right.requests - left.requests) };
+}
+
 async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies) {
   const integration = requireIntegration(parsed, dependencies, "run", { trailingArgs: true });
   const agentArgs = parsed.operands.slice(1);
@@ -2649,7 +2714,58 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     ? { binding, rotated: false, warnings: [] as readonly string[] }
     : await runtimeCredentialForLaunch(parsed, dependencies, integration);
   binding = runtime.binding;
+
+  // Hourly buckets, so the before/after difference is what this launch did.
+  const hourStart = new Date(currentTime(dependencies));
+  hourStart.setUTCMinutes(0, 0, 0);
+  const from = hourStart.toISOString();
+  let before: Awaited<ReturnType<typeof usageByKey>> | undefined;
+  try {
+    before = await usageByKey(parsed, dependencies, from);
+  } catch {
+    // Reconciliation is a check on the launch, not a precondition for it.
+    before = undefined;
+  }
+
   await launchAgent(parsed, dependencies, integration, binding, agentArgs);
+
+  const launchWarnings: string[] = [];
+  let attribution: LaunchAttribution | undefined;
+  if (before !== undefined) {
+    try {
+      attribution = attributeLaunch(before, await usageByKey(parsed, dependencies, from), binding.credentialId);
+    } catch {
+      launchWarnings.push("The billing ledger could not be read after the run, so the requests it made were not attributed.");
+    }
+  } else {
+    launchWarnings.push("The billing ledger could not be read before the run, so the requests it made were not attributed.");
+  }
+
+  if (attribution && attribution.ours === 0 && attribution.others.length > 0) {
+    const served = attribution.others
+      .map((entry) => `${entry.requests} on ${entry.key} (${entry.detail})`)
+      .join("; ");
+    throw new CliError({
+      code: "LAUNCH_ATTRIBUTION_MISMATCH",
+      message: `${integration.manifest.displayName} exited, but none of the requests it billed used the credential this launcher issued. Served instead: ${served}. The Agent is reaching a Provider this profile did not configure, so what it costs and where it sends your code are not what Connect reported.`,
+      exitCode: EXIT_CODES.verification,
+      details: {
+        agentId,
+        expectedCredentialId: binding.credentialId,
+        expectedDeploymentId: binding.deploymentId,
+        served: attribution.others,
+      },
+    });
+  }
+  if (attribution && attribution.ours > 0 && attribution.others.length > 0) {
+    launchWarnings.push(
+      `Some requests in this window were billed to other credentials: ${attribution.others.map((entry) => `${entry.requests} on ${entry.key}`).join("; ")}.`,
+    );
+  }
+  if (attribution && attribution.ours === 0 && attribution.others.length === 0) {
+    launchWarnings.push("The ledger shows no settled requests for this run yet, so its Deployment and billing subject were not confirmed.");
+  }
+
   return {
     data: {
       agentId,
@@ -2660,9 +2776,17 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
       credentialRotated: runtime.rotated,
       exited: true,
       agentExitCode: 0,
+      ...(attribution === undefined ? {} : { attributedRequests: attribution.ours }),
     },
-    warnings: [...configureWarnings, ...runtime.warnings],
-    human: `${runtime.rotated ? "Credential renewed.\n" : ""}${integration.manifest.displayName} exited successfully.`,
+    warnings: [...configureWarnings, ...runtime.warnings, ...launchWarnings],
+    human: [
+      `${runtime.rotated ? "Credential renewed.\n" : ""}${integration.manifest.displayName} exited successfully.`,
+      ...(attribution && attribution.ours > 0
+        ? [`${attribution.ours} request${attribution.ours === 1 ? "" : "s"} billed to this launcher's credential on ${binding.deploymentId}.`]
+        : []),
+      // Human mode prints `human` and nothing else.
+      ...launchWarnings,
+    ].join("\n"),
   };
 }
 

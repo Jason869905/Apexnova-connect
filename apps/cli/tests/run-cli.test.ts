@@ -723,6 +723,111 @@ describe("CLI", () => {
     expect(capture.stdout()).not.toContain("new-runtime-secret");
   });
 
+  it("fails the launch when the Agent billed a credential this launcher did not issue", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-attrib-"));
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "rtc_ours",
+      secret: SecretValue.from("runtime-secret"),
+      expiresAt: "2026-12-01T10:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    // Before the launch the hour is empty; afterwards two requests exist, paid
+    // for by a long-lived key nobody here issued. That is the 2026-09-11 failure
+    // exactly: the Agent answered, every command reported success, and the
+    // credential the launcher minted served nothing.
+    let call = 0;
+    const capture = captureIo();
+    const result = await runCli(["run", "opencode", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => installed }),
+      hubService: mockHub({
+        usageQuery: async () => {
+          call += 1;
+          return call === 1
+            ? { granularity: "hour" as const, items: [], asOf: "2026-09-11T15:00:00Z" }
+            : {
+                granularity: "hour" as const,
+                items: [{
+                  bucketStart: "2026-09-11T15:00:00Z",
+                  apiKeyId: "key_theirs",
+                  apiKeyName: "myopencode",
+                  publicDeploymentId: "deployment.other",
+                  resolvedModel: "glm-5.2",
+                  requestCount: 2,
+                  normalCost: "0.005693",
+                  currency: "USD",
+                }],
+                asOf: "2026-09-11T15:05:00Z",
+              };
+        },
+      }),
+      launchAgent: async () => 0,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      now: () => new Date("2026-09-11T15:01:00Z"),
+      createRequestId: () => "local_attrib",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.verification);
+    const error = JSON.parse(capture.stdout()).error;
+    expect(error.code).toBe("LAUNCH_ATTRIBUTION_MISMATCH");
+    expect(error.message).toContain("myopencode");
+    expect(error.message).toContain("glm-5.2");
+    expect(error.details.expectedCredentialId).toBe("rtc_ours");
+  });
+
+  it("reports the requests that did reach the credential it issued", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-attrib-ok-"));
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "rtc_ours",
+      secret: SecretValue.from("runtime-secret"),
+      expiresAt: "2026-12-01T10:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    let call = 0;
+    const capture = captureIo();
+    const result = await runCli(["run", "opencode"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => installed }),
+      hubService: mockHub({
+        usageQuery: async () => {
+          call += 1;
+          const requestCount = call === 1 ? 1 : 4;
+          return {
+            granularity: "hour" as const,
+            items: [{
+              bucketStart: "2026-09-11T15:00:00Z",
+              apiKeyId: "rtc_ours",
+              publicDeploymentId: "deployment.nova",
+              requestCount,
+              normalCost: "0.001",
+              currency: "USD",
+            }],
+            asOf: "2026-09-11T15:05:00Z",
+          };
+        },
+      }),
+      launchAgent: async () => 0,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      now: () => new Date("2026-09-11T15:01:00Z"),
+      createRequestId: () => "local_attrib_ok",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    // Only the difference across the launch is attributed to it: the request
+    // that was already in the bucket belongs to whatever ran earlier that hour.
+    expect(capture.stdout()).toContain("3 requests billed to this launcher's credential");
+  });
+
   it("keeps the previous binding when a renewed credential cannot be verified", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-renew-fail-"));
     const credentials = memoryCredentials();
