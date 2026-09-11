@@ -250,18 +250,35 @@ M1 在 Windows 上验过 launcher，Linux 侧没有。本次实测的结论是**
 
 Linux 侧的 launcher **不记为通过**。要能声称它成立，至少需要：查清 OpenCode 为何不加载我们写入的 provider；查清那枚 `myopencode` key 被 OpenCode 从哪里取到；并让 launcher 在「agent 实际使用的不是我们配置的 Deployment」时**失败而不是报成功**——最后这条是最重要的，因为前两条修好之后，静默错配的可能性依然存在。
 
-### 根因排查（同日晚）
+### 根因排查（同日晚）：先前两条结论均已撤回
 
-第三条已实现（`LAUNCH_ATTRIBUTION_MISMATCH`），并在同一条路径上**实测复现并拦截**：`run opencode -- run "…"` 仍然走到 `glm-5.2` 与 `myopencode`，但命令现在以退出码 7 失败并点名是谁服务了那两次请求。
+第三条（让 launcher 失败而不是报成功）已实现（`LAUNCH_ATTRIBUTION_MISMATCH`），并在同一条路径上**实测复现并拦截**：命令以退出码 7 失败并点名是谁服务了那两次请求。这一条不受下面的更正影响。
 
-前两条查到了根因，是**我们这侧的协议错配**：
+**`[corrected]` 此前记下的两条根因都是错的，作废：**
 
-- `[root cause]` **写进配置的 provider 包与凭据的协议对不上。** `providerPackage()` 对 `openai-responses` 写 `@ai-sdk/openai`。把包换成 `@ai-sdk/openai-compatible` 后，OpenCode 立刻选中我们的模型（`> build · glm-5.1`）并真的打到了 Apexnova，Hub 的拒绝一句话说清了问题：**`This credential is not allowed to use the openai-chat protocol.`** 也就是说 OpenCode 经该 provider 走的是 `/v1/chat/completions`（`openai-chat`），而我们签发的 runtime credential 只授权 `openai-responses`；
-- `[root cause]` 用 `@ai-sdk/openai` 时这次失败**不会以这种可读形式暴露**，只得到 OpenCode 的内部 `UnknownError`，于是 OpenCode 回落到别的 provider/模型——**静默错配由此产生**；
-- `[observed]` 那批不是我们写的 provider（`apex_agent`、`apexnova_ai_hub`、`huawei_maas`）来自 **OpenCode 的远端 v2 catalog**：`opencode debug v2` 显示 catalog 结构，且其内容在同一天内变过（后来只剩 `opencode`）。catalog 条目自带请求鉴权字段（`request.body.apiKey`）。**因此「Agent 只会使用 Connect 签发的凭据」这一点，Connect 无法单方面保证**——Agent 可以从自己的远端目录获得 provider 与凭据。这使对账检查不是权宜，而是这条路径上唯一能发现该类问题的机制，应长期保留；
-- `[not established]` `myopencode` 这枚 key 的 secret 具体存放在哪，仍未查实：OpenCode 的 auth store 报 `0 credentials`，其 data/state/cache 目录里 grep 不到该名字，shell 环境也没有相关变量。
+- ~~「provider 包与凭据协议对不上，OpenCode 走 openai-chat」~~。那条 `This credential is not allowed to use the openai-chat protocol` 来自**我把包换成 `@ai-sdk/openai-compatible` 的实验**，不是我们发布的配置。对照实验证明**我们写的配置是对的**：`@ai-sdk/openai` + 注入的凭据，OpenCode 选中 `apexnova/glm-5.1` 并真实返回 `APEXNOVA_OK`，退出 0。OpenCode 二进制里也明确写着 `if(npm==="@ai-sdk/openai") return configure(a).responses(id)`，即该包本就走 Responses；
+- ~~「那批 provider 来自 OpenCode 的远端 v2 catalog」~~。它们来自**另一台机器的配置文件**，见下。
 
-**尚未修复**：协议错配本身。修法涉及一个取舍——让 OpenCode 走 `openai-chat`（则需要 `openai-chat` 的能力证据，而现有 OpenCode 证据全是 `openai-responses`），还是让 `@ai-sdk/openai` 真正使用 Responses API。这是个影响证据口径的决定，单独提出。
+**真正的根因：`detect` 与 `run` 在 WSL 上启动的是 Windows 那份 OpenCode，而配置写给了 Linux 那份。**
+
+证据链：
+
+- 让被启动的子进程自报配置（`run opencode -- debug config`），返回的配置里有 `"username": "wakee"`——**Windows 用户名**（WSL 侧是 `wanke`），provider 是 `apexagent`/`huawei_maas`/`apex_agent`/`apexnova_ai_hub`；
+- `/mnt/c/Users/wakee/.config/opencode/opencode.jsonc` 的 provider 列表与之**逐个吻合**。此前那批「不是我们写的 provider」就是这个文件；
+- `which -a opencode` **只**返回 `/mnt/c/Users/wakee/AppData/Roaming/npm/opencode`。Linux 安装（`~/.npm-global/bin/opencode`）根本不在 PATH 上，PATH 里有 12 个 `/mnt/c` 条目；
+- `discovery.ts:22` 的 `OPENCODE_EXECUTABLE` 是裸名 `"opencode"`，`detect` 与 `planLaunch` 都用它；而配置路径由 context 的 HOME 推出，是 Linux 的。
+
+因此 `detect` 报出的版本来自 Windows 二进制、配置路径来自 Linux HOME，`connect` 把配置写到后者，launcher 启动前者——**Connect 配置了一个永远不会读它的安装**，Agent 于是按 Windows 配置运行，用的是那里的 `myopencode` 长期 key。这也解释了为什么 `myopencode` 的 secret 在 Linux 侧 grep 不到：它本来就不在这台「机器」上。
+
+**尚未修复。** 修法方向明确：检测必须产出**它实际探测到的那个可执行文件**，launcher 必须启动同一个，而不是各自再按 PATH 解析一次；在 WSL 上，PATH 上的 Windows `opencode` 不得与 Linux 的配置目录静默配对——两者不一致时应当拒绝，而不是挑一个。
+
+### 同一轮暴露的另一处：Agent 会改写 Connect 写的文件
+
+`restore` 以 `CONFLICT` 拒绝回滚：`Configuration changed after apply`。对比后确认，改动是 **OpenCode 自己往配置里加了一行 `"$schema"`**，其余内容与 Connect 写入时一致。
+
+拒绝本身是对的——不删一个被改过的文件。但后果是用户**没有出路**：`restore` 不肯回滚，而文件又确实是 Connect 创建的。本次是手工去掉那行 `$schema` 后 `restore` 才正常收尾。
+
+这类情况需要一个正常路径：Agent 规范化或注解自己配置文件是常态，不是异常。
 
 ### 顺带修掉的第三处
 
