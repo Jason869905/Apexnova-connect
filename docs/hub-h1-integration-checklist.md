@@ -216,6 +216,19 @@ macOS 仍无实机，按 [ADR 0006](decisions/0006-m3-closure.md) 继续挂在�
 
 修法：带 `--yes` 或 `--dry-run` 却不给事务 id 时报 `INVALID_ARGUMENT` 并列出当前可恢复的事务，不再落回列表分支。**不自动挑一个**——[`cli-spec.md`](cli-spec.md) 要求恢复按事务逆序显式执行，替用户挑可能回滚掉他没打算动的 integration。`restore` 与 `restore --list` 的列表行为不变。
 
+## `switch` 链路的现网实测：重新签发的凭据真的能用（2026-09-11，Linux/WSL2）
+
+接上一条闭环，把 `recommend → connect → switch → 逆序 restore` 整条跑完，本轮实扣 `0.000623 USD`。目标取自同一次推荐的第一名与第二名（GLM-5.1 与 GLM-5.2，两者 score 同为 0.778，靠 `deploymentId` 字典序分先后）。
+
+**这条补上了 2026-09-05 记录里挂着的那句**：`switch` 恢复时重新签发上一目标凭据的语义，此前只有自动化 contract test 覆盖，标着「仍待 staging 实测」。现在是现网实测过的。
+
+- `[passed]` `switch --dry-run` 报一个操作（`update` 而不是 `create`，506 字节）且不改状态；`--yes` 切到 GLM-5.2 并签发新凭据；
+- `[passed]` **切换后真实可用**：`verify --live --yes` 对 `glm-5.2` 通过，请求 `0553e7ae-bf7c-40a4-a08b-f82368cded9e`，实扣 `0.000179 USD`；
+- `[passed]` **顺序守卫按预期拒绝**：直接恢复较旧的 `connect` 事务返回 `RESTORE_ORDER_CONFLICT`（退出码 6）并点名应先恢复哪一条；**拒绝后配置未被修改**：文件里仍是 `apexnova/glm-5.2`，即 `switch` 之后的目标；
+- `[passed]` **重新签发的凭据不是纸面语义**：恢复 `switch` 事务后 CLI 报「Previous runtime connection was reissued」，配置回到 `apexnova/glm-5.1`，随后 `verify --live --yes` 用那枚**重新签发的**凭据对 `glm-5.1` 真实推理通过，请求 `c68b5c06-b659-4b6e-a45b-3688e472353e`，实扣 `0.000444 USD`。这是这条记录的重点：契约测试能证明代码路径走到了，只有真实调用能证明那枚凭据在上游被接受；
+- `[passed]` 再恢复 `connect` 事务后回到连接前：配置文件消失、绑定删除、凭据撤销（`credential print` 返回 `RUNTIME_CREDENTIAL_NOT_FOUND`）、`restore --list` 无可恢复事务；
+- `[passed]` **账对得上**：余额 `60.273439` → `60.272816`，差 `0.000623 USD` = `0.000179` + `0.000444`，与两次 `verify` 各自报的实扣分别相符。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：
@@ -225,7 +238,7 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 - `[passed]` `/v1/me`、余额与原子 catalog snapshot；
 - `[passed]` runtime credential 签发、推理面 Bearer 鉴权入口和成功后的自动撤销；
 - `[passed]` 指定 `glm-5.2` 的最小 `openai-chat` 真实推理返回 HTTP 200；请求 `319f02cd-44c2-4326-a9d8-4c2ee76566f9` 记录为 17 input / 93 output tokens，实扣 `0.000203 USD`；
-- `[passed]` 正式 CLI 经 Windows Credential Manager 完成登录、目录查询、`connect --dry-run`、`connect --yes`、配置验证、`switch`、配置事务逆序 `restore` 与 `logout`；`switch` 恢复时重新签发上一目标凭据的语义已由自动化 contract test 覆盖，仍待 staging 实测；
+- `[passed]` 正式 CLI 经 Windows Credential Manager 完成登录、目录查询、`connect --dry-run`、`connect --yes`、配置验证、`switch`、配置事务逆序 `restore` 与 `logout`；`switch` 恢复时重新签发上一目标凭据的语义已由自动化 contract test 覆盖，仍待 staging 实测（**2026-09-11 已现网实测，见下文 M4 switch 链路记录**）；
 - `[passed with follow-up]` 正式 CLI 的 `verify opencode --live --yes` 经 `openai-responses` 调用 `glm-5.2` 成功，请求 `523d9ab3-0839-4b58-989a-c66bd596033f` 的公共路由头完整，账单为 17 input / 87 output tokens、`0.000191 USD`。实际费用高于原 64 input / 8 output 估价，已转为非约束估价并登记 `M1-HUB-01` 请求级硬消费上限需求；
 - `[passed with follow-up]` Windows OpenCode CLI `1.18.29` 已完成真实 Agent 进程验收：Connect 保留用户现有 Provider，临时加入现行 `provider/npm/options` 配置，通过 launcher 仅在子进程环境注入 runtime credential；`opencode models apexnova` 识别 `apexnova/glm-5.2`，随后真实 Responses 请求返回精确文本 `APEXNOVA_OK`；Hub 请求 `55978fdf-a840-4673-b6a5-8f3e237cae6f` 归因到本次 runtime credential，记录 6964 input / 7 output tokens、实扣 `0.006978 USD`；
 - `[passed]` 上述 OpenCode 配置事务已逆序恢复，恢复后文件 SHA-256 与测试前一致；runtime credential 已撤销，OAuth access/refresh token 均已服务端撤销。本次 `logout` 保留无活动 token 的设备审计记录，不影响授权安全；
