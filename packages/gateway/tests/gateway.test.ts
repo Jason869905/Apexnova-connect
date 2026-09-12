@@ -275,6 +275,87 @@ describe("the local gateway", () => {
     await second.body?.cancel();
   });
 
+  it("keeps concurrent requests apart, and finishes them out of order", async () => {
+    const forwarded: ForwardedRequest[] = [];
+    const { gateway } = await gatewayReturning(
+      async (request) => {
+        const marker = new URL(request.url).pathname.split("/").pop()!;
+        // Later requests answer first, so the responses are deliberately out of
+        // request order: crossing two of them would pass a test where the
+        // upstream replied in the order it was asked.
+        await new Promise((resolve) => setTimeout(resolve, (8 - Number(marker)) * 12));
+        return new Response(`answer-${marker}`, {
+          status: 200,
+          headers: { "x-apexnova-request-id": `req_${marker}` },
+        });
+      },
+      (request) => forwarded.push(request),
+    );
+
+    const markers = [1, 2, 3, 4, 5, 6, 7, 8];
+    const startedAt = Date.now();
+    const answers = await Promise.all(
+      markers.map(async (marker) => {
+        const response = await fetch(`${gateway.url}/v1/responses/${marker}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${gateway.localToken}` },
+          body: JSON.stringify({ marker }),
+        });
+        return `${marker}:${await response.text()}`;
+      }),
+    );
+
+    // Each caller gets its own answer. A gateway that shared state between
+    // in-flight requests would hand someone else's model output to an Agent,
+    // which is the worst failure available to a component in the request path.
+    expect(answers).toEqual(markers.map((marker) => `${marker}:answer-${marker}`));
+    // Without this the test would pass on a gateway that served them one after
+    // another: separate answers prove nothing about overlap. The upstream delays
+    // add up to 336ms, so finishing well inside that means they were in flight
+    // together.
+    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(forwarded).toHaveLength(markers.length);
+    expect(new Set(forwarded.map((request) => request.requestId))).toEqual(
+      new Set(markers.map((marker) => `req_${marker}`)),
+    );
+  });
+
+  it("shuts down while requests are still in flight", async () => {
+    const { gateway } = await gatewayReturning(
+      () =>
+        new Response(
+          new ReadableStream({
+            async start(controller) {
+              for (;;) {
+                controller.enqueue(new TextEncoder().encode("event: delta\n\n"));
+                await new Promise((resolve) => setTimeout(resolve, 5));
+              }
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+    );
+
+    const response = await fetch(`${gateway.url}/v1/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.localToken}` },
+      body: "{}",
+    });
+    await response.body!.getReader().read();
+
+    // A stream that never ends must not keep the launcher alive after the Agent
+    // is gone -- that is the hang that made `close()` wait on keep-alive
+    // connections in the first place. Closing returns rather than waiting for a
+    // client that will never be done.
+    await expect(
+      Promise.race([
+        gateway.close(),
+        new Promise((_resolve, reject) => setTimeout(() => reject(new Error("close did not return")), 2_000)),
+      ]),
+    ).resolves.toBeUndefined();
+    running.splice(running.indexOf(gateway), 1);
+  });
+
   it("listens on loopback and nowhere else", async () => {
     const { gateway } = await gatewayReturning(() => new Response("{}", { status: 200 }));
 
