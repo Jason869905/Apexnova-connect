@@ -9,7 +9,7 @@
 | 项目 | 值 |
 | --- | --- |
 | 产品 | Claude Code `>=2.0.0 <3.0.0` |
-| 平台 | Windows、macOS、Linux |
+| 平台 | Windows、Linux（macOS 不在支持范围内，见 [ADR 0024](../../../docs/decisions/0024-narrow-platform-claims.md)） |
 | 配置文件 | `~/.claude/settings.json`（Windows 为 `%USERPROFILE%\.claude\settings.json`） |
 | 协议 | `anthropic-messages`（Hub 的 `/anthropic/v1/messages`） |
 | 凭据 | 默认 `ANTHROPIC_AUTH_TOKEN`，只由 `apexnova run claude-code` 注入子进程环境；`--api-key-helper` 改为让 Claude Code 自己去取 |

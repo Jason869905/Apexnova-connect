@@ -9,7 +9,7 @@ Connects the [Codex CLI](https://github.com/openai/codex) to Apexnova AI Hub thr
 | 项目 | 值 |
 | --- | --- |
 | 产品 | Codex CLI `>=0.20.0` |
-| 平台 | Windows、macOS、Linux |
+| 平台 | Windows、Linux（macOS 不在支持范围内，见 [ADR 0024](../../../docs/decisions/0024-narrow-platform-claims.md)） |
 | 配置文件 | `$CODEX_HOME/config.toml`，默认 `~/.codex/config.toml` |
 | 协议 | 仅 `openai-responses` |
 | 凭据 | `env_key = "APEXNOVA_API_KEY"`，由 `apexnova run codex` 注入进程环境 |

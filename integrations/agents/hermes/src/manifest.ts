@@ -24,7 +24,6 @@ export const hermesManifest: IntegrationManifest = {
   },
   "compatibility": {
     "platforms": [
-      "macos",
       "linux"
     ],
     "products": [

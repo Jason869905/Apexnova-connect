@@ -11,7 +11,7 @@
     "modes": ["config-adapter", "launcher"]
   },
   "compatibility": {
-    "platforms": ["windows", "macos", "linux"],
+    "platforms": ["windows", "linux"],
     "products": [
       {
         "name": "Claude Code",

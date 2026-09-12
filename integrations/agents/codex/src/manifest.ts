@@ -18,13 +18,13 @@ export const codexManifest: IntegrationManifest = {
     modes: ["config-adapter", "launcher"],
   },
   compatibility: {
-    platforms: ["windows", "macos", "linux"],
+    platforms: ["windows", "linux"],
     products: [
       {
         name: "Codex CLI",
         versionRange: ">=0.20.0",
         documentation: "https://learn.chatgpt.com/docs/config-file/config-reference",
-      },
+      }
     ],
   },
   protocols: [{ id: "openai-responses", transport: "direct" }],
@@ -34,7 +34,7 @@ export const codexManifest: IntegrationManifest = {
     "model-catalog",
     "provider-config",
     "restart-required",
-    "backup-and-restore",
+    "backup-and-restore"
   ],
   permissions: [
     {
@@ -52,7 +52,7 @@ export const codexManifest: IntegrationManifest = {
     {
       kind: "process-launch",
       reason: "Launches Codex with a runtime credential injected via environment.",
-    },
+    }
   ],
   links: {
     documentation: "https://learn.chatgpt.com/docs/config-file/config-reference",

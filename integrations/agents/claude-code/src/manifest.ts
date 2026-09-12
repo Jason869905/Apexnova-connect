@@ -23,7 +23,6 @@ export const claudeCodeManifest: IntegrationManifest = {
   "compatibility": {
     "platforms": [
       "windows",
-      "macos",
       "linux"
     ],
     "products": [

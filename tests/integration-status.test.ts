@@ -76,26 +76,20 @@ function missingCriteria(manifest: Manifest, matrix: readonly MatrixRow[], docs:
  * which is the point -- the author then has to revisit the status too.
  */
 const EXPECTED_GAPS: Readonly<Record<string, readonly string[]>> = {
-  // Two protocols declared, one ever measured. Found by this check, against an
-  // ADR that had just been written saying macOS was all it lacked.
-  opencode: [
-    "evidence:linux/openai-chat-completions",
-    "evidence:windows/openai-chat-completions",
-    "evidence:macos/openai-chat-completions",
-    "evidence:macos/openai-responses",
-  ],
-  codex: [
-    "evidence:windows/openai-responses",
-    "evidence:macos/openai-responses",
-    "evidence:linux/openai-responses",
-  ],
-  "claude-code": ["evidence:macos/anthropic-messages"],
-  hermes: [
-    "evidence:macos/openai-chat-completions",
-    "evidence:macos/anthropic-messages",
-    "evidence:linux/openai-chat-completions",
-    "evidence:linux/anthropic-messages",
-  ],
+  // macOS was dropped from every manifest on 2026-09-12 rather than left as a
+  // claim nothing backs (ADR 0024). What remains is the protocol axis, which is
+  // where this check found gaps nobody had reconciled.
+  //
+  // Every `openai-chat-completions` line below is blocked on the capability
+  // suite, which covers `openai-responses` and `anthropic-messages` and nothing
+  // else. Collecting cannot close them; extending the suite can.
+  opencode: ["evidence:windows/openai-chat-completions", "evidence:linux/openai-chat-completions"],
+  codex: ["evidence:windows/openai-responses", "evidence:linux/openai-responses"],
+  // Mechanically clear. Whether it is `stable` turns on the three criteria a
+  // machine cannot see -- and ADR 0020 records that it has never run through
+  // the gateway, which is criterion 2's business.
+  "claude-code": [],
+  hermes: ["evidence:linux/openai-chat-completions"],
 };
 
 describe("the integration status ladder", () => {

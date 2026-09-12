@@ -1,7 +1,7 @@
 # Hermes Agent + Apexnova AI Hub 使用指南
 
 > 适用版本：apexnova-connect v0.2.1 · Hermes Agent ≥0.21.0
-> 平台：macOS、Linux（含 WSL2）——Hermes 没有原生 Windows 版
+> 平台：Linux（含 WSL2）。Hermes 本身也支持 macOS 且没有原生 Windows 版，但 macOS 不在本项目的支持范围内，见 [ADR 0024](decisions/0024-narrow-platform-claims.md)
 
 安装、登录、Hub 地址、Key 模式、通用命令和环境变量见 [CLI 通用指南](cli-usage-guide.md)。本文只讲 Hermes 特有的部分。
 

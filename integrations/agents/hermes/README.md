@@ -33,7 +33,7 @@
 | 项目 | 值 |
 | --- | --- |
 | 产品 | Hermes Agent `>=0.21.0` |
-| 平台 | macOS、Linux（Hermes 官方支持 Linux/macOS/WSL2，未提供原生 Windows 版） |
+| 平台 | Linux（Hermes 官方支持 Linux/macOS/WSL2，未提供原生 Windows 版；macOS 不在本项目支持范围内，见 [ADR 0024](../../../docs/decisions/0024-narrow-platform-claims.md)） |
 | 配置文件 | `$HERMES_HOME/config.yaml`，默认 `~/.hermes/config.yaml` |
 | 协议 | openai-responses、openai-chat-completions、anthropic-messages |
 | 凭据 | `APEXNOVA_API_KEY`，由 `apexnova run hermes` 注入进程环境 |

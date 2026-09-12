@@ -81,7 +81,7 @@ M6 能跨领域复制
 
 预计：4～6 周。目标版本：`v0.2`。
 
-当前状态：进行中。契约与 registry 重构已完成；四个 Integration 均已实现、通过公共 Contract Test，并在现网 Hub 完成完整生命周期验收（OpenCode/Codex/Claude Code 在 Windows，Hermes 在 Linux/WSL2；含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。唯一未满足的退出条件是 macOS：无实机，Keychain 后端只有 mock command runner 测试。
+当前状态：进行中。契约与 registry 重构已完成；四个 Integration 均已实现、通过公共 Contract Test，并在现网 Hub 完成完整生命周期验收（OpenCode/Codex/Claude Code 在 Windows，Hermes 在 Linux/WSL2；含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。唯一未满足的退出条件是 macOS：无实机，Keychain 后端只有 mock command runner 测试。**2026-09-12 起本条与产品声明不一致，需要一个自己的决定**：[ADR 0024](decisions/0024-narrow-platform-claims.md) 把四个 Integration 的平台声明收窄为 Windows/Linux，而本阶段的退出条件仍写「三个平台」。ADR 0024 只决定了 Integration 的声明，**没有决定本条退出条件**——它是按两个平台重述，还是保持三个平台并继续记为未满足，尚未裁决。在裁决之前如实记为未满足。
 
 范围：
 
@@ -208,7 +208,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - Provider 故障不会造成工具副作用请求的自动重放；
 - 每次路由可解释且可审计；
 - 切换失败不会破坏 Agent 配置；
-- 三个首批 Integration 达到 stable（**未满足，但判定标准已建立**：五档条件见 [ADR 0023](decisions/0023-integration-status-ladder.md)，其中可机检的两条由 `tests/integration-status.test.ts` 强制，因此这条退出条件不再可能被默认满足。按新标准四个仍全是 `experimental`：macOS 无任何证据、一次性卡住四个；`codex` 与 `hermes` 一条证据都没有；`opencode` 声称两个协议而只测过一个——**最后这条是机检当场发现的，此前无人按声称范围核对过协议维度**）；
+- 三个首批 Integration 达到 stable（**未满足，但判定标准已建立**：五档条件见 [ADR 0023](decisions/0023-integration-status-ladder.md)，其中可机检的两条由 `tests/integration-status.test.ts` 强制，因此这条退出条件不再可能被默认满足。按新标准四个仍全是 `experimental`：macOS 无任何证据、一次性卡住四个；`codex` 与 `hermes` 一条证据都没有；`opencode` 声称两个协议而只测过一个——**最后这条是机检当场发现的，此前无人按声称范围核对过协议维度**。**2026-09-12 已收窄并重跑采集**（[ADR 0024](decisions/0024-narrow-platform-claims.md)）：四个 manifest 去掉 `macos`，`hermes` 首次采到真实证据（linux/`anthropic-messages`，四个 Deployment）。缺口六降到五，但性质变了——**三个卡在能力套件不覆盖 `openai-chat-completions`，跑多少遍都不会关闭**；两个卡在本机没有 Linux 安装／需要 Windows 会话。`claude-code` 机检已无缺口）；
 - 用户始终能看到实际 Deployment 和计费主体。
 
 ~~允许推荐非 Apexnova Provider~~、~~用户可以强制隐私约束~~ 两条**已于 2026-09-12 撤销**，见 [ADR 0022](decisions/0022-m5-midpoint-review.md) 第 3 节。这是 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md) 决策 5 要求的第三次决定，两条的理由分别是：**隐私约束指错了责任方**（Connect 侧已做完并验证，缺的是只有 Hub 能发布的事实，本仓库做任何工作都无法满足它）；**非 Apexnova 候选的措辞选错了对象**（推荐实现本就没有 Apexnova 特判，字面交付得到的是一律 `eligible: false` 的假支持，而诚实版本需要凭据签发、价格来源、计费归属三样底座）。

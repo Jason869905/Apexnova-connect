@@ -1,7 +1,7 @@
 # Claude Code + Apexnova AI Hub 使用指南
 
 > 适用版本：apexnova-connect v0.2.1 · Claude Code ≥2.0.0 <3.0.0
-> 平台：Windows、macOS、Linux
+> 平台：Windows、Linux（macOS 不在支持范围内，见 [ADR 0024](decisions/0024-narrow-platform-claims.md)）
 
 安装、登录、Hub 地址、Key 模式、通用命令和环境变量见 [CLI 通用指南](cli-usage-guide.md)。本文只讲 Claude Code 特有的部分。
 

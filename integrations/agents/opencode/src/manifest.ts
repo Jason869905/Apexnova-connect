@@ -20,18 +20,18 @@ export const openCodeManifest: IntegrationManifest = {
     modes: ["config-adapter", "launcher"],
   },
   compatibility: {
-    platforms: ["windows", "macos", "linux"],
+    platforms: ["windows", "linux"],
     products: [
       {
         name: "OpenCode",
         versionRange: ">=1.18.29 <2.0.0",
         documentation: "https://opencode.ai/docs/providers/",
-      },
+      }
     ],
   },
   protocols: [
     { id: "openai-responses", transport: "direct" },
-    { id: "openai-chat-completions", transport: "direct" },
+    { id: "openai-chat-completions", transport: "direct" }
   ],
   capabilities: [
     "authentication",
@@ -40,7 +40,7 @@ export const openCodeManifest: IntegrationManifest = {
     "provider-config",
     "hot-switch",
     "restart-required",
-    "backup-and-restore",
+    "backup-and-restore"
   ],
   permissions: [
     {
@@ -58,7 +58,7 @@ export const openCodeManifest: IntegrationManifest = {
     {
       kind: "process-launch",
       reason: "Launches OpenCode with a runtime credential injected via environment.",
-    },
+    }
   ],
   links: {
     documentation: "https://opencode.ai/docs/providers/",

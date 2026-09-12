@@ -67,7 +67,7 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 - `[passed]` Hermes 三种 `api_mode` 中的两种（`codex_responses`、`anthropic_messages`）经过真实推理验证；
 - `[passed]` Linux 的凭证存储（Secret Service）与事务恢复流程。
 
-未覆盖：macOS 全部流程（无实机，Keychain 后端只有 mock command runner 测试）；Hermes 的 `chat_completions` 模式未做真实推理。
+未覆盖：macOS 全部流程（无实机，Keychain 后端只有 mock command runner 测试；**2026-09-12 已按 [ADR 0024](decisions/0024-narrow-platform-claims.md) 移出支持范围**）；Hermes 的 `chat_completions` 模式未做真实推理——**该协议也不在能力套件覆盖范围内**，见 ADR 0024 第 3 节。
 
 ## M3 首批能力采集记录（2026-09-08，Linux/WSL2，`api.apexnova-consulting.com`）
 
@@ -416,3 +416,22 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 - `[fixed]` `secret-tool lookup` 对不存在的条目返回 exit code 1（而非 0 + 空输出），`LinuxSecretServiceBackend.get` 之前将其当作后端故障抛出，导致首次 `connect`（无历史 binding）时 `RuntimeBindingStore.load` 失败。已修正：exit code 1 视为 not-found 返回 `null`，`delete` 同理容忍 exit code 1。
 
 本机计费 live verify 与 Linux 真实环境验收均已通过，临时配置和活动凭据已清理。M1 发布门槛剩余稳定 staging contract test。
+
+## 2026-09-12 Hermes 首次 capability 采集（linux-x64 / anthropic-messages）
+
+按 [ADR 0023](decisions/0023-integration-status-ladder.md) 的 `stable` 第 1 条采集。`hermes` 与 `codex` 自 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md) 把 M3 首批定为 OpenCode 与 Claude Code 之后，从未进入过采集范围，**这是 Hermes 的第一批真实证据**。
+
+- 环境：WSL2 Linux，Hermes Agent v0.21.0（`/home/wanke/.hermes`，git 安装），账号 `testpro@test.com`；
+- 协议：`anthropic-messages`（Hermes 另一个声称协议 `openai-chat-completions` 不在能力套件覆盖范围内，无法采集）；
+- 四个 Deployment，与 `claude-code` 已有证据所用的四个相同，以便交叉比对：
+
+| Deployment | 结论 | 计费 | Evidence |
+| --- | --- | --- | --- |
+| `…cmq4770nr0000edzis38w378a`（GLM-5.1） | `compatible` | 0.001484 USD / 5 请求 | `ev.sha256.37d21c9d…` |
+| `…cmqr4cngr000dn1q69bbrl1vw`（GLM-5.2） | `compatible` | 0.001056 USD / 5 请求 | `ev.sha256.f46e5def…` |
+| `…cmt0bub5d0042139w2xobpghn`（DeepSeek-V4-Pro-0813） | `compatible` | 0.001400 USD / 5 请求 | `ev.sha256.ecc84235…` |
+| `…cmtdear4g005n5pfmdx2ge3x3` | `partial` | 0.000087 USD / 3 请求 | `ev.sha256.6c11c42a…` |
+
+**交叉验证**：那条 `partial` 的失败项是 `agent.forced-tool-choice` 与 `agent.structured-output`，上游返回 `tool_choice` 不接受 `required`。**`claude-code` 在同一个 Deployment 上是同样的 `partial`、同样两项。** 两个不同 Agent、同一部署、同一组失败——该结论属于部署侧限制，不是 Integration 缺陷。这正是 subject 同时记录 agent 与 deployment 的用处。
+
+合计计费 0.004027 USD。矩阵已重新生成。
