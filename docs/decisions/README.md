@@ -24,3 +24,4 @@
 - [ADR 0016：M5 启动的首批范围](0016-m5-scope-and-first-batch.md)
 - [ADR 0017：M5 首批评审](0017-m5-first-batch-review.md)
 - [ADR 0018：Gateway 首个切片](0018-gateway-first-slice.md)
+- [ADR 0019：Gateway 首个切片评审](0019-gateway-first-slice-review.md)
