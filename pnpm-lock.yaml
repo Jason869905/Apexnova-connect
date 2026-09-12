@@ -35,6 +35,9 @@ importers:
       '@apexnova-connect/credential-store':
         specifier: workspace:*
         version: link:../../packages/credential-store
+      '@apexnova-connect/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
       '@apexnova-connect/hub-client':
         specifier: workspace:*
         version: link:../../packages/hub-client

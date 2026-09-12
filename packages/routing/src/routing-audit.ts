@@ -27,6 +27,13 @@ export interface RoutingAttribution {
    * a reassurance.
    */
   readonly status: "confirmed" | "mismatched" | "unconfirmed";
+  /**
+   * How the figure was reached. A window difference and a named request are not
+   * the same claim, and a log that cannot tell them apart invites reading the
+   * approximation as the exact one.
+   */
+  readonly method: "gateway" | "request-id" | "ledger-window";
+  readonly requestIds?: readonly string[];
   readonly requestCount?: number;
   readonly billedTo?: readonly RoutingAttributionShare[];
 }

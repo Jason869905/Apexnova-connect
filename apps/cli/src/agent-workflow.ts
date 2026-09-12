@@ -228,6 +228,10 @@ export function connectionIntent(
   deployment: HubCatalogDeployment,
   protocol: HubCatalogProtocol,
   catalog: HubCatalogSnapshot,
+  // A gateway run points the Agent at loopback on purpose, so the plain-HTTP
+  // allowance is stated by the caller that knows it rather than inferred from an
+  // environment variable meant for local Hub testing.
+  viaLoopbackGateway = false,
 ): ConnectionIntent {
   const protocolId = toProtocolId(protocol.protocol);
   if (!protocolId || !integration.supportedProtocols.includes(protocolId)) {
@@ -251,7 +255,7 @@ export function connectionIntent(
     ...(limits?.contextWindow && limits.maxOutputTokens
       ? { limits: { context: limits.contextWindow, output: limits.maxOutputTokens } }
       : {}),
-    allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
+    allowInsecureLoopback: viaLoopbackGateway || environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
     ...(parsed.apiKeyHelper
       ? {
           credentialHelperCommand: (
@@ -374,6 +378,7 @@ export async function configureAgent(
   catalog: HubCatalogSnapshot,
   mode: CredentialMode = "auto",
   chosenBy?: { readonly grounds: RoutingGrounds; readonly recommendationId?: string },
+  viaLoopbackGateway = false,
 ): Promise<ConfigureResult> {
   const agentId = integration.manifest.id;
   const context = integrationContext(parsed, dependencies);
@@ -383,7 +388,7 @@ export async function configureAgent(
     await detectForCommand(parsed, dependencies, integration),
     integration,
   );
-  const intent = connectionIntent(parsed, dependencies, integration, deployment, protocol, catalog);
+  const intent = connectionIntent(parsed, dependencies, integration, deployment, protocol, catalog, viaLoopbackGateway);
 
   await mkdir(dirname(detection.configPath), { recursive: true, mode: 0o700 });
   const executor = new FileConfigExecutor({

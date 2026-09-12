@@ -27,6 +27,7 @@
     "@apexnova-connect/config-engine": "workspace:*",
     "@apexnova-connect/core": "workspace:*",
     "@apexnova-connect/credential-store": "workspace:*",
+    "@apexnova-connect/gateway": "workspace:*",
     "@apexnova-connect/hub-client": "workspace:*",
     "@apexnova-connect/integration-claude-code": "workspace:*",
     "@apexnova-connect/integration-codex": "workspace:*",

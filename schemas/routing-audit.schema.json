@@ -98,7 +98,8 @@
       "type": "object",
       "description": "What the billing ledger reported for the requests that followed the selection. Absent requests are not an absence of cost: settlement lags, and `unconfirmed` says so rather than claiming either outcome.",
       "required": [
-        "status"
+        "status",
+        "method"
       ],
       "properties": {
         "status": {
@@ -145,6 +146,25 @@
               }
             },
             "additionalProperties": false
+          }
+        },
+        "method": {
+          "description": "How the attribution was established. `gateway` and `request-id` name individual requests; `ledger-window` is a difference between hourly billing buckets and can be polluted by another machine on the same account. Recording which one produced a figure keeps an approximation from being read as an exact one.",
+          "enum": [
+            "gateway",
+            "request-id",
+            "ledger-window"
+          ]
+        },
+        "requestIds": {
+          "description": "The requests this attribution covers, where they are individually known.",
+          "type": "array",
+          "maxItems": 200,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           }
         }
       },

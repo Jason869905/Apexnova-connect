@@ -97,6 +97,7 @@ describe("routing audit entries", () => {
         credentialId: "rtc_1",
         attribution: {
           status: "confirmed",
+          method: "gateway",
           requestCount: 2,
           billedTo: [{ apiKeyId: "rtc_1", deploymentId: "deployment.nova", requestCount: 2 }],
         },
@@ -168,7 +169,7 @@ describe("routing audit entries", () => {
       agentId: "opencode",
       profile: "default",
       selectionId: `audit.sha256.${"b".repeat(64)}`,
-      attribution: { status: "unconfirmed" },
+      attribution: { status: "unconfirmed", method: "ledger-window" },
       recordedAt: "2026-09-11T20:05:00.000Z",
     });
 

@@ -2230,6 +2230,84 @@ describe("CLI", () => {
     expect(capture.stderr()).toContain("needs a transaction ID");
   });
 
+  it("points the Agent at loopback when the gateway is asked for, and says how it attributed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-gateway-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{}\n", "utf8");
+    const credentials = memoryCredentials();
+    let launchedKey: string | undefined;
+    let duringLaunch = "";
+    const capture = captureIo();
+
+    const result = await runCli(["run", "opencode", "--gateway", "--deployment", "deployment.nova", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub(),
+      launchAgent: async ({ environment }) => {
+        // Read while the Agent is running: the gateway run takes its own
+        // configuration back afterwards, because a loopback port and a token
+        // that died with the process are no use to the next launch.
+        launchedKey = environment.APEXNOVA_API_KEY;
+        duringLaunch = await readFile(configPath, "utf8");
+        return 0;
+      },
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+      createRequestId: () => "local_gateway",
+    });
+
+    if (result.exitCode !== EXIT_CODES.success) throw new Error(`${capture.stdout()}${capture.stderr()}`);
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    // The Agent talks to loopback and holds a local token; the Hub credential
+    // stays in the gateway process. That boundary is the point, not a detail.
+    expect(duringLaunch).toContain("http://127.0.0.1:");
+    // And taken back: the address is gone once the gateway is.
+    expect(await readFile(configPath, "utf8")).not.toContain("127.0.0.1");
+    expect(launchedKey).toBeDefined();
+    expect(launchedKey).not.toContain("runtime-secret");
+
+    const audit = await new RoutingAuditLog({
+      path: routingAuditPath(join(root, "Apexnova", "connect")),
+    }).list();
+    const attributed = audit.find((entry) => entry.event === "attributed");
+    // No request was made -- the launcher is stubbed -- so the figure is
+    // unconfirmed, and the method says a gateway produced it rather than a
+    // difference between billing buckets.
+    expect(attributed?.attribution).toMatchObject({ method: "gateway", status: "unconfirmed" });
+  });
+
+  it("refuses to send a run direct when the gateway was asked for", async () => {
+    // The flag silently doing nothing is the failure this milestone keeps
+    // finding; asked-for-and-not-running is a contradiction, not a fallback.
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-gateway-guard-"));
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "rtc_1",
+      secret: SecretValue.from("runtime-secret"),
+      expiresAt: "2099-09-05T12:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    const capture = captureIo();
+
+    const result = await runCli(["run", "opencode", "--gateway", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => installed }),
+      hubService: mockHub({ catalog: async () => { throw new HubClientError("API_ERROR", "catalog unavailable"); } }),
+      launchAgent: async () => 0,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_gateway_guard",
+    });
+
+    expect(result.exitCode).not.toBe(EXIT_CODES.success);
+  });
+
   it("reads the audit log back with each cost under the decision it paid for", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-audit-"));
     const state = { platform: "win32" as const, environment: { LOCALAPPDATA: root }, homeDirectory: root };
@@ -2252,7 +2330,7 @@ describe("CLI", () => {
       profile: "default",
       command: "run",
       selectionId: selected.id,
-      attribution: { status: "confirmed", requestCount: 2, billedTo: [{ apiKeyId: "rtc_1", requestCount: 2 }] },
+      attribution: { status: "confirmed", method: "gateway", requestCount: 2, requestIds: ["req_a", "req_b"], billedTo: [{ apiKeyId: "rtc_1", requestCount: 2 }] },
       recordedAt: "2026-09-11T20:05:00.000Z",
     }));
     await log.append(createRoutingAuditEntry({
@@ -2260,7 +2338,7 @@ describe("CLI", () => {
       agentId: "opencode",
       profile: "default",
       command: "verify",
-      attribution: { status: "mismatched", requestCount: 1, billedTo: [{ apiKeyId: "key_other", apiKeyName: "someone-else", requestCount: 1 }] },
+      attribution: { status: "mismatched", method: "ledger-window", requestCount: 1, billedTo: [{ apiKeyId: "key_other", apiKeyName: "someone-else", requestCount: 1 }] },
       recordedAt: "2026-09-11T20:06:00.000Z",
     }));
 
@@ -2278,7 +2356,7 @@ describe("CLI", () => {
     // what grounds, and who actually paid.
     expect(output).toContain("deployment.nova");
     expect(output).toContain("chosen: recommendation (rec.sha256.");
-    expect(output).toContain("billed (run): confirmed — 2 on rtc_1");
+    expect(output).toContain("billed (run): confirmed via gateway, 2 request ids — 2 on rtc_1");
     // An attribution with no recorded decision is still a fact about spending.
     // Dropping it would be the quiet omission the log exists to prevent.
     expect(output).toContain("Not linked to any recorded route");

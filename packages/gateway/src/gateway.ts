@@ -21,8 +21,15 @@ export interface ForwardedRequest {
 export interface GatewayOptions {
   /** Where Hub lives. Only the origin is used; the Agent's path is preserved. */
   readonly upstreamBaseUrl: string;
-  /** The Hub credential. It stays in this process and never reaches the Agent. */
-  readonly credential: SecretValue;
+  /**
+   * The Hub credential. It stays in this process and never reaches the Agent.
+   *
+   * Read per request rather than captured at start, so the gateway can be
+   * listening before the credential exists: the Agent's configuration has to
+   * name this gateway's address, and the credential is minted by the same
+   * configure step that writes it.
+   */
+  readonly credential: SecretValue | (() => SecretValue);
   readonly onForwarded?: (request: ForwardedRequest) => void;
   readonly now?: () => number;
   readonly fetch?: typeof globalThis.fetch;
@@ -110,7 +117,8 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       if (value === undefined || HOP_BY_HOP.has(name.toLowerCase())) continue;
       headers.set(name, Array.isArray(value) ? value.join(", ") : value);
     }
-    headers.set("authorization", `Bearer ${options.credential.reveal()}`);
+    const credential = typeof options.credential === "function" ? options.credential() : options.credential;
+    headers.set("authorization", `Bearer ${credential.reveal()}`);
 
     const method = request.method ?? "GET";
     const hasBody = method !== "GET" && method !== "HEAD";
@@ -185,7 +193,14 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     url: `http://${host === "::1" ? "[::1]" : host}:${address.port}`,
     localToken,
     async close() {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      // `close()` alone waits for every open connection, and an Agent that keeps
+      // its connection alive never lets go -- the launcher hung after the Agent
+      // had already exited. Idle sockets are dropped first, then anything still
+      // attached, so shutting down does not depend on the client's manners.
+      server.closeIdleConnections();
+      const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+      server.closeAllConnections();
+      await closed;
     },
   };
 }

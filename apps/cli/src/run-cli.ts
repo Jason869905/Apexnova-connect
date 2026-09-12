@@ -48,6 +48,7 @@ import {
   type SuiteProtocol,
 } from "@apexnova-connect/capabilities";
 import { createRoutingAuditEntry, type RoutingAuditEntry } from "@apexnova-connect/routing";
+import { startGateway, type ForwardedRequest, type RunningGateway } from "@apexnova-connect/gateway";
 import {
   CODING_GENERAL,
   recommend,
@@ -101,7 +102,7 @@ import {
   selectProtocol,
   toProtocolId,
 } from "./agent-workflow.js";
-import { RuntimeBindingStore } from "./runtime-binding-store.js";
+import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-binding-store.js";
 import {
   hubConfigDefaults,
   hubConfigPath,
@@ -123,7 +124,7 @@ const CAPABILITY_SUITE_BUDGET = 0.05;
 const HELP = `Apexnova-connect CLI
 
 Usage:
-  apexnova run <agent> [--deployment <id>] [--key <id>] [--rotating] [-- <agent args>]
+  apexnova run <agent> [--deployment <id>] [--gateway] [--key <id>] [--rotating] [-- <agent args>]
   apexnova init [--hub-url <url>] [--client-id <id>] [--path-prefix <p>]
   apexnova login | logout | whoami | balance
   apexnova agents
@@ -160,6 +161,7 @@ Global options:
   --compatible-only      Hide unavailable or unsupported deployments
   --deployment <id>      Select a public model deployment
   --best                 Connect to the top of the ranking, and record why
+  --gateway              Route this run through a local gateway (default off)
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
   --record <path>        Write a replayable recording of a suite run
   --within <days>        Refresh evidence expiring within this many days (default 7)
@@ -234,6 +236,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let requestIdFilter: string | undefined;
   let scenarioId: string | undefined;
   let best = false;
+  let gateway = false;
   let limit: number | undefined;
   let modelAllowlist: readonly string[] | undefined;
   let excludePublishers: readonly string[] | undefined;
@@ -367,6 +370,9 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         requestIdFilter = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--gateway":
+        gateway = true;
+        break;
       case "--limit": {
         const raw = valueAfter(args, index, arg);
         const requested = Number(raw);
@@ -478,6 +484,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(requestIdFilter ? { requestId: requestIdFilter } : {}),
     ...(scenarioId ? { scenarioId } : {}),
     best,
+    gateway,
     ...(limit === undefined ? {} : { limit }),
     ...(modelAllowlist ? { modelAllowlist } : {}),
     ...(excludePublishers ? { excludePublishers } : {}),
@@ -2338,7 +2345,13 @@ async function executeAudit(parsed: ParsedArguments, dependencies: CliDependenci
               const billed = (attribution.attribution?.billedTo ?? [])
                 .map((share) => `${share.requestCount} on ${share.apiKeyName ?? share.apiKeyId}`)
                 .join(", ");
-              return `  billed (${attribution.command ?? "?"}): ${attribution.attribution?.status}${billed ? ` \u2014 ${billed}` : ""}`;
+              // The method is printed because a window difference and a named
+              // request are not the same claim, and a reader who cannot tell
+              // them apart will take the approximation for the exact one.
+              const named = attribution.attribution?.requestIds?.length
+                ? `, ${attribution.attribution.requestIds.length} request id${attribution.attribution.requestIds.length === 1 ? "" : "s"}`
+                : "";
+              return `  billed (${attribution.command ?? "?"}): ${attribution.attribution?.status} via ${attribution.attribution?.method}${named}${billed ? ` \u2014 ${billed}` : ""}`;
             }),
           ].join("\n");
         }),
@@ -2930,17 +2943,48 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     });
   }
 
+  let gateway: RunningGateway | undefined;
+  const forwarded: ForwardedRequest[] = [];
+  let gatewayBinding: RuntimeCredentialBinding | undefined;
+
   const existing = await bindings.load(agentId, parsed.profile);
-  const needConfig = !existing || parsed.deployment !== undefined;
+  // `parsed.gateway`, not the variable below: that one is assigned inside this
+  // branch, so reading it here left `--gateway` silently doing nothing whenever
+  // a binding already existed -- the run went direct and said nothing.
+  const needConfig = !existing || parsed.deployment !== undefined || parsed.gateway;
   let binding = existing;
   let selectionEntryId: string | undefined;
+  let gatewayTransactionId: string | undefined;
   const configureWarnings: string[] = [];
   if (needConfig) {
     const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
     const deployment = await resolveDeployment(parsed, dependencies, integration, catalog, existing?.deploymentId);
     const protocol = selectProtocol(deployment, integration);
-    const result = await configureAgent(parsed, dependencies, integration, deployment, protocol, catalog);
+    if (parsed.gateway) {
+      // Started here, once the endpoint this run will actually use is known --
+      // taking whichever endpoint the catalog happened to list first would
+      // forward to a different protocol's address. The credential is read per
+      // request, so the gateway can be listening before the configure step below
+      // mints it and writes the address down.
+      gateway = await startGateway({
+        upstreamBaseUrl: new URL(protocol.baseUrl).origin,
+        credential: () => gatewayBinding!.secret,
+        onForwarded: (request) => forwarded.push(request),
+      });
+    }
+    // Through the gateway the Agent talks to loopback; the real endpoint stays
+    // in this process. Only the origin changes -- the path is what tells the
+    // upstream which endpoint this is, and dropping it would send every request
+    // to the wrong one.
+    const target = gateway
+      ? { ...protocol, baseUrl: `${gateway.url}${new URL(protocol.baseUrl).pathname}` }
+      : protocol;
+    const result = await configureAgent(
+      parsed, dependencies, integration, deployment, target, catalog, "auto", undefined, gateway !== undefined,
+    );
     binding = result.binding;
+    gatewayBinding = result.binding;
+    gatewayTransactionId = result.transactionId;
     selectionEntryId = result.auditEntryId;
     configureWarnings.push(...result.warnings);
     if (!parsed.json) {
@@ -2969,9 +3013,51 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     before = undefined;
   }
 
-  await launchAgent(parsed, dependencies, integration, binding, agentArgs);
-
   const launchWarnings: string[] = [];
+  if (parsed.gateway && gateway === undefined) {
+    // Asked for and not running is a contradiction, not a fallback. Continuing
+    // would send the request straight to Hub while the operator believes it went
+    // through the gateway.
+    throw new CliError({
+      code: "GATEWAY_NOT_STARTED",
+      message: "--gateway was requested but no gateway was started; the run was stopped rather than sent direct.",
+      exitCode: EXIT_CODES.runtime,
+    });
+  }
+
+  // Through the gateway the Agent gets the local token, never the Hub
+  // credential: that is the point of the process boundary, not a side effect of
+  // it.
+  await launchAgent(
+    parsed,
+    dependencies,
+    integration,
+    gateway ? { ...binding, secret: SecretValue.from(gateway.localToken) } : binding,
+    agentArgs,
+  );
+
+  if (gateway) {
+    await gateway.close();
+    // The configuration names an ephemeral loopback port and a token that died
+    // with the process. Leaving it behind would give the next launch an address
+    // that answers nothing, so the gateway run takes its own writes back.
+    if (gatewayTransactionId !== undefined) {
+      try {
+        // The restore command already revokes the credential, restores the
+        // previous binding and checks ordering. A second implementation here
+        // would be a second set of rules to keep in step.
+        await executeRestore(
+          { ...parsed, command: "restore", operands: [gatewayTransactionId], yes: true, dryRun: false, list: false },
+          dependencies,
+        );
+      } catch (cause) {
+        launchWarnings.push(
+          `The gateway configuration could not be rolled back automatically (${cause instanceof Error ? cause.message : "unknown error"}); run "apexnova restore --list".`,
+        );
+      }
+    }
+  }
+
   let attribution: LaunchAttribution | undefined;
   if (before !== undefined) {
     try {
@@ -2990,7 +3076,43 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   // What a route cost is a second event, not an amendment to the first: it is
   // not known when the target is chosen, and rewriting the decision would lose
   // what was believed when it was made.
-  if (attribution !== undefined) {
+  if (gateway !== undefined) {
+    // The gateway saw every request and the id the upstream gave it, so the
+    // attribution stops being a difference between hourly buckets. It is also
+    // confirmed by construction: nothing but this gateway held the credential.
+    const failures = forwarded.filter((request) => request.failure !== undefined).length;
+    try {
+      await routingAuditLog(dependencies).append(
+        createRoutingAuditEntry({
+          event: "attributed",
+          agentId,
+          integrationId: integration.manifest.id,
+          profile: parsed.profile,
+          command: "run",
+          deploymentId: binding.deploymentId,
+          credentialId: binding.credentialId,
+          ...(selectionEntryId === undefined ? {} : { selectionId: selectionEntryId }),
+          attribution: {
+            status: forwarded.length === 0 ? "unconfirmed" : "confirmed",
+            method: "gateway",
+            ...(forwarded.length === 0 ? {} : { requestCount: forwarded.length }),
+            ...(forwarded.some((request) => request.requestId !== undefined)
+              ? { requestIds: [...new Set(forwarded.flatMap((request) => request.requestId ? [request.requestId] : []))] }
+              : {}),
+            ...(forwarded.length === 0
+              ? {}
+              : { billedTo: [{ apiKeyId: binding.credentialId, deploymentId: binding.deploymentId, requestCount: forwarded.length }] }),
+          },
+          recordedAt: new Date(currentTime(dependencies)).toISOString(),
+        }),
+      );
+    } catch {
+      launchWarnings.push("The run completed but its billing attribution was not written to the audit log.");
+    }
+    if (failures > 0) {
+      launchWarnings.push(`${failures} request${failures === 1 ? "" : "s"} could not reach the upstream and were not retried.`);
+    }
+  } else if (attribution !== undefined) {
     const billedTo = [
       ...(attribution.ours > 0 ? [{ apiKeyId: binding.credentialId, deploymentId: binding.deploymentId, requestCount: attribution.ours }] : []),
       ...attribution.others.map((entry) => ({ apiKeyId: entry.key, requestCount: entry.requests })),
@@ -3013,6 +3135,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
           ...(selectionEntryId === undefined ? {} : { selectionId: selectionEntryId }),
           attribution: {
             status,
+            method: "ledger-window",
             ...(status === "unconfirmed" ? {} : { requestCount: attribution.ours + attribution.others.reduce((sum, entry) => sum + entry.requests, 0) }),
             ...(billedTo.length === 0 ? {} : { billedTo }),
           },
@@ -3064,9 +3187,11 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     warnings: [...configureWarnings, ...runtime.warnings, ...launchWarnings],
     human: [
       `${runtime.rotated ? "Credential renewed.\n" : ""}${integration.manifest.displayName} exited successfully.`,
-      ...(attribution && attribution.ours > 0
-        ? [`${attribution.ours} request${attribution.ours === 1 ? "" : "s"} billed to this launcher's credential on ${binding.deploymentId}.`]
-        : []),
+      ...(gateway
+        ? [`${forwarded.length} request${forwarded.length === 1 ? "" : "s"} forwarded through the local gateway to ${binding.deploymentId}, each one named.`]
+        : attribution && attribution.ours > 0
+          ? [`${attribution.ours} request${attribution.ours === 1 ? "" : "s"} billed to this launcher's credential on ${binding.deploymentId}.`]
+          : []),
       // Human mode prints `human` and nothing else.
       ...launchWarnings,
     ].join("\n"),
@@ -3223,6 +3348,8 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
         ...(selectionInForceId === undefined ? {} : { selectionId: selectionInForceId }),
         attribution: {
           status,
+          method: "request-id",
+          ...(billedKey === undefined ? {} : { requestIds: [inference.requestId] }),
           ...(billedKey === undefined
             ? {}
             : {
