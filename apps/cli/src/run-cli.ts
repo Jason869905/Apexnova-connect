@@ -2353,10 +2353,24 @@ async function executeAudit(parsed: ParsedArguments, dependencies: CliDependenci
               // The method is printed because a window difference and a named
               // request are not the same claim, and a reader who cannot tell
               // them apart will take the approximation for the exact one.
-              const named = attribution.attribution?.requestIds?.length
-                ? `, ${attribution.attribution.requestIds.length} request id${attribution.attribution.requestIds.length === 1 ? "" : "s"}`
-                : "";
-              return `  billed (${attribution.command ?? "?"}): ${attribution.attribution?.status} via ${attribution.attribution?.method}${named}${billed ? ` \u2014 ${billed}` : ""}`;
+              const requests = attribution.attribution?.requests ?? [];
+              const named = requests.length === 0
+                ? ""
+                : `, ${requests.length} request${requests.length === 1 ? "" : "s"}`;
+              return [
+                `  billed (${attribution.command ?? "?"}): ${attribution.attribution?.status} via ${attribution.attribution?.method}${named}${billed ? ` \u2014 ${billed}` : ""}`,
+                // One wall-clock reading each, not a latency measurement: no
+                // aggregation, no percentile, no record of the conditions. It is
+                // shown because it is what happened, and labelled so nobody
+                // reads one sample as a distribution.
+                ...requests
+                  .filter((request) => request.path !== undefined)
+                  .map((request) =>
+                    `    ${request.method ?? "?"} ${request.path} ${request.status ?? "?"}${
+                      request.durationMs === undefined ? "" : ` in ${request.durationMs}ms`
+                    }${request.requestId ? ` (${request.requestId})` : ""}${request.failure ? ` \u2014 ${request.failure}` : ""}`,
+                  ),
+              ].join("\n");
             }),
           ].join("\n");
         }),
@@ -3101,9 +3115,18 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
             status: forwarded.length === 0 ? "unconfirmed" : "confirmed",
             method: "gateway",
             ...(forwarded.length === 0 ? {} : { requestCount: forwarded.length }),
-            ...(forwarded.some((request) => request.requestId !== undefined)
-              ? { requestIds: [...new Set(forwarded.flatMap((request) => request.requestId ? [request.requestId] : []))] }
-              : {}),
+            ...(forwarded.length === 0
+              ? {}
+              : {
+                  requests: forwarded.slice(0, 200).map((request) => ({
+                    ...(request.requestId === undefined ? {} : { requestId: request.requestId }),
+                    method: request.method,
+                    path: request.path,
+                    status: request.status,
+                    durationMs: Math.round(request.durationMs),
+                    ...(request.failure === undefined ? {} : { failure: request.failure }),
+                  })),
+                }),
             ...(forwarded.length === 0
               ? {}
               : { billedTo: [{ apiKeyId: binding.credentialId, deploymentId: binding.deploymentId, requestCount: forwarded.length }] }),
@@ -3358,7 +3381,7 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
         attribution: {
           status,
           method: "request-id",
-          ...(billedKey === undefined ? {} : { requestIds: [inference.requestId] }),
+          ...(billedKey === undefined ? {} : { requests: [{ requestId: inference.requestId }] }),
           ...(billedKey === undefined
             ? {}
             : {

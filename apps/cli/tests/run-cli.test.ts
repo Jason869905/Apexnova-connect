@@ -2330,7 +2330,7 @@ describe("CLI", () => {
       profile: "default",
       command: "run",
       selectionId: selected.id,
-      attribution: { status: "confirmed", method: "gateway", requestCount: 2, requestIds: ["req_a", "req_b"], billedTo: [{ apiKeyId: "rtc_1", requestCount: 2 }] },
+      attribution: { status: "confirmed", method: "gateway", requestCount: 2, requests: [{ requestId: "req_a", method: "POST", path: "/v1/responses", status: 200, durationMs: 812 }, { requestId: "req_b" }], billedTo: [{ apiKeyId: "rtc_1", requestCount: 2 }] },
       recordedAt: "2026-09-11T20:05:00.000Z",
     }));
     await log.append(createRoutingAuditEntry({
@@ -2356,7 +2356,10 @@ describe("CLI", () => {
     // what grounds, and who actually paid.
     expect(output).toContain("deployment.nova");
     expect(output).toContain("chosen: recommendation (rec.sha256.");
-    expect(output).toContain("billed (run): confirmed via gateway, 2 request ids — 2 on rtc_1");
+    expect(output).toContain("billed (run): confirmed via gateway, 2 requests — 2 on rtc_1");
+    // The per-request line is routing detail, printed as a single reading and
+    // never as a latency measurement.
+    expect(output).toContain("POST /v1/responses 200 in 812ms (req_a)");
     // An attribution with no recorded decision is still a fact about spending.
     // Dropping it would be the quiet omission the log exists to prevent.
     expect(output).toContain("Not linked to any recorded route");

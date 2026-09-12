@@ -20,6 +20,15 @@ export interface RoutingAttributionShare {
   readonly requestCount: number;
 }
 
+export interface RoutingAuditRequest {
+  readonly requestId?: string;
+  readonly method?: string;
+  readonly path?: string;
+  readonly status?: number;
+  readonly durationMs?: number;
+  readonly failure?: string;
+}
+
 export interface RoutingAttribution {
   /**
    * `unconfirmed` is not `confirmed`. Settlement lags, so a ledger with nothing
@@ -33,7 +42,13 @@ export interface RoutingAttribution {
    * approximation as the exact one.
    */
   readonly method: "gateway" | "request-id" | "ledger-window";
-  readonly requestIds?: readonly string[];
+  /**
+   * The individual requests, where they are known one by one. `durationMs` is a
+   * single wall-clock reading taken at the gateway -- routing detail, not
+   * Operational Evidence, which needs measurement conditions, aggregation and a
+   * far shorter TTL than this log has.
+   */
+  readonly requests?: readonly RoutingAuditRequest[];
   readonly requestCount?: number;
   readonly billedTo?: readonly RoutingAttributionShare[];
 }

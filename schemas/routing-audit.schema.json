@@ -156,15 +156,41 @@
             "ledger-window"
           ]
         },
-        "requestIds": {
-          "description": "The requests this attribution covers, where they are individually known.",
+        "requests": {
+          "description": "The individual requests this attribution covers, where they are known one by one. `durationMs` is a single wall-clock measurement taken at the gateway: it is routing detail, not Operational Evidence -- there is no aggregation, no percentile and no record of the measurement conditions, and reading it as a latency measurement would be reading one sample as a distribution.",
           "type": "array",
           "maxItems": 200,
-          "uniqueItems": true,
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "type": "object",
+            "properties": {
+              "requestId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "method": {
+                "type": "string",
+                "maxLength": 16
+              },
+              "path": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "status": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              },
+              "durationMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failure": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "additionalProperties": false
           }
         }
       },

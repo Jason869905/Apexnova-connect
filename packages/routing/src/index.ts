@@ -10,6 +10,7 @@ export {
 export type {
   RoutingAttribution,
   RoutingAttributionShare,
+  RoutingAuditRequest,
   RoutingAuditEntry,
   RoutingAuditEvent,
   RoutingAuditIssue,
