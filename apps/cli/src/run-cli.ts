@@ -134,7 +134,7 @@ Usage:
   apexnova connect <agent> (--deployment <id> | --best) (--dry-run | --yes)
   apexnova switch <agent> --deployment <id> (--dry-run | --yes)
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
-  apexnova restore [transaction-id] [--list] [--dry-run] [--yes]
+  apexnova restore [transaction-id] [--list] [--dry-run] [--yes] [--discard-local-changes]
   apexnova compatibility run <agent> --deployment <id> [--budget <amount>] [--yes]
   apexnova compatibility refresh [--within <days>] [--budget <amount>] [--yes]
   apexnova compatibility sync [--agent <id>] [--deployment <id>] [--yes]
@@ -237,6 +237,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let scenarioId: string | undefined;
   let best = false;
   let gateway = false;
+  let discardLocalChanges = false;
   let limit: number | undefined;
   let modelAllowlist: readonly string[] | undefined;
   let excludePublishers: readonly string[] | undefined;
@@ -370,6 +371,9 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         requestIdFilter = valueAfter(args, index, arg);
         index += 1;
         break;
+      case "--discard-local-changes":
+        discardLocalChanges = true;
+        break;
       case "--gateway":
         gateway = true;
         break;
@@ -485,6 +489,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(scenarioId ? { scenarioId } : {}),
     best,
     gateway,
+    discardLocalChanges,
     ...(limit === undefined ? {} : { limit }),
     ...(modelAllowlist ? { modelAllowlist } : {}),
     ...(excludePublishers ? { excludePublishers } : {}),
@@ -895,7 +900,7 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
   }
 
   try {
-    await executor.rollback(receipt);
+    await executor.rollback(receipt, parsed.discardLocalChanges ? { discardChangedTargets: true } : undefined);
   } catch (cause) {
     if (replacement) await hubService(parsed, dependencies).revokeRuntimeCredential(parsed.profile, replacement.credentialId, compensationSignal(parsed)).catch(() => {});
     throw cause;
@@ -977,7 +982,7 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
     // The credential ID only ever reached `warnings`, and human mode prints
     // `human` alone -- so the one instruction the user was given ("revoke it
     // yourself") came without the thing to revoke.
-    human: `Restored transaction ${transactionId}.${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? ` Runtime credential ${binding?.credentialId ?? "(id unknown)"} could not be revoked from Hub; revoke it there.` : ""}`,
+    human: `Restored transaction ${transactionId}.${parsed.discardLocalChanges ? ` Changes made since it was applied were copied into ${join(localStateRoot(dependencies), "backups", "discarded")} before restoring.` : ""}${runtimeCredentialRestored ? " Previous runtime connection was reissued." : ""}${runtimeCredentialRevoked === false ? ` Runtime credential ${binding?.credentialId ?? "(id unknown)"} could not be revoked from Hub; revoke it there.` : ""}`,
   };
 }
 

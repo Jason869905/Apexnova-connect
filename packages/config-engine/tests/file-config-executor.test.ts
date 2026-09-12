@@ -479,6 +479,59 @@ describe("FileConfigExecutor", () => {
     expect(await readFile(other, "utf8")).toBe('{"other":true}\n');
   });
 
+  it("offers a way out of a changed target that keeps what it discards", async () => {
+    const { configRoot, backupRoot, executor } = await fixture();
+    const configPath = join(configRoot, "agent.json");
+    const receipt = await executor.apply(
+      plan({
+        type: "write-file",
+        path: configPath,
+        mode: "create",
+        expectedContentHash: null,
+        content: '{"managed":true}\n',
+        containsSecrets: false,
+      }),
+    );
+    const edited = '{"managed":true,"edited":"work nobody else knows about"}\n';
+    await writeFile(configPath, edited, "utf8");
+
+    await expect(executor.rollback(receipt)).rejects.toMatchObject({ code: "CONFLICT" });
+
+    // Refusing is right; refusing with no way forward is what left a real
+    // operator reconstructing applied bytes from a recorded hash. The escape is
+    // explicit, and it copies the current file first -- a discard that destroys
+    // would be a trap with a polite name.
+    await executor.rollback(receipt, { discardChangedTargets: true });
+
+    await expect(readFile(configPath, "utf8")).rejects.toThrow();
+    const setAside = await readdir(join(backupRoot, "discarded"));
+    expect(setAside).toHaveLength(1);
+    expect(await readFile(join(backupRoot, "discarded", setAside[0]!), "utf8")).toBe(edited);
+  });
+
+  it("restores over a target that was deleted after it was applied", async () => {
+    const { configRoot, executor } = await fixture();
+    const configPath = join(configRoot, "agent.json");
+    await writeFile(configPath, '{"user":"setting"}\n', "utf8");
+    const receipt = await executor.apply(
+      plan({
+        type: "write-file",
+        path: configPath,
+        mode: "update",
+        expectedContentHash: `sha256:${createHash("sha256").update('{"user":"setting"}\n').digest("hex")}`,
+        content: '{"user":"setting","managed":true}\n',
+        containsSecrets: false,
+      }),
+    );
+    // The file is gone: nothing to compare, and nothing to preserve either.
+    await rm(configPath);
+
+    await expect(executor.rollback(receipt)).rejects.toMatchObject({ code: "CONFLICT" });
+    await executor.rollback(receipt, { discardChangedTargets: true });
+
+    expect(await readFile(configPath, "utf8")).toBe('{"user":"setting"}\n');
+  });
+
   it("does not let a damaged sibling backup block an unrelated rollback", async () => {
     const { backupRoot, configRoot } = await fixture();
     const own = join(configRoot, "own.json");

@@ -130,6 +130,8 @@ export interface ParsedArguments {
   readonly best: boolean;
   /** Route this run through the local gateway. Off unless asked for. */
   readonly gateway: boolean;
+  /** Restore over a target that changed after it was applied, keeping a copy. */
+  readonly discardLocalChanges: boolean;
   /** How many routes `audit` prints, newest first. */
   readonly limit?: number;
   readonly modelAllowlist?: readonly string[];

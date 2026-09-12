@@ -39,6 +39,15 @@ export type ConfigExecutionErrorCode =
   | "ROLLBACK_ORDER_CONFLICT"
   | "ROLLBACK_FAILED";
 
+export interface RollbackOptions {
+  /**
+   * Proceed even though a target changed after it was applied, copying what is
+   * there now into the backup root first. Never inferred: the operator has to
+   * ask, because the file may be work nobody else knows about.
+   */
+  readonly discardChangedTargets?: boolean;
+}
+
 export class ConfigExecutionError extends Error {
   readonly code: ConfigExecutionErrorCode;
 
@@ -390,11 +399,16 @@ export class FileConfigExecutor implements ChangeExecutor {
     parentPath: string,
     content: string | Uint8Array,
     fileMode: number,
-    expectedContentHash: string | null,
+    // `null` means the target must not exist; `undefined` means the caller has
+    // already decided what is there is to be replaced. They are different
+    // instructions and conflating them would make a discard refuse itself.
+    expectedContentHash: string | null | undefined,
   ): Promise<void> {
     const allowedRoots = await this.#resolvedAllowedRoots();
     await this.#assertAllowedTarget(targetPath, allowedRoots);
-    await this.#assertExpectedContent(targetPath, expectedContentHash);
+    if (expectedContentHash !== undefined) {
+      await this.#assertExpectedContent(targetPath, expectedContentHash);
+    }
 
     const temporaryPath = join(
       parentPath,
@@ -408,7 +422,12 @@ export class FileConfigExecutor implements ChangeExecutor {
       await handle.sync();
       await handle.close();
       handle = undefined;
-      await this.#assertExpectedContent(targetPath, expectedContentHash);
+      // Checked twice on purpose: once before the temporary file is written and
+      // again immediately before the rename, so a file that changed in between
+      // is not overwritten.
+      if (expectedContentHash !== undefined) {
+        await this.#assertExpectedContent(targetPath, expectedContentHash);
+      }
       await rename(temporaryPath, targetPath);
       await chmod(targetPath, fileMode);
       await syncDirectory(parentPath);
@@ -625,6 +644,7 @@ export class FileConfigExecutor implements ChangeExecutor {
    */
   async #planRollback(
     entries: readonly FileRollbackEntry[],
+    options?: RollbackOptions,
   ): Promise<ReadonlySet<FileRollbackEntry>> {
     const allowedRoots = await this.#resolvedAllowedRoots();
     const pending = new Set<FileRollbackEntry>();
@@ -637,10 +657,13 @@ export class FileConfigExecutor implements ChangeExecutor {
       if (entry.mode === "create") {
         if (currentHash === null) continue;
         if (currentHash !== entry.appliedContentHash) {
-          throw new ConfigExecutionError(
-            "CONFLICT",
-            `Configuration changed after apply; refusing to remove it: ${entry.targetPath}.`,
-          );
+          if (!options?.discardChangedTargets) {
+            throw new ConfigExecutionError(
+              "CONFLICT",
+              `Configuration changed after apply; refusing to remove it: ${entry.targetPath}. Re-run with --discard-local-changes to set the current file aside and restore anyway.`,
+            );
+          }
+          await this.#setAside(entry, target.targetPath);
         }
         pending.add(entry);
         continue;
@@ -661,15 +684,42 @@ export class FileConfigExecutor implements ChangeExecutor {
       }
       if (currentHash === entry.originalContentHash) continue;
       if (currentHash !== entry.appliedContentHash) {
-        throw new ConfigExecutionError(
-          "CONFLICT",
-          `Configuration changed after apply; refusing to overwrite it: ${entry.targetPath}.`,
-        );
+        if (!options?.discardChangedTargets) {
+          throw new ConfigExecutionError(
+            "CONFLICT",
+            `Configuration changed after apply; refusing to overwrite it: ${entry.targetPath}. Re-run with --discard-local-changes to set the current file aside and restore anyway.`,
+          );
+        }
+        await this.#setAside(entry, target.targetPath);
       }
       pending.add(entry);
     }
 
     return pending;
+  }
+
+  /**
+   * Copies what is on disk now into the backup root before a rollback
+   * overwrites or removes it.
+   *
+   * This is what makes the escape honest. Refusing to touch a changed file is
+   * right, but a refusal with no way forward left a real user stuck: on
+   * 2026-09-12 the only way out of one was reconstructing the exact applied
+   * bytes from a recorded hash. "Discard" that keeps a copy is a door; one that
+   * destroys is a trap with a polite name.
+   */
+  async #setAside(entry: FileRollbackEntry, targetPath: string): Promise<string | undefined> {
+    // Nothing to preserve when the target is already gone -- which is one of the
+    // two ways this dead end is reached, and the one where there is no work to
+    // lose.
+    if (!(await pathMetadata(targetPath))?.isFile()) return undefined;
+    const directory = join(this.#backupRoot, "discarded");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const destination = join(directory, `${stamp}-${basename(entry.targetPath)}`);
+    await copyFile(targetPath, destination);
+    await chmod(destination, 0o600);
+    return destination;
   }
 
   async #rollbackEntries(entries: readonly FileRollbackEntry[]): Promise<void> {
@@ -679,11 +729,17 @@ export class FileConfigExecutor implements ChangeExecutor {
   async #applyRollback(
     entries: readonly FileRollbackEntry[],
     pending: ReadonlySet<FileRollbackEntry>,
+    options?: RollbackOptions,
   ): Promise<void> {
     for (const entry of [...entries].reverse()) {
       if (!pending.has(entry)) continue;
+      // The second check is a guard against the file changing between planning
+      // and writing. When the operator has already said to discard a changed
+      // target -- and the current content has been copied aside -- re-asserting
+      // the applied hash would refuse the very case they asked for.
+      const expected = options?.discardChangedTargets ? undefined : entry.appliedContentHash;
       if (entry.mode === "create") {
-        await this.#assertExpectedContent(entry.targetPath, entry.appliedContentHash);
+        if (expected !== undefined) await this.#assertExpectedContent(entry.targetPath, expected);
         await unlink(entry.targetPath);
         await syncDirectory(dirname(entry.targetPath));
         continue;
@@ -695,7 +751,7 @@ export class FileConfigExecutor implements ChangeExecutor {
         dirname(entry.targetPath),
         backup,
         entry.originalFileMode ?? 0o600,
-        entry.appliedContentHash,
+        expected,
       );
     }
   }
@@ -870,7 +926,7 @@ export class FileConfigExecutor implements ChangeExecutor {
     };
   }
 
-  async rollback(receipt: ApplyReceipt): Promise<void> {
+  async rollback(receipt: ApplyReceipt, options?: RollbackOptions): Promise<void> {
     if (!isFileRollbackToken(receipt.rollbackToken)) {
       throw new ConfigExecutionError(
         "INVALID_RECEIPT",
@@ -900,12 +956,12 @@ export class FileConfigExecutor implements ChangeExecutor {
     // Validate first: a rollback that is going to be refused must not leave the
     // transaction marked `rolling-back`, because nothing was rolled back and a
     // later recovery scan would misread a still-applied transaction as half-undone.
-    const pending = await this.#planRollback(transaction.entries);
+    const pending = await this.#planRollback(transaction.entries, options);
     transaction = { ...transaction, state: "rolling-back" };
     await this.#writeTransaction(transaction);
 
     try {
-      await this.#applyRollback(transaction.entries, pending);
+      await this.#applyRollback(transaction.entries, pending, options);
       await removeTransactionDirectory(transactionDirectory);
       await syncDirectory(dirname(transactionDirectory));
     } catch (cause) {
