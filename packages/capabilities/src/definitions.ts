@@ -29,13 +29,18 @@ export const CAPABILITY_SUITE_ID = "apexnova.capability-suite";
  * suite changed in a way that invalidates earlier results, so verdicts stop
  * accepting evidence from an older major (see `isEvidenceLive`).
  */
-export const CAPABILITY_SUITE_VERSION = "0.3.0";
+export const CAPABILITY_SUITE_VERSION = "0.4.0";
 
 /**
  * The M3 first batch fixed by ADR 0004 -- six protocol tests and two
  * interaction tests -- plus `agent.forced-tool-choice`, added in suite 0.3.0
  * once the catalog could express it. Adding a capability is a minor bump:
  * records written under 0.2.0 stay valid and simply say nothing about it.
+ *
+ * 0.4.0 adds no capability. It adds a third protocol the same nine can be asked
+ * over -- `openai-chat-completions` -- which is the same shape of change by the
+ * same rule: earlier records stay valid and say nothing about it. The digest
+ * below is therefore unchanged, because no definition moved.
  */
 export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
   {

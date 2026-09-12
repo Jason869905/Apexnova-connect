@@ -4,6 +4,9 @@ import { CAPABILITY_SUITE_ID, CAPABILITY_SUITE_VERSION } from "./definitions.js"
 import { CapabilityError } from "./evidence.js";
 import type { SuiteProtocol } from "./suite.js";
 
+/** Kept in step with `SuiteProtocol`; a recording of a protocol the suite cannot run is not a recording of anything. */
+const SUITE_PROTOCOLS = new Set<string>(["openai-responses", "anthropic-messages", "openai-chat-completions"]);
+
 /** Response headers a probe reads. Everything else is dropped rather than filtered. */
 const RECORDED_HEADERS: readonly string[] = [
   "content-type",
@@ -157,7 +160,7 @@ export function parseRecording(value: unknown): CapabilityRecording {
   if (
     item.version !== 1 ||
     typeof item.endpoint !== "string" ||
-    (item.protocol !== "openai-responses" && item.protocol !== "anthropic-messages") ||
+    !SUITE_PROTOCOLS.has(item.protocol as string) ||
     typeof item.model !== "string" ||
     typeof item.deploymentId !== "string" ||
     typeof item.recordedAt !== "string" ||

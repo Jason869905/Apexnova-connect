@@ -1133,6 +1133,11 @@ function versionUnavailableReason(lookup: AgentVersionLookup, displayName: strin
 function suiteProtocol(hubProtocol: string): SuiteProtocol | undefined {
   if (hubProtocol === "openai-responses") return "openai-responses";
   if (hubProtocol === "anthropic-messages") return "anthropic-messages";
+  // The catalog spells this one `openai-chat`; manifests and the schema
+  // vocabulary spell it `openai-chat-completions`. Both are accepted here, and
+  // the caller still records the catalog's own spelling so a subject cannot
+  // split in two.
+  if (hubProtocol === "openai-chat" || hubProtocol === "openai-chat-completions") return "openai-chat-completions";
   return undefined;
 }
 
@@ -1426,7 +1431,7 @@ async function executeCompatibilityRun(
   if (protocol === undefined || protocolId === undefined) {
     throw new CliError({
       code: "PROTOCOL_NOT_SUPPORTED",
-      message: `The first capability batch covers openai-responses and anthropic-messages; ${hubProtocol.protocol} is not in it yet.`,
+      message: `The capability suite covers openai-responses, anthropic-messages and openai-chat; ${hubProtocol.protocol} is not in it.`,
       exitCode: EXIT_CODES.unavailable,
     });
   }

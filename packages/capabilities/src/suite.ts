@@ -3,12 +3,21 @@ import type { SecretValue } from "@apexnova-connect/credential-store";
 import { CAPABILITY_SUITE_ID, CAPABILITY_SUITE_VERSION } from "./definitions.js";
 import { CapabilityError, type CapabilityOutcome, type CapabilitySupport } from "./evidence.js";
 
-/** The two protocol families ADR 0004 fixed for the first batch. */
-export type SuiteProtocol = "openai-responses" | "anthropic-messages";
+/**
+ * The protocol families the suite can measure.
+ *
+ * ADR 0004 fixed the first two; `openai-chat-completions` was added once
+ * [ADR 0023](../../../docs/decisions/0023-integration-status-ladder.md) made
+ * "declared means measured" a checked condition and two Integrations turned out
+ * to declare a protocol no instrument here could reach.
+ */
+export type SuiteProtocol = "openai-responses" | "anthropic-messages" | "openai-chat-completions";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_STREAM_EVENTS = 512;
 const MAX_DETAIL = 240;
+/** Chat Completions ends its stream with this rather than a named frame. */
+const DONE_SENTINEL = "[DONE]";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 export interface CapabilitySuiteOptions {
@@ -209,15 +218,24 @@ async function streamProbe(
           named = true;
           events.push(line.slice("event:".length).trim());
         } else if (!named && line.startsWith("data:")) {
-          // Both protocols name their frames in an `event:` line, but a server
-          // that only sends `data:` frames still carries the name in the
+          // Responses and Messages name their frames in an `event:` line, but a
+          // server that only sends `data:` frames still carries the name in the
           // payload -- reading it there keeps a terse stream from being
           // reported as a stream with no events at all.
+          //
+          // Chat Completions never names frames: every one is an object whose
+          // `object` field says what it is, and the stream ends with the
+          // sentinel `data: [DONE]`, which is not JSON at all. Both are read
+          // here so that protocol has an order to check rather than looking
+          // like a stream of nothing.
           const payload = line.slice("data:".length).trim();
-          if (payload.startsWith("{")) {
+          if (payload === DONE_SENTINEL) {
+            events.push(DONE_SENTINEL);
+          } else if (payload.startsWith("{")) {
             try {
-              const parsed = JSON.parse(payload) as { type?: unknown };
+              const parsed = JSON.parse(payload) as { type?: unknown; object?: unknown };
               if (typeof parsed.type === "string") events.push(parsed.type);
+              else if (typeof parsed.object === "string") events.push(parsed.object);
             } catch {
               // A partial frame is not a finding on its own.
             }
@@ -267,6 +285,14 @@ function minimalBody(options: CapabilitySuiteOptions, stream: boolean): unknown 
       stream,
     };
   }
+  if (options.protocol === "openai-chat-completions") {
+    return {
+      model: options.model,
+      messages: [{ role: "user", content: "Reply with exactly OK." }],
+      max_tokens: 16,
+      stream,
+    };
+  }
   return {
     model: options.model,
     max_tokens: 16,
@@ -282,6 +308,14 @@ function longerStreamBody(options: CapabilitySuiteOptions): unknown {
       input: "Count slowly from one to forty, one number per line.",
       max_output_tokens: 256,
       store: false,
+      stream: true,
+    };
+  }
+  if (options.protocol === "openai-chat-completions") {
+    return {
+      model: options.model,
+      messages: [{ role: "user", content: "Count slowly from one to forty, one number per line." }],
+      max_tokens: 256,
       stream: true,
     };
   }
@@ -314,6 +348,23 @@ function toolBody(options: CapabilitySuiteOptions): unknown {
           description: "Look up the current weather for a city.",
           parameters: WEATHER_TOOL_SCHEMA,
           strict: true,
+        },
+      ],
+    };
+  }
+  if (options.protocol === "openai-chat-completions") {
+    return {
+      model: options.model,
+      messages: [{ role: "user", content: "What is the weather in Oslo? Use the get_weather tool to answer." }],
+      max_tokens: 256,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Look up the current weather for a city.",
+            parameters: WEATHER_TOOL_SCHEMA,
+          },
         },
       ],
     };
@@ -358,6 +409,24 @@ function forcedToolBody(options: CapabilitySuiteOptions): unknown {
       tool_choice: { type: "function", name: "get_weather" },
     };
   }
+  if (options.protocol === "openai-chat-completions") {
+    return {
+      model: options.model,
+      messages: [{ role: "user", content: "What is the weather in Oslo?" }],
+      max_tokens: 256,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Look up the current weather for a city.",
+            parameters: WEATHER_TOOL_SCHEMA,
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "get_weather" } },
+    };
+  }
   return {
     model: options.model,
     max_tokens: 256,
@@ -397,6 +466,19 @@ function structuredBody(options: CapabilitySuiteOptions): unknown {
       },
     };
   }
+  if (options.protocol === "openai-chat-completions") {
+    // Chat Completions has a structured-output mode of its own, so unlike
+    // Anthropic Messages it is asked directly rather than through a tool.
+    return {
+      model: options.model,
+      messages: [{ role: "user", content: "Oslo is 7 degrees. Answer with the schema." }],
+      max_tokens: 256,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "capability_probe", strict: true, schema: STRUCTURED_SCHEMA },
+      },
+    };
+  }
   // Anthropic Messages has no separate structured-output mode; a tool whose
   // input schema is the target shape is the supported way, and the evidence
   // says so rather than reporting the capability as missing. Forcing the choice
@@ -411,6 +493,8 @@ function structuredBody(options: CapabilitySuiteOptions): unknown {
 }
 
 function invalidBody(options: CapabilitySuiteOptions): unknown {
+  // Chat Completions and Anthropic Messages take the same shape here, and a
+  // negative token ceiling is invalid in both.
   return options.protocol === "openai-responses"
     ? { model: options.model, input: "Reply with exactly OK.", max_output_tokens: -1, store: false }
     : { model: options.model, max_tokens: -1, messages: [{ role: "user", content: "Reply with exactly OK." }] };
@@ -436,6 +520,15 @@ function toolArguments(
   protocol: SuiteProtocol,
   body: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
+  // Chat Completions puts the call under the message rather than in the
+  // content list, so it is read before the shared item walk below.
+  if (protocol === "openai-chat-completions") {
+    for (const call of chatToolCalls(body)) {
+      const args = (call.function as { arguments?: unknown } | undefined)?.arguments;
+      if (typeof args === "string") return parseJsonObject(args);
+    }
+    return undefined;
+  }
   for (const item of responseItems(body)) {
     if (protocol === "anthropic-messages" && item.type === "tool_use" && typeof item.input === "object" && item.input !== null) {
       return item.input as Record<string, unknown>;
@@ -452,7 +545,26 @@ function toolArguments(
   return undefined;
 }
 
+/** `choices[0].message`, which is where Chat Completions puts its answer. */
+function chatMessage(body: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const choices = body?.choices;
+  if (!Array.isArray(choices)) return undefined;
+  const first: unknown = choices[0];
+  if (typeof first !== "object" || first === null) return undefined;
+  const message = (first as { message?: unknown }).message;
+  return typeof message === "object" && message !== null ? message as Record<string, unknown> : undefined;
+}
+
+function chatToolCalls(body: Record<string, unknown> | undefined): readonly Record<string, unknown>[] {
+  const calls = chatMessage(body)?.tool_calls;
+  return Array.isArray(calls)
+    ? calls.filter((call): call is Record<string, unknown> => typeof call === "object" && call !== null)
+    : [];
+}
+
 function outputText(body: Record<string, unknown> | undefined): string | undefined {
+  const chat = chatMessage(body)?.content;
+  if (typeof chat === "string") return chat;
   for (const item of responseItems(body)) {
     if (typeof item.text === "string") return item.text;
     const content = item.content;
@@ -491,15 +603,20 @@ function outcome(
 
 function bodyShapeOk(protocol: SuiteProtocol, body: Record<string, unknown> | undefined): boolean {
   if (!body || typeof body.id !== "string") return false;
-  return protocol === "openai-responses"
-    ? Array.isArray(body.output)
-    : body.type === "message" && Array.isArray(body.content);
+  if (protocol === "openai-responses") return Array.isArray(body.output);
+  if (protocol === "openai-chat-completions") {
+    return body.object === "chat.completion" && Array.isArray(body.choices);
+  }
+  return body.type === "message" && Array.isArray(body.content);
 }
 
 function streamOrder(protocol: SuiteProtocol): { readonly first: string; readonly last: string } {
-  return protocol === "openai-responses"
-    ? { first: "response.created", last: "response.completed" }
-    : { first: "message_start", last: "message_stop" };
+  if (protocol === "openai-responses") return { first: "response.created", last: "response.completed" };
+  // Chat Completions has no lifecycle frames: the contract is that every frame
+  // is a chunk and the sentinel closes the stream. That is the whole of its
+  // ordering guarantee, so it is the whole of what this asks for.
+  if (protocol === "openai-chat-completions") return { first: "chat.completion.chunk", last: DONE_SENTINEL };
+  return { first: "message_start", last: "message_stop" };
 }
 
 /**

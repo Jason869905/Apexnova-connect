@@ -30,3 +30,4 @@
 - [ADR 0022：M5 中期状态评审，并撤销两条退出条件](0022-m5-midpoint-review.md)
 - [ADR 0023：Integration 状态阶梯的判定标准](0023-integration-status-ladder.md)
 - [ADR 0024：收窄平台声明，不再声称支持 macOS](0024-narrow-platform-claims.md)
+- [ADR 0025：能力套件扩到 `openai-chat-completions`（套件 0.4.0）](0025-capability-suite-covers-chat-completions.md)

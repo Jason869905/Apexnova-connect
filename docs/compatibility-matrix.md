@@ -1,7 +1,7 @@
 # Compatibility Matrix
 
-- Generated: 2026-09-12T12:23:56.276Z
-- Test suite: `apexnova.capability-suite` 0.3.0
+- Generated: 2026-09-12T12:41:29.280Z
+- Test suite: `apexnova.capability-suite` 0.4.0
 - Source: Apexnova-verified test runs. A provider claim is shown as claimed and never counted as verified.
 
 Generated from the evidence store by `apexnova compatibility matrix`. Do not edit by hand.
@@ -23,9 +23,13 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 | claude-code | 2.1.261 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | `partial` | 2026-09-09T17:58:30.557Z |
 | claude-code | 2.1.233 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | windows-x64 | `partial` | 2026-09-09T20:37:56.731Z |
 | hermes | 0.21.0 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | anthropic-messages | linux-x64 | `compatible` | 2026-09-12T12:22:12.646Z |
+| hermes | 0.21.0 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-chat | linux-x64 | `partial` | 2026-09-12T12:39:30.202Z |
 | hermes | 0.21.0 | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | anthropic-messages | linux-x64 | `compatible` | 2026-09-12T12:23:13.654Z |
+| hermes | 0.21.0 | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | openai-chat | linux-x64 | `partial` | 2026-09-12T12:40:23.550Z |
 | hermes | 0.21.0 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | anthropic-messages | linux-x64 | `compatible` | 2026-09-12T12:23:29.156Z |
+| hermes | 0.21.0 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | openai-chat | linux-x64 | `compatible` | 2026-09-12T12:40:37.066Z |
 | hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | `partial` | 2026-09-12T12:23:38.872Z |
+| hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-chat | linux-x64 | `partial` | 2026-09-12T12:41:02.879Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` | openai-responses | linux-x64 | `partial` | 2026-09-08T18:10:48.262Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | linux-x64 | `partial` | 2026-09-09T17:56:06.863Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | windows-x64 | `partial` | 2026-09-09T20:34:54.153Z |
@@ -56,9 +60,13 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 | claude-code | 2.1.261 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | yes | yes | yes | yes | yes | yes | yes | no | no |
 | claude-code | 2.1.233 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | windows-x64 | yes | yes | yes | yes | yes | yes | yes | no | no |
 | hermes | 0.21.0 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | anthropic-messages | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| hermes | 0.21.0 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-chat | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | hermes | 0.21.0 | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | anthropic-messages | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| hermes | 0.21.0 | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | openai-chat | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | hermes | 0.21.0 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | anthropic-messages | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| hermes | 0.21.0 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | openai-chat | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | yes | yes | yes | yes | yes | yes | yes | no | no |
+| hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-chat | linux-x64 | yes | yes | yes | yes | yes | yes | yes | no | yes |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | untested | no |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | windows-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
@@ -87,9 +95,13 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 - claude-code 2.1.261, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), anthropic-messages, linux-x64, integration claude-code 0.1.0: `ev.sha256.0334c12be4a6133a5a8c3ce72b9b85534f5b7917d96f3726d7fe2a44036ea6ce`
 - claude-code 2.1.233, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), anthropic-messages, windows-x64, integration claude-code 0.1.0: `ev.sha256.544f46d44c864724966afff05265d1765770d34e48e8c909c1bb5b5e9f9f7164`
 - hermes 0.21.0, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), anthropic-messages, linux-x64, integration hermes 0.1.0: `ev.sha256.37d21c9dfdf6f11b6f9125963e7e5ffd7465510d17d69306fcbb1a1d0b830ed0`
+- hermes 0.21.0, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-chat, linux-x64, integration hermes 0.1.0: `ev.sha256.746c7480e38a02ac96580ddf24d420e249b2bbd1568c606dfd8e72436d048a7c`
 - hermes 0.21.0, `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`), anthropic-messages, linux-x64, integration hermes 0.1.0: `ev.sha256.f46e5def1cb28ded71ae1aebcbceab2d2c85c8514c00fb0a20a1ddbfaf517028`
+- hermes 0.21.0, `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`), openai-chat, linux-x64, integration hermes 0.1.0: `ev.sha256.4b25bf707554bd2ac00e6e15efcf9dac185afcd922a8dd6a91c1ba150ceaccc6`
 - hermes 0.21.0, `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`), anthropic-messages, linux-x64, integration hermes 0.1.0: `ev.sha256.ecc84235a2f5272fe87f2719f336b65096c971fa7e37cf748ba4482d8cdcabcf`
+- hermes 0.21.0, `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`), openai-chat, linux-x64, integration hermes 0.1.0: `ev.sha256.349a7873a0b6a3219785f9c4b4b8d95410be66c0bc69af2045f183f709dc463e`
 - hermes 0.21.0, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), anthropic-messages, linux-x64, integration hermes 0.1.0: `ev.sha256.6c11c42aa69fb50c5ff1f375525edd508b7a72663d75d7317499e22bbb617cdc`
+- hermes 0.21.0, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), openai-chat, linux-x64, integration hermes 0.1.0: `ev.sha256.b24ff1f4cd1340d6c8198683bbc290147431f258fab8e249917edaa65c1539c4`
 - opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a`, openai-responses, linux-x64, integration opencode 0.1.0: `evidence.3fa5e35537385cf736270de34394b1de`
 - opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-responses, linux-x64, integration opencode 0.1.0: `ev.sha256.f61ff31afd83aa75c091936cf295f73fee481f9a5e0b5bfe6c34367b64831634`
 - opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-responses, windows-x64, integration opencode 0.1.0: `ev.sha256.ac0710a57d0b411b95a814fbed6d786d8b5f9e15b11f1e73dba39215419ff80f`

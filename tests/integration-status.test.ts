@@ -49,13 +49,23 @@ function coversPlatform(evidencePlatform: string, declared: string): boolean {
   return evidencePlatform === declared || evidencePlatform.startsWith(`${declared}-`);
 }
 
+/**
+ * Evidence records the catalog's spelling so a subject cannot split in two, and
+ * the catalog calls this one `openai-chat` while manifests and the schema call
+ * it `openai-chat-completions`. Normalised towards the schema, which is the
+ * vocabulary the manifest is written in.
+ */
+function schemaProtocol(evidenceProtocol: string): string {
+  return evidenceProtocol === "openai-chat" ? "openai-chat-completions" : evidenceProtocol;
+}
+
 function missingCriteria(manifest: Manifest, matrix: readonly MatrixRow[], docs: ReadonlySet<string>): string[] {
   const missing: string[] = [];
   for (const platform of manifest.compatibility.platforms) {
     for (const protocol of manifest.protocols) {
       const measured = matrix.some((row) =>
         row.agentId === manifest.id
-        && row.protocol === protocol.id
+        && schemaProtocol(row.protocol) === protocol.id
         && coversPlatform(row.platform, platform)
         // A verdict, not a passing one: `partial` and `incompatible` are real
         // findings. Only `unknown` means nothing was measured.
@@ -77,19 +87,16 @@ function missingCriteria(manifest: Manifest, matrix: readonly MatrixRow[], docs:
  */
 const EXPECTED_GAPS: Readonly<Record<string, readonly string[]>> = {
   // macOS was dropped from every manifest on 2026-09-12 rather than left as a
-  // claim nothing backs (ADR 0024). What remains is the protocol axis, which is
-  // where this check found gaps nobody had reconciled.
-  //
-  // Every `openai-chat-completions` line below is blocked on the capability
-  // suite, which covers `openai-responses` and `anthropic-messages` and nothing
-  // else. Collecting cannot close them; extending the suite can.
+  // claim nothing backs (ADR 0024). The capability suite grew
+  // `openai-chat-completions` the same day (ADR 0025), which is what let the
+  // Hermes line close.
   opencode: ["evidence:windows/openai-chat-completions", "evidence:linux/openai-chat-completions"],
   codex: ["evidence:windows/openai-responses", "evidence:linux/openai-responses"],
   // Mechanically clear. Whether it is `stable` turns on the three criteria a
   // machine cannot see -- and ADR 0020 records that it has never run through
   // the gateway, which is criterion 2's business.
   "claude-code": [],
-  hermes: ["evidence:linux/openai-chat-completions"],
+  hermes: [],
 };
 
 describe("the integration status ladder", () => {

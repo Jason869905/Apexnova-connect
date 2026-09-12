@@ -67,7 +67,7 @@ WSL 上 `org.freedesktop.secrets` 激活超时的原因是 keyring daemon 挂在
 - `[passed]` Hermes 三种 `api_mode` 中的两种（`codex_responses`、`anthropic_messages`）经过真实推理验证；
 - `[passed]` Linux 的凭证存储（Secret Service）与事务恢复流程。
 
-未覆盖：macOS 全部流程（无实机，Keychain 后端只有 mock command runner 测试；**2026-09-12 已按 [ADR 0024](decisions/0024-narrow-platform-claims.md) 移出支持范围**）；Hermes 的 `chat_completions` 模式未做真实推理——**该协议也不在能力套件覆盖范围内**，见 ADR 0024 第 3 节。
+未覆盖：macOS 全部流程（无实机，Keychain 后端只有 mock command runner 测试；**2026-09-12 已按 [ADR 0024](decisions/0024-narrow-platform-claims.md) 移出支持范围**）；Hermes 的 `chat_completions` 模式未做真实推理——**2026-09-12 已结清**：能力套件扩到该协议（0.4.0，[ADR 0025](decisions/0025-capability-suite-covers-chat-completions.md)），Hermes 四个 Deployment 已采集。
 
 ## M3 首批能力采集记录（2026-09-08，Linux/WSL2，`api.apexnova-consulting.com`）
 
@@ -435,3 +435,20 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 **交叉验证**：那条 `partial` 的失败项是 `agent.forced-tool-choice` 与 `agent.structured-output`，上游返回 `tool_choice` 不接受 `required`。**`claude-code` 在同一个 Deployment 上是同样的 `partial`、同样两项。** 两个不同 Agent、同一部署、同一组失败——该结论属于部署侧限制，不是 Integration 缺陷。这正是 subject 同时记录 agent 与 deployment 的用处。
 
 合计计费 0.004027 USD。矩阵已重新生成。
+
+## 2026-09-12 首次 `openai-chat-completions` 采集（能力套件 0.4.0）
+
+按 [ADR 0025](decisions/0025-capability-suite-covers-chat-completions.md) 把套件扩到第三个协议后的第一次真机运行。`hermes` × 四个 Deployment × `openai-chat`：
+
+| Deployment | 结论 | 关键项 |
+| --- | --- | --- |
+| `…cmq4770nr…`（GLM-5.1） | `partial` | `agent.structured-output` unsupported |
+| `…cmqr4cngr…`（GLM-5.2） | `partial` | `agent.structured-output` unsupported |
+| `…cmt0bub5d…`（DeepSeek-V4-Pro-0813） | `compatible` | 九项全 supported |
+| `…cmtdear4g…` | `partial` | `agent.forced-tool-choice` unsupported（`tool_choice` 不接受 `required`） |
+
+**按规范实现的部分被真机确认**：`protocol.streaming-order` 报「41 events, chat.completion.chunk first and `[DONE]` last」——该协议没有 `event:` 命名帧、以 `[DONE]` 收尾，这两点与端点实际行为一致。
+
+**一个只有测了第二个协议才看得见的发现**：GLM-5.1 与 GLM-5.2 的 `agent.structured-output` 在 `anthropic-messages` 上是 supported（该路径是强制工具，它们支持），在 `openai-chat-completions` 上是 unsupported（`response_format: json_schema` 它们不照做）。**同一部署、同一 capability、两个协议、两个结论。** 只测一个协议会给出一个看起来完整、实际只对一半的答案。
+
+四条结论在套件 0.3.0 与 0.4.0 下逐项一致（升版后重采，原因见 ADR 0025 第 3 节）。这批证据**尚未 `compatibility sync` 到 Hub**。

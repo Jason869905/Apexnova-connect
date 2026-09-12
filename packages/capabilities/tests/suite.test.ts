@@ -32,6 +32,20 @@ function sse(events: readonly string[]): Response {
   });
 }
 
+/**
+ * Chat Completions as it really streams: no `event:` lines at all, every frame
+ * an object whose `object` field names it, and a `[DONE]` sentinel that is not
+ * JSON. Written separately from `sse` because the difference is the point.
+ */
+function chatSse(chunks: number): Response {
+  const frames = Array.from({ length: chunks }, () =>
+    `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"delta":{"content":"x"}}]}\n\n`);
+  return new Response(`${frames.join("")}data: [DONE]\n\n`, {
+    status: 200,
+    headers: { ...hubHeaders(), "content-type": "text/event-stream" },
+  });
+}
+
 interface RequestShape {
   readonly authorized: boolean;
   readonly body: Record<string, unknown>;
@@ -45,8 +59,13 @@ interface RequestShape {
 function shape(init: RequestInit | undefined): RequestShape {
   const headers = (init?.headers ?? {}) as Record<string, string>;
   const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+  // Chat Completions nests the declaration under `function`; the other two put
+  // the name at the top level.
   const toolNames = Array.isArray(body.tools)
-    ? body.tools.map((tool) => (tool as { name?: string }).name)
+    ? body.tools.map((tool) => {
+        const item = tool as { name?: string; function?: { name?: string } };
+        return item.name ?? item.function?.name;
+      })
     : [];
   return {
     authorized: !String(headers.authorization ?? "").includes("invalid-credential"),
@@ -54,7 +73,7 @@ function shape(init: RequestInit | undefined): RequestShape {
     stream: body.stream === true,
     tools: toolNames.includes("get_weather"),
     forced: body.tool_choice !== undefined && toolNames.includes("get_weather"),
-    structured: toolNames.includes("report_weather") || body.text !== undefined,
+    structured: toolNames.includes("report_weather") || body.text !== undefined || body.response_format !== undefined,
     invalid: body.max_output_tokens === -1 || body.max_tokens === -1,
   };
 }
@@ -69,6 +88,7 @@ function healthyHub(protocol: SuiteProtocol, overrides: Partial<Record<string, (
     if (!request.authorized) return overrides.unauthorized?.() ?? json({ error: { message: "invalid credential" } }, 401);
     if (request.invalid) return overrides.invalid?.() ?? json({ error: { message: "max tokens must be positive" } }, 400);
     if (request.stream) {
+      if (protocol === "openai-chat-completions") return overrides.stream?.() ?? chatSse(3);
       const events = protocol === "openai-responses"
         ? ["response.created", "response.output_text.delta", "response.output_text.delta", "response.completed"]
         : ["message_start", "content_block_delta", "content_block_delta", "message_stop"];
@@ -83,29 +103,60 @@ function healthyHub(protocol: SuiteProtocol, overrides: Partial<Record<string, (
 
 function messageResponse(protocol: SuiteProtocol, text: string): unknown {
   const usage = { input_tokens: 17, output_tokens: 3 };
-  return protocol === "openai-responses"
-    ? { id: "resp_1", model: MODEL, output: [{ type: "message", content: [{ type: "output_text", text }] }], usage }
-    : { id: "msg_1", type: "message", model: MODEL, content: [{ type: "text", text }], usage };
+  if (protocol === "openai-responses") {
+    return { id: "resp_1", model: MODEL, output: [{ type: "message", content: [{ type: "output_text", text }] }], usage };
+  }
+  if (protocol === "openai-chat-completions") {
+    // `prompt_tokens`/`completion_tokens`, which is this protocol's spelling of
+    // the same two numbers.
+    return {
+      id: "chatcmpl_1", object: "chat.completion", model: MODEL,
+      choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 17, completion_tokens: 3 },
+    };
+  }
+  return { id: "msg_1", type: "message", model: MODEL, content: [{ type: "text", text }], usage };
 }
 
 function toolResponse(protocol: SuiteProtocol, input: Record<string, unknown>): unknown {
   const usage = { input_tokens: 42, output_tokens: 12 };
-  return protocol === "openai-responses"
-    ? { id: "resp_2", model: MODEL, output: [{ type: "function_call", name: "get_weather", arguments: JSON.stringify(input) }], usage }
-    : { id: "msg_2", type: "message", model: MODEL, content: [{ type: "tool_use", name: "get_weather", input }], usage };
+  if (protocol === "openai-responses") {
+    return { id: "resp_2", model: MODEL, output: [{ type: "function_call", name: "get_weather", arguments: JSON.stringify(input) }], usage };
+  }
+  if (protocol === "openai-chat-completions") {
+    // Under `choices[0].message.tool_calls`, not in a content list: the reason
+    // the suite reads this protocol's tool calls on a separate path.
+    return {
+      id: "chatcmpl_2", object: "chat.completion", model: MODEL,
+      choices: [{
+        index: 0,
+        message: {
+          role: "assistant", content: null,
+          tool_calls: [{ id: "call_1", type: "function", function: { name: "get_weather", arguments: JSON.stringify(input) } }],
+        },
+        finish_reason: "tool_calls",
+      }],
+      usage: { prompt_tokens: 42, completion_tokens: 12 },
+    };
+  }
+  return { id: "msg_2", type: "message", model: MODEL, content: [{ type: "tool_use", name: "get_weather", input }], usage };
 }
 
 function structuredResponse(protocol: SuiteProtocol): Response {
-  return protocol === "openai-responses"
-    ? json(messageResponse(protocol, JSON.stringify({ city: "Oslo", degrees: 7 })))
-    : json(toolResponse(protocol, { city: "Oslo", degrees: 7 }));
+  // Chat Completions has `response_format`, so like Responses it answers with
+  // JSON in the message itself rather than through a forced tool.
+  return protocol === "anthropic-messages"
+    ? json(toolResponse(protocol, { city: "Oslo", degrees: 7 }))
+    : json(messageResponse(protocol, JSON.stringify({ city: "Oslo", degrees: 7 })));
 }
 
 function options(protocol: SuiteProtocol, fetchImpl: typeof globalThis.fetch) {
   return {
     endpoint: protocol === "openai-responses"
       ? "https://api.example.test/v1/responses"
-      : "https://api.example.test/v1/messages",
+      : protocol === "openai-chat-completions"
+        ? "https://api.example.test/v1/chat/completions"
+        : "https://api.example.test/v1/messages",
     protocol,
     model: MODEL,
     deploymentId: DEPLOYMENT,
@@ -119,7 +170,7 @@ function support(result: Awaited<ReturnType<typeof runCapabilitySuite>>): Record
 }
 
 describe("runCapabilitySuite", () => {
-  for (const protocol of ["openai-responses", "anthropic-messages"] as const) {
+  for (const protocol of ["openai-responses", "anthropic-messages", "openai-chat-completions"] as const) {
     it(`records every capability as supported against a healthy ${protocol} deployment`, async () => {
       const result = await runCapabilitySuite(options(protocol, healthyHub(protocol)));
 
@@ -263,6 +314,43 @@ describe("stream event names", () => {
     );
 
     expect(support(result)["protocol.streaming-order"]).toBe("supported");
+  });
+});
+
+describe("openai-chat-completions", () => {
+  it("treats a stream that never sends [DONE] as unterminated", async () => {
+    // The only ordering guarantee this protocol makes is that chunks arrive and
+    // the sentinel closes them. A stream that stops without it has not kept
+    // that contract, and an Agent reading it cannot tell finished from cut off
+    // -- the failure M3 spent a milestone on.
+    const truncated = () =>
+      new Response(
+        `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"delta":{"content":"x"}}]}\n\n`,
+        { status: 200, headers: { ...hubHeaders(), "content-type": "text/event-stream" } },
+      );
+    const result = await runCapabilitySuite(
+      options("openai-chat-completions", healthyHub("openai-chat-completions", { stream: truncated })),
+    );
+
+    expect(support(result)["protocol.streaming-order"]).toBe("unsupported");
+    const detail = result.outcomes.find((item) => item.capabilityId === "protocol.streaming-order")?.detail;
+    // Says what actually arrived rather than only that the check failed.
+    expect(detail).toContain("chat.completion.chunk");
+  });
+
+  it("reads a tool call from the message rather than a content list", async () => {
+    // Responses and Messages both carry tool calls in the item list this suite
+    // walks; this one hangs them off `choices[0].message`. Getting that wrong
+    // would report a model that calls tools perfectly well as unable to.
+    const result = await runCapabilitySuite(
+      options("openai-chat-completions", healthyHub("openai-chat-completions")),
+    );
+
+    expect(support(result)["agent.single-tool-call"]).toBe("supported");
+    expect(support(result)["agent.forced-tool-choice"]).toBe("supported");
+    // And it has a structured-output mode of its own, so unlike Anthropic
+    // Messages the schema is asked for directly instead of through a tool.
+    expect(support(result)["agent.structured-output"]).toBe("supported");
   });
 });
 
