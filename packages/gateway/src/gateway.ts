@@ -36,6 +36,12 @@ export interface GatewayOptions {
   /** Loopback only. A gateway holding a Hub credential does not listen outward. */
   readonly host?: "127.0.0.1" | "::1";
   readonly port?: number;
+  /**
+   * How long to wait for the upstream's response headers. It does not bound the
+   * body: once a model starts streaming, how long it takes is the model's
+   * business, and cutting it off at a clock would truncate real answers.
+   */
+  readonly headerTimeoutMs?: number;
 }
 
 /**
@@ -91,6 +97,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
   const doFetch = options.fetch ?? globalThis.fetch;
   const now = options.now ?? Date.now;
   const localToken = randomBytes(32).toString("base64url");
+  const headerTimeoutMs = options.headerTimeoutMs ?? 60_000;
 
   const server: Server = createServer((request, response) => {
     void handle(request, response).catch(() => {
@@ -124,15 +131,32 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     const hasBody = method !== "GET" && method !== "HEAD";
 
     let upstreamResponse: Response;
+    // The timer is cleared the moment headers arrive, so it bounds reaching the
+    // upstream and nothing after it. A single deadline over the whole exchange
+    // would abort long generations that are working exactly as intended.
+    const controller = new AbortController();
+    const headerTimeout = setTimeout(
+      () => controller.abort(new Error(`the upstream sent no response headers within ${headerTimeoutMs}ms`)),
+      headerTimeoutMs,
+    );
     try {
       upstreamResponse = await doFetch(target, {
         method,
         headers,
         ...(hasBody ? { body: Readable.toWeb(request) as ReadableStream<Uint8Array>, duplex: "half" } : {}),
         redirect: "error",
+        signal: controller.signal,
       } as RequestInit);
     } catch (cause) {
-      const failure = cause instanceof Error ? cause.message : "the upstream call failed";
+      // When this gateway is the one that aborted, its own reason is the true
+      // one. The client library reports that a caller cancelled, which is
+      // accurate and useless: it does not say who, or why.
+      const reason = controller.signal.aborted ? controller.signal.reason : undefined;
+      const failure = reason instanceof Error
+        ? reason.message
+        : cause instanceof Error
+          ? cause.message
+          : "the upstream call failed";
       options.onForwarded?.({
         method,
         path: target.pathname,
@@ -143,11 +167,24 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       });
       // No retry, by decision: a request whose tool calls already ran must not
       // be replayed on the Agent's behalf.
-      response.writeHead(502, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { code: "upstream_unreachable", message: failure, retryable: false } }));
+      const timedOut = controller.signal.aborted;
+      response.writeHead(timedOut ? 504 : 502, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: {
+          code: timedOut ? "upstream_timeout" : "upstream_unreachable",
+          message: failure,
+          // Never `true`. A retryable flag is an invitation, and the one thing
+          // this slice must not invite is replaying a request whose tool calls
+          // may already have run.
+          retryable: false,
+        },
+      }));
       return;
+    } finally {
+      clearTimeout(headerTimeout);
     }
 
+    const requestId = upstreamResponse.headers.get("x-apexnova-request-id");
     const outbound: Record<string, string> = {};
     upstreamResponse.headers.forEach((value, name) => {
       if (!HOP_BY_HOP.has(name.toLowerCase())) outbound[name] = value;
@@ -158,10 +195,30 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       // Streamed through rather than buffered: the suite proved event order and
       // boundaries are what an Agent trips over, and buffering would change both.
       const reader = upstreamResponse.body.getReader();
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        if (!response.write(Buffer.from(chunk.value))) await once(response, "drain");
+      try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          if (!response.write(Buffer.from(chunk.value))) await once(response, "drain");
+        }
+      } catch (cause) {
+        // Headers are already out, so there is no status left to tell the truth
+        // with. Ending the response cleanly would hand the Agent a stream that
+        // looks complete, and appending an error object would corrupt the one it
+        // has been reading. Destroying the connection is the only honest answer:
+        // the Agent sees a truncated stream, which is what happened.
+        const failure = cause instanceof Error ? cause.message : "the upstream stream failed";
+        options.onForwarded?.({
+          method,
+          path: target.pathname,
+          ...(requestId === null ? {} : { requestId }),
+          status: upstreamResponse.status,
+          startedAt: new Date(startedAt).toISOString(),
+          durationMs: now() - startedAt,
+          failure,
+        });
+        response.destroy();
+        return;
       }
     }
     response.end();
@@ -169,9 +226,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
     options.onForwarded?.({
       method,
       path: target.pathname,
-      ...(upstreamResponse.headers.get("x-apexnova-request-id")
-        ? { requestId: upstreamResponse.headers.get("x-apexnova-request-id")! }
-        : {}),
+      ...(requestId === null ? {} : { requestId }),
       status: upstreamResponse.status,
       startedAt: new Date(startedAt).toISOString(),
       durationMs: now() - startedAt,

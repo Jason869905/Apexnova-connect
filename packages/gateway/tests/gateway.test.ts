@@ -150,6 +150,131 @@ describe("the local gateway", () => {
     expect(forwarded[0]).toMatchObject({ method: "POST", path: "/v1/responses", status: 200, requestId: "req_abc" });
   });
 
+  it("gives up on an upstream that never sends headers, once", async () => {
+    const attempts = vi.fn(async (_input: unknown, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted by the caller")));
+      }),
+    );
+    const forwarded: ForwardedRequest[] = [];
+    const gateway = await startGateway({
+      upstreamBaseUrl: "https://hub.example.test",
+      credential: SecretValue.from("hub-secret"),
+      fetch: attempts as unknown as typeof globalThis.fetch,
+      headerTimeoutMs: 50,
+      onForwarded: (request) => forwarded.push(request),
+    });
+    running.push(gateway);
+
+    const response = await fetch(`${gateway.url}/v1/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.localToken}` },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(504);
+    expect(await response.json()).toMatchObject({ error: { code: "upstream_timeout", retryable: false } });
+    // One attempt: a request that may already have had effects is not replayed
+    // just because the answer was slow.
+    expect(attempts).toHaveBeenCalledTimes(1);
+    expect(forwarded[0]?.failure).toContain("no response headers");
+  });
+
+  it("does not bound a stream that has already started", async () => {
+    const { gateway } = await gatewayReturning(() =>
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            controller.enqueue(new TextEncoder().encode("event: start\n\n"));
+            // Longer than the header timeout below: a model that takes its time
+            // is working, not failing, and cutting it off would truncate a real
+            // answer.
+            await new Promise((resolve) => setTimeout(resolve, 120));
+            controller.enqueue(new TextEncoder().encode("event: done\n\n"));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+    );
+
+    const response = await fetch(`${gateway.url}/v1/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.localToken}` },
+      body: "{}",
+    });
+
+    expect(await response.text()).toBe("event: start\n\nevent: done\n\n");
+  });
+
+  it("truncates rather than completing a stream that failed halfway", async () => {
+    const forwarded: ForwardedRequest[] = [];
+    const { gateway } = await gatewayReturning(
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: start\ndata: {\"a\":1}\n\n"));
+              controller.error(new Error("upstream stream collapsed"));
+            },
+          }),
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        ),
+      (request) => forwarded.push(request),
+    );
+
+    // Headers are already out by then, so there is no status left to tell the
+    // truth with. Ending cleanly would hand the Agent a stream that looks
+    // finished; M3 spent a milestone on exactly that failure.
+    await expect(
+      fetch(`${gateway.url}/v1/responses`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${gateway.localToken}` },
+        body: "{}",
+      }).then((response) => response.text()),
+    ).rejects.toBeDefined();
+    expect(forwarded[0]?.failure).toContain("collapsed");
+  });
+
+  it("survives a caller that walks away mid-stream", async () => {
+    const { gateway } = await gatewayReturning(() =>
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            for (let index = 0; index < 200; index += 1) {
+              controller.enqueue(new TextEncoder().encode(`event: delta-${index}\n\n`));
+              await new Promise((resolve) => setTimeout(resolve, 1));
+            }
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+    );
+
+    const abort = new AbortController();
+    const pending = fetch(`${gateway.url}/v1/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.localToken}` },
+      body: "{}",
+      signal: abort.signal,
+    });
+    const response = await pending;
+    const reader = response.body!.getReader();
+    await reader.read();
+    abort.abort();
+
+    // The gateway holds a live Hub credential; a client hanging up must not take
+    // it down. A second request still works.
+    const second = await fetch(`${gateway.url}/v1/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.localToken}` },
+      body: "{}",
+    });
+    expect(second.status).toBe(200);
+    await second.body?.cancel();
+  });
+
   it("listens on loopback and nowhere else", async () => {
     const { gateway } = await gatewayReturning(() => new Response("{}", { status: 200 }));
 
