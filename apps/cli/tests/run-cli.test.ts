@@ -2366,6 +2366,27 @@ describe("CLI", () => {
     expect(output).toContain("someone-else");
   });
 
+  it("refuses an option the command would have ignored", async () => {
+    const capture = captureIo();
+
+    const result = await runCli(["balance", "--max-price", "5", "--json"], {
+      io: capture.io,
+      hubService: mockHub(),
+      createRequestId: () => "local_unread",
+    });
+
+    // Three times this milestone a switch was set, did nothing and reported
+    // success -- `--max-price` excluding nobody, `restore --yes` printing a
+    // table, `run --gateway` going direct. None was caught by a test. An option
+    // the command never reads is the same failure with the volume turned down,
+    // so it is a usage error rather than a silence.
+    expect(result.exitCode).toBe(EXIT_CODES.usage);
+    const error = JSON.parse(capture.stdout()).error;
+    expect(error.code).toBe("INVALID_ARGUMENT");
+    expect(error.message).toContain("does not read --max-price");
+    expect(error.details.accepted).toBeDefined();
+  });
+
   it("says on every run that the ranking only ever saw the Apexnova catalog", async () => {
     const { root } = await withEvidence();
     const capture = captureIo();

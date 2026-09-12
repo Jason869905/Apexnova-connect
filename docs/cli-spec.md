@@ -419,6 +419,14 @@ M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、
 
 **`--max-price` 对价格未知的 Deployment 判为不通过**（ADR 0010 决策 2）：约束的语义是「证明得了才通过」，与 required 能力 `unknown` 不算通过是同一条规则。目录当前对全部 Deployment 发布 `pricing: 0`（需求 12H）并被读作「没有价格」，因此**只要设了 `--max-price`，当前本轮就没有候选**——这是 12H 的实际影响，不是过滤器坏了。零候选时输出会报出最大的一组排除理由及其计数。
 
+### 选项只在被读取的命令上被接受
+
+传给一条**不读取它**的命令的选项会以 `INVALID_ARGUMENT` 拒绝，并列出该命令实际接受的选项。例如 `apexnova balance --max-price 5` 报错，而不是解析后默默忽略。
+
+理由来自本阶段三次同形的缺陷：`--max-price` 一个候选都没排除、`restore --yes`（不带事务 id）打印一张表就返回成功、`run --gateway` 在已有绑定时直连发出——**三次都是开关被设置、什么也没做、并且报告成功，三次都不是测试发现的**。一个命令从不读取的选项是同一种失败的静音版本，因此改为出错。
+
+代价是新增选项必须同时登记到它所属的命令上；这正是目的：没有接线的选项会在第一次被使用时立刻失败。
+
 ### `apexnova doctor [agent]`
 
 执行只读诊断，省略 agent 时诊断全部已注册 Integration。每项检查符合 [`diagnostic-result.schema.json`](../schemas/diagnostic-result.schema.json) 的 `checks[]` 形状：

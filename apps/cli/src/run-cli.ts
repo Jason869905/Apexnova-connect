@@ -197,6 +197,63 @@ short-lived credentials or --key <id> to bind an existing key for per-tool usage
 tracking. Run "apexnova agents" to list the Agents this build supports.
 `;
 
+/**
+ * Which options each command reads.
+ *
+ * A flag a command does not read is a flag that did nothing, and three times in
+ * this milestone a switch was set, ignored, and reported success: `--max-price`
+ * excluded nobody, `restore --yes` without an id printed a table, and
+ * `run --gateway` went direct whenever a binding already existed. None was
+ * caught by a test; each was found by someone running it and looking closely.
+ *
+ * Listing what a command reads turns that class into a usage error instead of a
+ * silence. The cost is that adding an option means adding it here -- which is
+ * the point: an option nobody wired up now fails loudly on its first use.
+ */
+const GLOBAL_OPTIONS: ReadonlySet<string> = new Set([
+  "--profile", "--json", "--non-interactive", "--timeout", "--verbose", "--no-color", "--help", "--version",
+]);
+
+const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+  init: ["--hub-url", "--client-id", "--path-prefix"],
+  login: [],
+  logout: [],
+  whoami: [],
+  balance: [],
+  agents: [],
+  audit: ["--limit"],
+  models: ["--agent", "--protocol", "--compatible-only"],
+  usage: ["--request-id", "--key", "--from", "--to", "--granularity"],
+  detect: ["--config"],
+  inspect: ["--config"],
+  doctor: ["--config"],
+  connect: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--dry-run", "--yes"],
+  switch: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--dry-run", "--yes"],
+  verify: ["--live", "--config", "--yes"],
+  restore: ["--list", "--dry-run", "--yes", "--discard-local-changes", "--config"],
+  run: ["--deployment", "--gateway", "--key", "--rotating", "--config"],
+  opencode: ["--deployment", "--gateway", "--key", "--rotating", "--config"],
+  credential: ["--key", "--rotating", "--api-key-helper"],
+  recommend: ["--scenario", "--deployment", "--max-price", "--model-allowlist", "--exclude-publisher"],
+  compatibility: [
+    "--agent", "--deployment", "--protocol", "--budget", "--record", "--within",
+    "--reason", "--yes", "--force", "--config",
+  ],
+};
+
+function assertOptionsAreRead(command: string, used: readonly string[]): void {
+  const accepted = COMMAND_OPTIONS[command];
+  if (accepted === undefined) return;
+  const ignored = used.filter((option) => !GLOBAL_OPTIONS.has(option) && !accepted.includes(option));
+  if (ignored.length === 0) return;
+  throw new CliError({
+    code: "INVALID_ARGUMENT",
+    message: `${command} does not read ${ignored.join(", ")}. It would have been accepted and ignored, so it is refused instead.`,
+    exitCode: EXIT_CODES.usage,
+    details: { command, ignored, accepted: [...accepted] },
+  });
+}
+
 /** A repeated-value flag taken as one comma-separated list, empties dropped. */
 function splitList(value: string): readonly string[] {
   return value.split(",").map((item) => item.trim()).filter((item) => item.length > 0);
@@ -256,6 +313,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let pathPrefix: string | undefined;
   let force = false;
   let optionsEnded = false;
+  const used: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -263,6 +321,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
       operands.push(arg);
       continue;
     }
+    if (arg !== "--") used.push(arg);
     if (arg === "--") {
       optionsEnded = true;
       continue;
@@ -465,6 +524,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   }
 
   const [command, ...commandOperands] = operands;
+  if (command !== undefined && !help && !version) assertOptionsAreRead(command, used);
   return {
     ...(command ? { command } : {}),
     operands: commandOperands,
