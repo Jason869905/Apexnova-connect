@@ -8,10 +8,16 @@
   "status": "experimental",
   "category": "agent",
   "delivery": {
-    "modes": ["config-adapter", "launcher"]
+    "modes": [
+      "config-adapter",
+      "launcher"
+    ]
   },
   "compatibility": {
-    "platforms": ["macos", "linux"],
+    "platforms": [
+      "macos",
+      "linux"
+    ],
     "products": [
       {
         "name": "Hermes Agent",
@@ -21,9 +27,14 @@
     ]
   },
   "protocols": [
-    { "id": "openai-responses", "transport": "direct" },
-    { "id": "openai-chat-completions", "transport": "direct" },
-    { "id": "anthropic-messages", "transport": "direct" }
+    {
+      "id": "openai-chat-completions",
+      "transport": "direct"
+    },
+    {
+      "id": "anthropic-messages",
+      "transport": "direct"
+    }
   ],
   "capabilities": [
     "authentication",
@@ -34,11 +45,26 @@
     "backup-and-restore"
   ],
   "permissions": [
-    { "kind": "filesystem-read", "reason": "Check whether ~/.hermes/.env defines the credential variable, by name only." },
-    { "kind": "filesystem-write", "reason": "Writes the custom endpoint into the user's Hermes config.yaml." },
-    { "kind": "network", "reason": "Calls Apexnova AI Hub OAuth, control-plane, and inference endpoints." },
-    { "kind": "credential-store", "reason": "Stores OAuth tokens and runtime credentials in the OS credential backend." },
-    { "kind": "process-launch", "reason": "Launches Hermes with a runtime credential injected via environment." }
+    {
+      "kind": "filesystem-read",
+      "reason": "Check whether ~/.hermes/.env defines the credential variable, by name only."
+    },
+    {
+      "kind": "filesystem-write",
+      "reason": "Writes the custom endpoint into the user's Hermes config.yaml."
+    },
+    {
+      "kind": "network",
+      "reason": "Calls Apexnova AI Hub OAuth, control-plane, and inference endpoints."
+    },
+    {
+      "kind": "credential-store",
+      "reason": "Stores OAuth tokens and runtime credentials in the OS credential backend."
+    },
+    {
+      "kind": "process-launch",
+      "reason": "Launches Hermes with a runtime credential injected via environment."
+    }
   ],
   "links": {
     "documentation": "https://hermes-agent.nousresearch.com/docs/",

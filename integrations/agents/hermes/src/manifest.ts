@@ -37,10 +37,6 @@ export const hermesManifest: IntegrationManifest = {
   },
   "protocols": [
     {
-      "id": "openai-responses",
-      "transport": "direct"
-    },
-    {
       "id": "openai-chat-completions",
       "transport": "direct"
     },

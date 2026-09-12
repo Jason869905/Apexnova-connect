@@ -201,10 +201,17 @@ describe("planHermesConfig", () => {
     expect(second.operations).toHaveLength(0);
   });
 
-  it("maps each protocol onto the api_mode Hermes accepts", () => {
-    expect(hermesApiMode("openai-responses")).toBe("codex_responses");
+  it("maps each protocol onto the api_mode Hermes actually honours", () => {
     expect(hermesApiMode("openai-chat-completions")).toBe("chat_completions");
     expect(hermesApiMode("anthropic-messages")).toBe("anthropic_messages");
+  });
+
+  it("refuses to write a responses mode Hermes ignores", () => {
+    // Hermes stores `codex_responses` for a custom provider and then calls
+    // /v1/chat/completions anyway, so the credential -- minted for the protocol
+    // we asked for -- is rejected by Hub. Producing that configuration would
+    // write down one thing and do another; verified live on 2026-09-12.
+    expect(() => hermesApiMode("openai-responses")).toThrowError(/no API mode/i);
   });
 
   it("refuses a base URL carrying credentials", () => {

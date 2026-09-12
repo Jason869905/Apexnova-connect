@@ -32,8 +32,21 @@ import {
 } from "./discovery.js";
 import { hermesManifest } from "./manifest.js";
 
+/**
+ * No `openai-responses`, and that is a measured absence rather than an
+ * oversight. Connect configures Hermes as `provider: custom`, which Hermes
+ * documents as an OpenAI-compatible endpoint; it stores `api_mode:
+ * codex_responses` faithfully -- `hermes config get` reads it back -- and then
+ * calls /v1/chat/completions anyway. Hub rejects those with "this credential is
+ * not allowed to use the openai-chat protocol", because the credential was
+ * minted for the protocol we declared.
+ *
+ * Verified on 2026-09-12 against a live deployment: chat-completions and
+ * anthropic-messages both return the expected answer, responses does not.
+ * Declaring a protocol the integration cannot actually consume is the same
+ * claim-without-measurement this project refuses everywhere else.
+ */
 const SUPPORTED_PROTOCOLS: readonly ProtocolId[] = [
-  "openai-responses",
   "openai-chat-completions",
   "anthropic-messages",
 ];

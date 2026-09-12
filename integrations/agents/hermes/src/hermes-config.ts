@@ -25,7 +25,9 @@ export type HermesApiMode =
   | "anthropic_messages";
 
 export function hermesApiMode(protocol: ProtocolId): HermesApiMode {
-  if (protocol === "openai-responses") return "codex_responses";
+  // `codex_responses` is deliberately unmapped: Hermes accepts the value for a
+  // custom provider and then calls chat completions regardless, so producing it
+  // would write a configuration that says one thing and does another.
   if (protocol === "openai-chat-completions") return "chat_completions";
   if (protocol === "anthropic-messages") return "anthropic_messages";
   throw new HermesConfigError(

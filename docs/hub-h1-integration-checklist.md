@@ -315,10 +315,28 @@ PATH 修正并修掉上述两处之后，从推荐到回滚一次跑通，**全�
 
 - `[passed]` **OpenCode**：真实推理经 gateway 返回 `APEXNOVA_OK`，1 个请求逐个点名（`method: "gateway"`，带 Hub 的 `requestId`），运行后配置自动回滚；
 - `[passed]` **Codex 0.153.4**：`run codex --gateway -- exec "…"` 真实推理返回 `APEXNOVA_OK`，1 个请求经 gateway 转发；配置在运行前不存在、运行后回到不存在；
-- `[failed]` **Hermes**：经 gateway 的 12 个请求全部被 Hub 拒绝——`This credential is not allowed to use the openai-chat protocol`。**直连对照同样失败**，因此这是既有的协议错配，不是 gateway 引入的：`selectProtocol` 选了目录里第一个 Hermes 声明支持的协议（`openai-responses`）并据此签发凭据，而 Hermes 实际调用 `/v1/chat/completions`。与 2026-09-11 记录的 OpenCode `@ai-sdk/openai-compatible` 实验是同一类。**未修**；
+- `[fixed]` **Hermes**：经 gateway 的 12 个请求全部被 Hub 拒绝——`This credential is not allowed to use the openai-chat protocol`。**直连对照同样失败**，因此这是既有的协议错配，不是 gateway 引入的。根因与修复见下节，修复后直连与 gateway 均通过；
 - `[partial]` **Claude Code**：配置写入路径已验证——经临时配置路径写出 `ANTHROPIC_BASE_URL: http://127.0.0.1:42735/anthropic`，**路径前缀被正确保留**（该协议的端点前缀是 `/anthropic`，与 OpenCode 的 `/v1` 不同）。**launcher 未验证**：它的配置就是本会话正在使用的 `~/.claude/settings.json`，而从会话内部启动 `claude` 会挂起。真实 settings 全程未被写入（核对过零条 loopback 记录）。
 
 四个 Integration 的配置写入器现在都由一条**共用契约测试**覆盖：给一个 `http://127.0.0.1:<port><原路径>` 的端点，必须写出它且不得留下上游 host。这把上面的一次性观察变成了持续证据。
+
+### Hermes 的协议错配：根因与修复（同日）
+
+`selectProtocol` 按目录顺序取第一个该 Integration 声明支持的协议，目录顺序是 `[openai-responses, openai-chat, anthropic-messages]`，Hermes 三个都声明，于是选中 `openai-responses` 并据此签发凭据。集成也如实把它映射成 `api_mode: codex_responses` 写进配置——**写入是对的，`hermes config get model.api_mode` 能读回 `codex_responses`**。
+
+但 Hermes 对 `provider: custom` 不按这个值走。它自己的配置注释写着「For custom OpenAI-compatible endpoints」——custom 在 Hermes 这边就是 OpenAI 兼容（chat completions），于是它调用 `/v1/chat/completions`，而凭据只授权 responses，Hub 据此拒绝。
+
+**逐协议实测**（同一 Deployment，各跑一次真实推理）：
+
+| Hermes 声明 | 实测 |
+| --- | --- |
+| `openai-chat-completions` | **通过**，返回 `APEXNOVA_OK` |
+| `anthropic-messages` | **通过**，返回 `APEXNOVA_OK` |
+| `openai-responses` | **失败**，Hermes 改打 chat completions |
+
+修复：**从 Hermes 的 `supportedProtocols` 与 manifest 中移除 `openai-responses`**，`hermesApiMode` 也不再产出 `codex_responses`——能存下来却不被遵守的配置，是写着一件事、做着另一件事。声明一个交付不了的协议，与本项目在别处一律拒绝的「声明当实测」是同一回事。
+
+修复后默认路径（不带 `--protocol`）自动选中 `openai-chat`，直连与 `--gateway` 各跑一次真实推理都返回 `APEXNOVA_OK`（gateway 一次转发 11 个请求，逐个点名）。Hermes 的 `config.yaml` 在全部试验后与原文件逐字节一致。
 
 ### Hermes 的失败暴露了两条路径的精度差
 
