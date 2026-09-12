@@ -232,6 +232,31 @@ export function describeIntegrationContract(
       expect(JSON.stringify(plan)).not.toContain(SECRET);
     });
 
+    it.skipIf(fixtures.readOnly)("accepts a loopback gateway address as the endpoint", async () => {
+      // With `run --gateway` the Agent is pointed at a local gateway, so the
+      // endpoint is plain HTTP on 127.0.0.1 and the path is whatever the real
+      // endpoint had. A writer that only accepts https, or that keeps just the
+      // origin, sends every request somewhere else -- and that was found by
+      // running it, not by reading it.
+      const upstream = new URL(fixtures.intent.baseUrl);
+      const detection = await availableDetection();
+      const plan = await integration.plan(
+        context,
+        detection,
+        await integration.inspect(context, detection),
+        {
+          ...fixtures.intent,
+          baseUrl: `http://127.0.0.1:45999${upstream.pathname}`,
+          allowInsecureLoopback: true,
+        },
+      );
+
+      expect(plan.operations).toHaveLength(1);
+      const written = plan.operations[0]!.content;
+      expect(written).toContain("127.0.0.1:45999");
+      expect(written).not.toContain(upstream.host);
+    });
+
     it.skipIf(fixtures.readOnly)("produces the same plan twice and no plan once applied", async () => {
       const detection = await availableDetection();
       const first = await integration.plan(

@@ -309,6 +309,38 @@ PATH 修正并修掉上述两处之后，从推荐到回滚一次跑通，**全�
 
 仍未合上的一条不变：**没有人验证过排第一的 Deployment 用起来确实更好**——那需要 Scenario Quality Pack。
 
+## Gateway 路径的四个 Integration 验收（2026-09-12，Linux/WSL2）
+
+[ADR 0018](decisions/0018-gateway-first-slice.md) 写明：`run --gateway` 改变 Integration 写入的 `baseURL`，因此每个 Integration 都要重新验收，不能只验 OpenCode。
+
+- `[passed]` **OpenCode**：真实推理经 gateway 返回 `APEXNOVA_OK`，1 个请求逐个点名（`method: "gateway"`，带 Hub 的 `requestId`），运行后配置自动回滚；
+- `[passed]` **Codex 0.153.4**：`run codex --gateway -- exec "…"` 真实推理返回 `APEXNOVA_OK`，1 个请求经 gateway 转发；配置在运行前不存在、运行后回到不存在；
+- `[failed]` **Hermes**：经 gateway 的 12 个请求全部被 Hub 拒绝——`This credential is not allowed to use the openai-chat protocol`。**直连对照同样失败**，因此这是既有的协议错配，不是 gateway 引入的：`selectProtocol` 选了目录里第一个 Hermes 声明支持的协议（`openai-responses`）并据此签发凭据，而 Hermes 实际调用 `/v1/chat/completions`。与 2026-09-11 记录的 OpenCode `@ai-sdk/openai-compatible` 实验是同一类。**未修**；
+- `[partial]` **Claude Code**：配置写入路径已验证——经临时配置路径写出 `ANTHROPIC_BASE_URL: http://127.0.0.1:42735/anthropic`，**路径前缀被正确保留**（该协议的端点前缀是 `/anthropic`，与 OpenCode 的 `/v1` 不同）。**launcher 未验证**：它的配置就是本会话正在使用的 `~/.claude/settings.json`，而从会话内部启动 `claude` 会挂起。真实 settings 全程未被写入（核对过零条 loopback 记录）。
+
+四个 Integration 的配置写入器现在都由一条**共用契约测试**覆盖：给一个 `http://127.0.0.1:<port><原路径>` 的端点，必须写出它且不得留下上游 host。这把上面的一次性观察变成了持续证据。
+
+### Hermes 的失败暴露了两条路径的精度差
+
+同一次全部被拒的运行，两条路径报出的东西不同：
+
+| 路径 | 报告 |
+| --- | --- |
+| gateway | `12 requests forwarded … each one named` |
+| 直连 | `2 requests billed … confirmed` |
+
+**直连把一次全部被拒的运行报成了「已确认计费 2 次」。** 这正是 [ADR 0018](decisions/0018-gateway-first-slice.md) 决策 6 预期的差别，也是先做这个切片的理由。
+
+另记：两条路径下 Hermes 都以退出码 0 结束并报 `exited successfully`，尽管每个请求都被拒。那是 Hermes 自己吞掉了错误，不是 Connect 的行为。
+
+### 顺带发现：目标文件被删后 `restore` 无路可走
+
+验收过程中我在一个活动事务下删掉了目标文件（临时配置目录），`restore` 随即以 `CONFLICT` 拒绝——内容哈希对不上，而文件已经不在。拒绝是对的，但**没有出路**：与 2026-09-11 记录的 `$schema` 那次是同一形状。
+
+本次是靠事务记录里的 `appliedContentHash` 反推出写入时的确切字节（`JSON.stringify(doc, null, 2) + "\n"`）、重建文件后才让 `restore` 正常收尾。**普通用户没有这条路。**
+
+另外：用 `--config` 创建的事务，必须在 `restore` 时再次传同一个 `--config` 才能恢复——否则报 `PATH_OUTSIDE_ALLOWED_ROOT`，而 `restore --list` 不会提示这一点。
+
 ## 本机 Docker 验证记录（2026-09-05）
 
 Compose 项目 `apexagent` 的真实服务已完成以下验证：

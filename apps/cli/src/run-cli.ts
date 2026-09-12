@@ -3147,7 +3147,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     }
   }
 
-  if (attribution && attribution.ours === 0 && attribution.others.length > 0) {
+  if (gateway === undefined && attribution && attribution.ours === 0 && attribution.others.length > 0) {
     const served = attribution.others
       .map((entry) => `${entry.requests} on ${entry.key} (${entry.detail})`)
       .join("; ");
@@ -3163,12 +3163,14 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
       },
     });
   }
-  if (attribution && attribution.ours > 0 && attribution.others.length > 0) {
+  if (gateway === undefined && attribution && attribution.ours > 0 && attribution.others.length > 0) {
     launchWarnings.push(
       `Some requests in this window were billed to other credentials: ${attribution.others.map((entry) => `${entry.requests} on ${entry.key}`).join("; ")}.`,
     );
   }
-  if (attribution && attribution.ours === 0 && attribution.others.length === 0) {
+  // Only for a direct run: a gateway run knows exactly what it forwarded, so
+  // reporting the ledger's silence would describe a computation it did not do.
+  if (gateway === undefined && attribution && attribution.ours === 0 && attribution.others.length === 0) {
     launchWarnings.push("The ledger shows no settled requests for this run yet, so its Deployment and billing subject were not confirmed.");
   }
 
@@ -3188,7 +3190,9 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     human: [
       `${runtime.rotated ? "Credential renewed.\n" : ""}${integration.manifest.displayName} exited successfully.`,
       ...(gateway
-        ? [`${forwarded.length} request${forwarded.length === 1 ? "" : "s"} forwarded through the local gateway to ${binding.deploymentId}, each one named.`]
+        ? [forwarded.length === 0
+            ? `The local gateway forwarded no requests; this run made none.`
+            : `${forwarded.length} request${forwarded.length === 1 ? "" : "s"} forwarded through the local gateway to ${binding.deploymentId}, each one named.`]
         : attribution && attribution.ours > 0
           ? [`${attribution.ours} request${attribution.ours === 1 ? "" : "s"} billed to this launcher's credential on ${binding.deploymentId}.`]
           : []),
