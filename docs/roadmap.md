@@ -208,7 +208,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - Provider 故障不会造成工具副作用请求的自动重放；
 - 每次路由可解释且可审计；
 - 切换失败不会破坏 Agent 配置；
-- 三个首批 Integration 达到 stable（**未满足**：四个 Integration 的 manifest `status` 全部是 `experimental`，`stable` 就在 schema 阶梯的下一档，一个都没升过。这条此前无人过问，因为它要的不是功能而是一个「凭什么算 stable」的判定标准，而那个标准不存在——见 [ADR 0022](decisions/0022-m5-midpoint-review.md) 第 2 节）；
+- 三个首批 Integration 达到 stable（**未满足，但判定标准已建立**：五档条件见 [ADR 0023](decisions/0023-integration-status-ladder.md)，其中可机检的两条由 `tests/integration-status.test.ts` 强制，因此这条退出条件不再可能被默认满足。按新标准四个仍全是 `experimental`：macOS 无任何证据、一次性卡住四个；`codex` 与 `hermes` 一条证据都没有；`opencode` 声称两个协议而只测过一个——**最后这条是机检当场发现的，此前无人按声称范围核对过协议维度**）；
 - 用户始终能看到实际 Deployment 和计费主体。
 
 ~~允许推荐非 Apexnova Provider~~、~~用户可以强制隐私约束~~ 两条**已于 2026-09-12 撤销**，见 [ADR 0022](decisions/0022-m5-midpoint-review.md) 第 3 节。这是 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md) 决策 5 要求的第三次决定，两条的理由分别是：**隐私约束指错了责任方**（Connect 侧已做完并验证，缺的是只有 Hub 能发布的事实，本仓库做任何工作都无法满足它）；**非 Apexnova 候选的措辞选错了对象**（推荐实现本就没有 Apexnova 特判，字面交付得到的是一律 `eligible: false` 的假支持，而诚实版本需要凭据签发、价格来源、计费归属三样底座）。

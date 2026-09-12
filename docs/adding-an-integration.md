@@ -55,7 +55,7 @@ Integration 不应：
 
 ## 6. 测试
 
-每个 integration 必须通过 `packages/integration-testing` 的 `describeIntegrationContract`，否则不得超出 `research` 状态。只做检测的 integration 传 `readOnly: true`，套件会转而要求每个会修改状态的入口明确拒绝。
+每个 integration 必须通过 `packages/integration-testing` 的 `describeIntegrationContract`，否则不得超出 `research` 状态。**五档状态各自的判定条件见 [ADR 0023](decisions/0023-integration-status-ladder.md)**；其中 `stable` 的必要条件里可机检的两条由 `tests/integration-status.test.ts` 强制——声称的每个平台 × 每个协议都要有非 `unknown` 的实测结论，且缺口表与实际不符时测试会失败。只做检测的 integration 传 `readOnly: true`，套件会转而要求每个会修改状态的入口明确拒绝。
 
 除此之外还应提供：
 
