@@ -48,7 +48,7 @@ import {
   type SuiteProtocol,
 } from "@apexnova-connect/capabilities";
 import { createRoutingAuditEntry, type RoutingAuditEntry } from "@apexnova-connect/routing";
-import { startGateway, type ForwardedRequest, type RunningGateway } from "@apexnova-connect/gateway";
+import { startGateway, type ForwardedRequest, type GatewayCredential, type RunningGateway } from "@apexnova-connect/gateway";
 import {
   CODING_GENERAL,
   recommend,
@@ -99,6 +99,7 @@ import {
   requireAvailable,
   resolveDeployment,
   runtimeCredentialForLaunch,
+  runtimeCredentialIsDue,
   selectProtocol,
   toProtocolId,
 } from "./agent-workflow.js";
@@ -113,6 +114,13 @@ import {
 import { CLI_VERSION } from "./version.js";
 
 const LIVE_VERIFY_ESTIMATE_USAGE = { inputTokens: 64, outputTokens: 256 } as const;
+
+/**
+ * How long to leave a failed mid-run renewal alone before trying again. Without
+ * it a Hub that is down would be asked once per forwarded request, turning one
+ * outage into a second one of our own making.
+ */
+const RENEWAL_RETRY_COOLDOWN_MS = 60_000;
 
 // Five billable requests, sized from the probe bodies. Non-binding, like every
 // estimate: the requestIds the run reports are what the real cost is read from.
@@ -2989,17 +2997,44 @@ async function usageByKey(
 function attributeLaunch(
   before: Map<string, { requests: number; name?: string; detail: Set<string> }>,
   after: Map<string, { requests: number; name?: string; detail: Set<string> }>,
-  credentialId: string,
+  // A set, not one id: a run that outlives its credential is billed to the one
+  // it started on and the one it was renewed onto, and counting the first as
+  // ours and the second as a stranger's would report our own requests as
+  // somebody else's.
+  credentialIds: ReadonlySet<string>,
 ): LaunchAttribution {
   let ours = 0;
   const others: { key: string; requests: number; detail: string }[] = [];
   for (const [key, entry] of after) {
     const added = entry.requests - (before.get(key)?.requests ?? 0);
     if (added <= 0) continue;
-    if (key === credentialId) ours += added;
+    if (credentialIds.has(key)) ours += added;
     else others.push({ key: entry.name ? `${entry.name} (${key})` : key, requests: added, detail: [...entry.detail].sort().join(", ") });
   }
   return { ours, others: others.sort((left, right) => right.requests - left.requests) };
+}
+
+/**
+ * Which credential paid for how many of the forwarded requests.
+ *
+ * One entry per credential rather than one line for the run, because a run that
+ * crossed a renewal was billed to two of them and a single total would put
+ * requests on a key that never carried them.
+ */
+function gatewayBilledTo(
+  forwarded: readonly ForwardedRequest[],
+  binding: RuntimeCredentialBinding,
+): { apiKeyId: string; deploymentId: string; requestCount: number }[] {
+  const counts = new Map<string, number>();
+  for (const request of forwarded) {
+    const apiKeyId = request.credentialId ?? binding.credentialId;
+    counts.set(apiKeyId, (counts.get(apiKeyId) ?? 0) + 1);
+  }
+  return [...counts].map(([apiKeyId, requestCount]) => ({
+    apiKeyId,
+    deploymentId: binding.deploymentId,
+    requestCount,
+  }));
 }
 
 async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies) {
@@ -3025,6 +3060,64 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   let gateway: RunningGateway | undefined;
   const forwarded: ForwardedRequest[] = [];
   let gatewayBinding: RuntimeCredentialBinding | undefined;
+  const gatewayNotices: string[] = [];
+  let renewal: Promise<void> | undefined;
+  let renewalFailedAt: number | undefined;
+
+  /**
+   * Replace the credential the gateway is holding, if it has come due.
+   *
+   * A renewal that fails is not a reason to fail the request. The credential in
+   * hand is still valid -- "due" means inside the last hour of its life, not
+   * expired -- so the run continues on it and says so. Once it really does
+   * expire, Hub answers 401 and the gateway forwards that unchanged, which is
+   * the truth about what happened rather than a guess made here.
+   */
+  async function renewGatewayCredential(): Promise<void> {
+    try {
+      const outcome = await runtimeCredentialForLaunch(parsed, dependencies, integration);
+      const replaced = gatewayBinding!.credentialId !== outcome.binding.credentialId;
+      gatewayBinding = outcome.binding;
+      renewalFailedAt = undefined;
+      if (replaced) {
+        gatewayNotices.push(
+          `The runtime credential was renewed mid-run; requests after that point are billed to ${outcome.binding.credentialId}.`,
+        );
+      }
+      gatewayNotices.push(...outcome.warnings);
+    } catch (cause) {
+      // Remembered so the next request does not try again immediately. A Hub
+      // that is refusing would otherwise be asked once per forwarded request.
+      renewalFailedAt = currentTime(dependencies);
+      gatewayNotices.push(
+        `The runtime credential could not be renewed mid-run (${cause instanceof Error ? cause.message : "unknown error"}); the run continues on ${gatewayBinding!.credentialId} until it expires.`,
+      );
+    }
+  }
+
+  /**
+   * What the gateway sends upstream, read once per request.
+   *
+   * This is the only path on which a credential can be replaced without
+   * touching the Agent: on a direct connection the Agent holds the credential
+   * in its own configuration, and swapping it would mean rewriting that
+   * configuration underneath a running process. Here the Agent holds a local
+   * token that never changes, and the replacement happens on this side of the
+   * boundary.
+   */
+  async function gatewayCredential(): Promise<GatewayCredential> {
+    const due = runtimeCredentialIsDue(gatewayBinding!, currentTime(dependencies));
+    const coolingOff = renewalFailedAt !== undefined
+      && currentTime(dependencies) - renewalFailedAt < RENEWAL_RETRY_COOLDOWN_MS;
+    if (due && !coolingOff) {
+      // Single-flight: eight requests arriving together must not mint eight
+      // credentials, seven of which nothing would ever revoke.
+      renewal ??= renewGatewayCredential().finally(() => { renewal = undefined; });
+      await renewal;
+    }
+    const inForce = gatewayBinding!;
+    return { secret: inForce.secret, credentialId: inForce.credentialId };
+  }
 
   const existing = await bindings.load(agentId, parsed.profile);
   // `parsed.gateway`, not the variable below: that one is assigned inside this
@@ -3047,7 +3140,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
       // mints it and writes the address down.
       gateway = await startGateway({
         upstreamBaseUrl: new URL(protocol.baseUrl).origin,
-        credential: () => gatewayBinding!.secret,
+        credential: gatewayCredential,
         onForwarded: (request) => forwarded.push(request),
       });
     }
@@ -3058,8 +3151,18 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     const target = gateway
       ? { ...protocol, baseUrl: `${gateway.url}${new URL(protocol.baseUrl).pathname}` }
       : protocol;
+    // Through the gateway the credential rotates: the Agent holds only the
+    // local token, so replacing the Hub credential costs nothing on its side.
+    // `run` defaults to a permanent key precisely because on a direct
+    // connection the Agent holds the credential itself and swapping it would
+    // mean rewriting a configuration it has already read -- a reason that does
+    // not survive the process boundary. It also bounds what a crashed run can
+    // leave behind: this path takes its credential back at the end, and if it
+    // never gets there, a permanent key outlives the failure and a 24-hour one
+    // does not.
     const result = await configureAgent(
-      parsed, dependencies, integration, deployment, target, catalog, "auto", undefined, gateway !== undefined,
+      parsed, dependencies, integration, deployment, target, catalog,
+      gateway ? "runtime" : "auto", undefined, gateway !== undefined,
     );
     binding = result.binding;
     gatewayBinding = result.binding;
@@ -3115,6 +3218,12 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     agentArgs,
   );
 
+  // Whatever the gateway ended up holding is what the last requests were billed
+  // to, so the audit names that one. What each individual request cost is in
+  // `billedTo`, which is split per credential below.
+  if (gatewayBinding !== undefined) binding = gatewayBinding;
+  launchWarnings.push(...gatewayNotices);
+
   if (gateway) {
     await gateway.close();
     // The configuration names an ephemeral loopback port and a token that died
@@ -3137,10 +3246,17 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     }
   }
 
+  // Every credential this run's requests could have been billed to: the one in
+  // force at the end, plus any the gateway actually used before a renewal.
+  const billedCredentialIds = new Set<string>([
+    binding.credentialId,
+    ...forwarded.flatMap((request) => (request.credentialId === undefined ? [] : [request.credentialId])),
+  ]);
+
   let attribution: LaunchAttribution | undefined;
   if (before !== undefined) {
     try {
-      attribution = attributeLaunch(before, await usageByKey(parsed, dependencies, from), binding.credentialId);
+      attribution = attributeLaunch(before, await usageByKey(parsed, dependencies, from), billedCredentialIds);
     } catch {
       launchWarnings.push("The billing ledger could not be read after the run, so the requests it made were not attributed.");
     }
@@ -3187,9 +3303,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
                     ...(request.failure === undefined ? {} : { failure: request.failure }),
                   })),
                 }),
-            ...(forwarded.length === 0
-              ? {}
-              : { billedTo: [{ apiKeyId: binding.credentialId, deploymentId: binding.deploymentId, requestCount: forwarded.length }] }),
+            ...(forwarded.length === 0 ? {} : { billedTo: gatewayBilledTo(forwarded, binding) }),
           },
           recordedAt: new Date(currentTime(dependencies)).toISOString(),
         }),

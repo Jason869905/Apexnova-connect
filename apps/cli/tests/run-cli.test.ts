@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SecretValue } from "@apexnova-connect/credential-store";
 import type { CredentialStore } from "@apexnova-connect/credential-store";
 import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -2277,6 +2278,194 @@ describe("CLI", () => {
     // unconfirmed, and the method says a gateway produced it rather than a
     // difference between billing buckets.
     expect(attributed?.attribution).toMatchObject({ method: "gateway", status: "unconfirmed" });
+  });
+
+  /**
+   * A gateway run whose credential comes due partway through, with the clock
+   * and the credential issuer under the test's control.
+   *
+   * `session` is handed a function that makes one request through the gateway
+   * and a clock it can move, so a test decides where the boundary falls.
+   */
+  async function runAcrossRenewal(
+    session: (ask: () => Promise<unknown>, crossExpiry: () => void) => Promise<void>,
+    // How long Hub takes to issue the replacement. Real time, not the fake
+    // clock: it is what decides whether requests actually overlap inside the
+    // renewal, and with instant stubs they never do.
+    renewalDelayMs = 0,
+    renewalFails = false,
+  ) {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-renewal-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{}\n", "utf8");
+
+    const presented: string[] = [];
+    const upstream = createServer((request, response) => {
+      presented.push(String(request.headers.authorization ?? ""));
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json", "x-apexnova-request-id": `req_${presented.length}` });
+        response.end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const port = (upstream.address() as { port: number }).port;
+
+    const start = Date.parse("2026-09-12T09:00:00.000Z");
+    let clock = start;
+    const issued = [
+      { credentialId: "rtc_1", expiresAt: new Date(start + 90 * 60_000).toISOString(), secret: "secret-first" },
+      { credentialId: "rtc_2", expiresAt: new Date(start + 26 * 60 * 60_000).toISOString(), secret: "secret-second" },
+    ];
+    const created: string[] = [];
+    const revoked: string[] = [];
+    let attempts = 0;
+    const base = await mockHub().catalog("default");
+    const hub = mockHub({
+      createRuntimeCredential: async () => {
+        attempts += 1;
+        if (renewalFails && attempts > 1) throw new Error("Hub is unavailable");
+        const next = issued[created.length] ?? issued[issued.length - 1]!;
+        created.push(next.credentialId);
+        if (created.length > 1 && renewalDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, renewalDelayMs));
+        }
+        return { credentialId: next.credentialId, expiresAt: next.expiresAt, deviceId: "device_1", secret: SecretValue.from(next.secret) };
+      },
+      catalog: async () => ({
+        ...base,
+        deployments: base.deployments.map((deployment) => ({
+          ...deployment,
+          protocols: [{ protocol: "openai-responses", baseUrl: `http://127.0.0.1:${port}/v1/responses` }],
+        })),
+      }),
+      runtimeCredentials: async () =>
+        created.map((credentialId) => ({
+          credentialId, name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1",
+          protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"],
+          expiresAt: issued.find((item) => item.credentialId === credentialId)!.expiresAt,
+          createdAt: "2026-09-12T09:00:00.000Z",
+        })),
+      revokeRuntimeCredential: async (_profile, credentialId) => { revoked.push(credentialId); },
+    });
+
+    const capture = captureIo();
+    const result = await runCli(["run", "opencode", "--gateway", "--deployment", "deployment.nova", "--json"], {
+      io: capture.io,
+      credentialStore: memoryCredentials(),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: hub,
+      now: () => new Date(clock),
+      launchAgent: async ({ environment }) => {
+        const config = await readFile(configPath, "utf8");
+        const address = /http:\/\/127\.0\.0\.1:\d+[^"]*/.exec(config)?.[0];
+        if (!address) throw new Error(`no gateway address in ${config}`);
+        await session(
+          () => fetch(address, {
+            method: "POST",
+            headers: { authorization: `Bearer ${environment.APEXNOVA_API_KEY}`, "content-type": "application/json" },
+            body: JSON.stringify({ model: "nova" }),
+          }),
+          () => { clock = start + 60 * 60_000; },
+        );
+        return 0;
+      },
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+      createRequestId: () => "local_renewal",
+    });
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    if (result.exitCode !== EXIT_CODES.success) throw new Error(`${capture.stdout()}${capture.stderr()}`);
+
+    const audit = await new RoutingAuditLog({ path: routingAuditPath(join(root, "Apexnova", "connect")) }).list();
+    return { created, revoked, presented, capture, attempts, attributed: audit.find((entry) => entry.event === "attributed") };
+  }
+
+  it("renews the credential mid-run and bills each request to the one that paid", async () => {
+    // ADR 0019 listed this as untested; it was not implemented. The binding was
+    // assigned once at configure time and nothing updated it, so a run that
+    // outlived its credential would fail. This drives a run across that
+    // boundary with a clock the test moves.
+    const run = await runAcrossRenewal(async (ask, crossExpiry) => {
+      await ask();
+      // The session crosses into the last hour of the credential's life.
+      crossExpiry();
+      await ask();
+      await ask();
+    });
+
+    // Exactly two: the configure step and one renewal.
+    expect(run.created).toEqual(["rtc_1", "rtc_2"]);
+    // The Agent never saw either of them -- it held the local token throughout,
+    // which is why the credential could be replaced underneath a running
+    // process at all. On a direct connection this would mean rewriting the
+    // Agent's configuration while it reads it, which is why that path issues a
+    // key that never expires instead.
+    expect(run.presented).toEqual(["Bearer secret-first", "Bearer secret-second", "Bearer secret-second"]);
+    expect(run.revoked).toContain("rtc_1");
+
+    expect(run.attributed?.attribution?.requestCount).toBe(3);
+    // Split, not totalled: one line for the run would put all three requests on
+    // a credential that paid for two of them.
+    expect(run.attributed?.attribution?.billedTo).toEqual([
+      { apiKeyId: "rtc_1", deploymentId: "deployment.nova", requestCount: 1 },
+      { apiKeyId: "rtc_2", deploymentId: "deployment.nova", requestCount: 2 },
+    ]);
+    expect(run.capture.stdout()).toContain("renewed mid-run");
+  });
+
+  it("makes eight requests that come due together wait on one renewal, not eight", async () => {
+    // What single-flighting prevents is queueing, not over-issuing: rotation
+    // takes a cross-process file lock and re-checks under it, so seven extra
+    // attempts would each find the credential already replaced and mint
+    // nothing. They would each have waited on that lock first, at a 100ms retry
+    // interval, which is what the elapsed assertion below is about.
+    //
+    // The renewal is made slow on purpose. With instant stubs the first one
+    // finishes before the other requests reach the check, so they never overlap
+    // and the test proves nothing -- which is what an earlier version of it did.
+    let elapsed = 0;
+    const run = await runAcrossRenewal(async (ask, crossExpiry) => {
+      crossExpiry();
+      const started = Date.now();
+      await Promise.all(Array.from({ length: 8 }, () => ask()));
+      elapsed = Date.now() - started;
+    }, 50);
+
+    expect(run.created).toEqual(["rtc_1", "rtc_2"]);
+    expect(run.presented).toEqual(Array.from({ length: 8 }, () => "Bearer secret-second"));
+    expect(run.attributed?.attribution?.billedTo).toEqual([
+      { apiKeyId: "rtc_2", deploymentId: "deployment.nova", requestCount: 8 },
+    ]);
+    // Well under seven lock waits. Removing the single-flight makes this fail.
+    expect(elapsed).toBeLessThan(400);
+  });
+
+  it("keeps running on the credential it holds when the renewal fails", async () => {
+    // Due means inside the last hour of the credential's life, not expired, so
+    // a renewal that fails is not a reason to fail a request that would work.
+    // When it really does expire, Hub answers 401 and the gateway forwards that
+    // unchanged -- the truth about what happened rather than a guess made here.
+    const run = await runAcrossRenewal(async (ask, crossExpiry) => {
+      await ask();
+      crossExpiry();
+      await ask();
+      await ask();
+      await ask();
+    }, 0, true);
+
+    expect(run.created).toEqual(["rtc_1"]);
+    expect(run.presented).toEqual(Array.from({ length: 4 }, () => "Bearer secret-first"));
+    // One retry, not one per request. A Hub that is refusing would otherwise be
+    // asked again by every forwarded request, turning its outage into a second
+    // one of our own making.
+    expect(run.attempts).toBe(2);
+    expect(run.capture.stdout()).toContain("could not be renewed mid-run");
+    expect(run.attributed?.attribution?.billedTo).toEqual([
+      { apiKeyId: "rtc_1", deploymentId: "deployment.nova", requestCount: 4 },
+    ]);
   });
 
   it("refuses to send a run direct when the gateway was asked for", async () => {

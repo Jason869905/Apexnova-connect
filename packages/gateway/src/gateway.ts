@@ -14,8 +14,21 @@ export interface ForwardedRequest {
   readonly status: number;
   readonly startedAt: string;
   readonly durationMs: number;
+  /**
+   * Which Hub credential paid for this one request. Recorded per request rather
+   * than once per run because the credential can be replaced mid-run: a run
+   * that outlives its credential is billed to two of them, and naming only the
+   * last would file the earlier requests under a key that never carried them.
+   */
+  readonly credentialId?: string;
   /** Set when the upstream call could not be made at all. */
   readonly failure?: string;
+}
+
+/** The Hub credential in force, and which one it is. */
+export interface GatewayCredential {
+  readonly secret: SecretValue;
+  readonly credentialId?: string;
 }
 
 export interface GatewayOptions {
@@ -28,8 +41,14 @@ export interface GatewayOptions {
    * listening before the credential exists: the Agent's configuration has to
    * name this gateway's address, and the credential is minted by the same
    * configure step that writes it.
+   *
+   * The same per-request read is what lets a credential be replaced while a run
+   * is in flight. It may return a promise so that the replacement can be
+   * fetched here, on the one request that needs it, rather than on a timer.
    */
-  readonly credential: SecretValue | (() => SecretValue);
+  readonly credential:
+    | SecretValue
+    | (() => SecretValue | GatewayCredential | Promise<SecretValue | GatewayCredential>);
   readonly onForwarded?: (request: ForwardedRequest) => void;
   readonly now?: () => number;
   readonly fetch?: typeof globalThis.fetch;
@@ -124,8 +143,30 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       if (value === undefined || HOP_BY_HOP.has(name.toLowerCase())) continue;
       headers.set(name, Array.isArray(value) ? value.join(", ") : value);
     }
-    const credential = typeof options.credential === "function" ? options.credential() : options.credential;
-    headers.set("authorization", `Bearer ${credential.reveal()}`);
+    let credential: GatewayCredential;
+    try {
+      const resolved = typeof options.credential === "function" ? await options.credential() : options.credential;
+      credential = "secret" in resolved ? resolved : { secret: resolved };
+    } catch (cause) {
+      // Nothing was sent upstream, so nothing was billed and nothing ran. Say
+      // that plainly rather than forwarding with a credential we know is wrong
+      // and reporting whatever the upstream makes of it.
+      const failure = cause instanceof Error ? cause.message : "no Hub credential was available";
+      options.onForwarded?.({
+        method: request.method ?? "GET",
+        path: target.pathname,
+        status: 502,
+        startedAt: new Date(startedAt).toISOString(),
+        durationMs: now() - startedAt,
+        failure,
+      });
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "credential_unavailable", message: failure, retryable: false },
+      }));
+      return;
+    }
+    headers.set("authorization", `Bearer ${credential.secret.reveal()}`);
 
     const method = request.method ?? "GET";
     const hasBody = method !== "GET" && method !== "HEAD";
@@ -161,6 +202,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
         method,
         path: target.pathname,
         status: 502,
+        ...(credential.credentialId === undefined ? {} : { credentialId: credential.credentialId }),
         startedAt: new Date(startedAt).toISOString(),
         durationMs: now() - startedAt,
         failure,
@@ -213,6 +255,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
           path: target.pathname,
           ...(requestId === null ? {} : { requestId }),
           status: upstreamResponse.status,
+          ...(credential.credentialId === undefined ? {} : { credentialId: credential.credentialId }),
           startedAt: new Date(startedAt).toISOString(),
           durationMs: now() - startedAt,
           failure,
@@ -228,6 +271,7 @@ export async function startGateway(options: GatewayOptions): Promise<RunningGate
       path: target.pathname,
       ...(requestId === null ? {} : { requestId }),
       status: upstreamResponse.status,
+      ...(credential.credentialId === undefined ? {} : { credentialId: credential.credentialId }),
       startedAt: new Date(startedAt).toISOString(),
       durationMs: now() - startedAt,
     });

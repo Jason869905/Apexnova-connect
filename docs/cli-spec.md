@@ -133,12 +133,15 @@ apexnova run opencode -- --model apexnova/glm-5.2
 --deployment <id>      指定模型（省略时自动选第一个；交互模式弹出上下键选择器）
 --key <id>             绑定已有 API key（跳过创建，用于按工具追踪用量）
 --rotating             使用 24h 短期 runtime credential 而非永久 key
+--gateway              经本地 Gateway 转发（默认关闭；蕴含 --rotating，见下）
 -- <agent args>        透传参数给 OpenCode
 ```
 
 流程：`detect → resolve deployment → ensure key → plan → apply → launch`。
 
 `ensure key` 行为：默认 `POST /v1/api-keys` 创建永久 `sk-` key；`--rotating` 创建 24h `anrt_`；`--key <id>` 验证存在并提示输入 secret。已有配置时跳过 plan/apply 直接 launch。永久 key 不过期无需续期；`--rotating` 剩余不足 1 小时时自动续期。
+
+**`--gateway` 一律使用短期 credential**，等同于 `--rotating`。默认发永久 key 的理由是「直连时凭据在 Agent 自己的配置里，换一枚就得在它读过之后改写那份配置」——**经 Gateway 时 Agent 拿的是本地令牌，这个理由不成立**。续期发生在 Gateway 进程内、请求到来时，Agent 无感知；同时到期的多个请求共用一次续期。续期失败不中断运行：凭据此刻仍然有效（「到期」指剩余不足 1 小时），运行继续并给出警告，真到期后 Hub 返回的 401 原样透传。见 [ADR 0021](decisions/0021-gateway-credential-renewal.md)。
 
 ### `apexnova credential print <agent>`
 

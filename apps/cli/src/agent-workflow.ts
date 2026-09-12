@@ -57,6 +57,20 @@ import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-bi
 const RUNTIME_ROTATION_WINDOW_MS = 60 * 60 * 1_000;
 const RUNTIME_CREDENTIAL_TTL_SECONDS = 86_400;
 
+/**
+ * Whether a binding is close enough to expiry that a run should replace it
+ * rather than start on it.
+ *
+ * One definition, because there are now three callers -- the pre-launch check,
+ * the re-check under the rotation lock, and the gateway's per-request read --
+ * and a run that disagrees with itself about what "due" means would renew on
+ * one path and not another.
+ */
+export function runtimeCredentialIsDue(binding: RuntimeCredentialBinding, now: number): boolean {
+  if (binding.kind === "user" || binding.expiresAt === undefined) return false;
+  return Date.parse(binding.expiresAt) - now <= RUNTIME_ROTATION_WINDOW_MS;
+}
+
 export interface LaunchOutcome {
   readonly binding: RuntimeCredentialBinding;
   readonly rotated: boolean;
@@ -644,20 +658,14 @@ export async function runtimeCredentialForLaunch(
   const bindings = new RuntimeBindingStore(credentialStore(dependencies));
   const initial = await bindings.load(agentId, parsed.profile);
   if (!initial) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
-  if (initial.kind === "user" || initial.expiresAt === undefined) {
-    return { binding: initial, rotated: false, warnings: [] as string[] };
-  }
-  if (Date.parse(initial.expiresAt) - currentTime(dependencies) > RUNTIME_ROTATION_WINDOW_MS) {
+  if (!runtimeCredentialIsDue(initial, currentTime(dependencies))) {
     return { binding: initial, rotated: false, warnings: [] as string[] };
   }
 
   return withRuntimeRotationLock(parsed, dependencies, async () => {
     const current = await bindings.load(agentId, parsed.profile);
     if (!current) throw new CliError({ code: "RUNTIME_CREDENTIAL_NOT_FOUND", message: "No runtime credential is stored for this profile; run connect first.", exitCode: EXIT_CODES.authentication });
-    if (current.kind === "user" || current.expiresAt === undefined) {
-      return { binding: current, rotated: false, warnings: [] as string[] };
-    }
-    if (Date.parse(current.expiresAt) - currentTime(dependencies) > RUNTIME_ROTATION_WINDOW_MS) {
+    if (!runtimeCredentialIsDue(current, currentTime(dependencies))) {
       return { binding: current, rotated: false, warnings: [] as string[] };
     }
     const service = hubService(parsed, dependencies);

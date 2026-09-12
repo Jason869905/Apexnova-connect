@@ -362,3 +362,109 @@ describe("the local gateway", () => {
     expect(gateway.url.startsWith("http://127.0.0.1:")).toBe(true);
   });
 });
+
+describe("the credential the gateway holds", () => {
+  it("picks up a replacement between requests, and names which one paid", async () => {
+    // ADR 0019 recorded the credential as fixed for the life of a run, which
+    // made a session that outlives it fail. The provider is read per request so
+    // the replacement can arrive mid-run; this proves the read is live rather
+    // than a value captured at start.
+    const sent: string[] = [];
+    const forwarded: ForwardedRequest[] = [];
+    let inForce = { secret: SecretValue.from("hub-secret-first"), credentialId: "rtc_1" };
+    const upstream = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers).get("authorization") ?? "");
+      return new Response("{}", { status: 200, headers: { "x-apexnova-request-id": `req_${sent.length}` } });
+    });
+    const gateway = await startGateway({
+      upstreamBaseUrl: "https://hub.example.test",
+      credential: () => inForce,
+      fetch: upstream as unknown as typeof globalThis.fetch,
+      onForwarded: (request) => forwarded.push(request),
+    });
+    running.push(gateway);
+
+    const call = () =>
+      fetch(`${gateway.url}/v1/responses`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${gateway.localToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: "nova" }),
+      });
+
+    await call();
+    inForce = { secret: SecretValue.from("hub-secret-second"), credentialId: "rtc_2" };
+    await call();
+
+    expect(sent).toEqual(["Bearer hub-secret-first", "Bearer hub-secret-second"]);
+    // Per request, not once per run: the audit has to be able to say which
+    // credential carried which requests, and a single figure for the run would
+    // file the first one under a key that never paid for it.
+    expect(forwarded.map((request) => request.credentialId)).toEqual(["rtc_1", "rtc_2"]);
+  });
+
+  it("waits for a credential that is still being fetched rather than sending without one", async () => {
+    let release: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    let entered: (() => void) | undefined;
+    // Waited on before the assertion below, so it tests the gateway holding the
+    // request back rather than the request not having arrived yet.
+    const asking = new Promise<void>((resolve) => { entered = resolve; });
+    const upstream = vi.fn(async (_input: string | URL | Request, init?: RequestInit) =>
+      new Response(new Headers(init?.headers).get("authorization") ?? "", { status: 200 }),
+    );
+    const gateway = await startGateway({
+      upstreamBaseUrl: "https://hub.example.test",
+      credential: async () => {
+        entered?.();
+        await ready;
+        return { secret: SecretValue.from("renewed-secret"), credentialId: "rtc_2" };
+      },
+      fetch: upstream as unknown as typeof globalThis.fetch,
+    });
+    running.push(gateway);
+
+    const response = fetch(`${gateway.url}/v1/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.localToken}` },
+      body: "{}",
+    });
+    await asking;
+    // Nothing may go upstream while the renewal is in flight. Forwarding with
+    // the old credential here would be the quiet kind of wrong: it would work
+    // right up until the moment it stopped.
+    expect(upstream).not.toHaveBeenCalled();
+    release?.();
+
+    expect(await (await response).text()).toBe("Bearer renewed-secret");
+  });
+
+  it("says no credential was available rather than forwarding one it knows is wrong", async () => {
+    const forwarded: ForwardedRequest[] = [];
+    const upstream = vi.fn(async () => new Response("{}", { status: 200 }));
+    const gateway = await startGateway({
+      upstreamBaseUrl: "https://hub.example.test",
+      credential: () => { throw new Error("Hub refused to issue a credential"); },
+      fetch: upstream as unknown as typeof globalThis.fetch,
+      onForwarded: (request) => forwarded.push(request),
+    });
+    running.push(gateway);
+
+    const response = await fetch(`${gateway.url}/v1/responses`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${gateway.localToken}` },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(502);
+    const body = await response.json() as { error: { code: string; message: string; retryable: boolean } };
+    expect(body.error.code).toBe("credential_unavailable");
+    expect(body.error.message).toContain("Hub refused");
+    expect(body.error.retryable).toBe(false);
+    // Nothing reached Hub, so nothing was billed and no tool call ran. The
+    // record has to say that, not report whatever an upstream made of a
+    // credential we never sent.
+    expect(upstream).not.toHaveBeenCalled();
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0]?.failure).toContain("Hub refused");
+  });
+});

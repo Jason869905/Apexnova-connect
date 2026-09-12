@@ -26,3 +26,4 @@
 - [ADR 0018：Gateway 首个切片](0018-gateway-first-slice.md)
 - [ADR 0019：Gateway 首个切片评审](0019-gateway-first-slice-review.md)
 - [ADR 0020：Gateway 这一批的收尾，仍然保持可选](0020-gateway-batch-closure.md)
+- [ADR 0021：经 Gateway 的凭据在运行期内续期，并且一律是短期的](0021-gateway-credential-renewal.md)
