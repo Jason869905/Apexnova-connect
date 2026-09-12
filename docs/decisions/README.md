@@ -27,3 +27,4 @@
 - [ADR 0019：Gateway 首个切片评审](0019-gateway-first-slice-review.md)
 - [ADR 0020：Gateway 这一批的收尾，仍然保持可选](0020-gateway-batch-closure.md)
 - [ADR 0021：经 Gateway 的凭据在运行期内续期，并且一律是短期的](0021-gateway-credential-renewal.md)
+- [ADR 0022：M5 中期状态评审，并撤销两条退出条件](0022-m5-midpoint-review.md)

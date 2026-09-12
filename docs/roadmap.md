@@ -190,7 +190,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v1.0`。
 
-当前状态：已启动，**首批完成并评审**（2026-09-11，见 [ADR 0017](decisions/0017-m5-first-batch-review.md)；范围见 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md)）。首批三个验收目标达成：路由审计（`selected` 与 `attributed` 两类不可变记录）、切换失败的三点注入验收（含变异检查）、`connect`/`switch` 输出真实 deployment 与计费凭据。**M5 不关闭**，且首批留下三个缺口：`grounds: "recommendation"` 无人写入（与 M4 的 `scenarioId` 同型）、`restore` 不写审计、没有读取审计的命令。**首批收窄为两件：显式 Provider 切换与路由审计**，不含 Gateway、Circuit Breaker、受控选择与 Team——那几项都要求 Connect 参与请求路径，而与审计语义同时做会让出问题时分不清是路由错了还是审计错了。今天没有 Gateway，一次「路由」就是一次连接目标的确定，审计要回答三句话：选了哪个 Deployment、依据是什么、实际由谁计费。首批之后已完成：`recommend → connect` 的传递（`connect --best`，让审计的 `grounds: recommendation` 不再是死字段）、`restore` 写审计、`apexnova audit` 读取命令；Gateway 的首个切片（忠实转发与逐请求归属，默认关闭）已交付并评审（[ADR 0018](decisions/0018-gateway-first-slice.md)、[ADR 0019](decisions/0019-gateway-first-slice-review.md)），四个 Integration 的 Gateway 路径已逐个验收。**Gateway 这一批已收尾**（2026-09-12，见 [ADR 0020](decisions/0020-gateway-batch-closure.md)）：ADR 0019 列的八条缺口清完六条——失败注入与超时、忠实性的强证据（能力套件对同一份回放跑两遍并逐项比对）、`path`/`durationMs` 入审计、长会话的近似、其余开关的结构性复核（命令不读的选项一律拒绝）、并发验收（含变异检查）。**剩两条：运行期内凭据不续期与 Claude Code 的 launcher**（后者环境所限）。**前者已于同日实现**（见 [ADR 0021](decisions/0021-gateway-credential-renewal.md)）：续期在请求到来时发生、同时到期的请求共用一次、失败不中断运行、归属按凭据拆分；`--gateway` 同时改为一律签发 24 小时短期凭据，因为「换凭据要改写 Agent 配置」这个理由在进程边界之后不成立。ADR 0021 同时更正了 ADR 0019/0020 的一处事实错误：`run` 默认发的是永不过期的 key，所以当时**没有任何在用路径会撞上到期**。**实跑仍未发生，转默认的条件 1 因此仍不满足。****Gateway 仍不设为默认**，转默认的条件已写成可核对的三条（凭据可续期并有一次跨过到期的实跑、Claude Code 经 Gateway 的端到端实跑、一次真实长交互会话）。**自 M4 移入的两条退出条件（非 Apexnova 候选来源、隐私约束）不进首批，但仍是退出条件**：两者的推迟理由都已用掉，收口时若未交付按未满足记录。
+当前状态：已启动，**首批完成并评审**（2026-09-11，见 [ADR 0017](decisions/0017-m5-first-batch-review.md)；范围见 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md)）。首批三个验收目标达成：路由审计（`selected` 与 `attributed` 两类不可变记录）、切换失败的三点注入验收（含变异检查）、`connect`/`switch` 输出真实 deployment 与计费凭据。**M5 不关闭**，且首批留下三个缺口：`grounds: "recommendation"` 无人写入（与 M4 的 `scenarioId` 同型）、`restore` 不写审计、没有读取审计的命令。**首批收窄为两件：显式 Provider 切换与路由审计**，不含 Gateway、Circuit Breaker、受控选择与 Team——那几项都要求 Connect 参与请求路径，而与审计语义同时做会让出问题时分不清是路由错了还是审计错了。今天没有 Gateway，一次「路由」就是一次连接目标的确定，审计要回答三句话：选了哪个 Deployment、依据是什么、实际由谁计费。首批之后已完成：`recommend → connect` 的传递（`connect --best`，让审计的 `grounds: recommendation` 不再是死字段）、`restore` 写审计、`apexnova audit` 读取命令；Gateway 的首个切片（忠实转发与逐请求归属，默认关闭）已交付并评审（[ADR 0018](decisions/0018-gateway-first-slice.md)、[ADR 0019](decisions/0019-gateway-first-slice-review.md)），四个 Integration 的 Gateway 路径已逐个验收。**Gateway 这一批已收尾**（2026-09-12，见 [ADR 0020](decisions/0020-gateway-batch-closure.md)）：ADR 0019 列的八条缺口清完六条——失败注入与超时、忠实性的强证据（能力套件对同一份回放跑两遍并逐项比对）、`path`/`durationMs` 入审计、长会话的近似、其余开关的结构性复核（命令不读的选项一律拒绝）、并发验收（含变异检查）。**剩两条：运行期内凭据不续期与 Claude Code 的 launcher**（后者环境所限）。**前者已于同日实现**（见 [ADR 0021](decisions/0021-gateway-credential-renewal.md)）：续期在请求到来时发生、同时到期的请求共用一次、失败不中断运行、归属按凭据拆分；`--gateway` 同时改为一律签发 24 小时短期凭据，因为「换凭据要改写 Agent 配置」这个理由在进程边界之后不成立。ADR 0021 同时更正了 ADR 0019/0020 的一处事实错误：`run` 默认发的是永不过期的 key，所以当时**没有任何在用路径会撞上到期**。**实跑仍未发生，转默认的条件 1 因此仍不满足。****Gateway 仍不设为默认**，转默认的条件已写成可核对的三条（凭据可续期并有一次跨过到期的实跑、Claude Code 经 Gateway 的端到端实跑、一次真实长交互会话）。**中期评审已完成**（2026-09-12，见 [ADR 0022](decisions/0022-m5-midpoint-review.md)）：七条退出条件中**四条满足、一条未满足（Integration 达到 stable）、两条撤销**（非 Apexnova 候选来源与隐私约束，理由见上）。范围里整项未动的四项如实点名：Circuit Breaker（全仓 `circuit` 零匹配）、新请求边界上的受控选择、Connection Profile（有 schema 无实现，CLI 不接受 `--connection-profile`）、Pro 与 Team。**M5 保持未关闭。** 建议顺序：先定义 stable 的判定标准并逐个 Integration 对照（它最便宜，且会把 Claude Code 未经 Gateway 实跑、macOS 自 M2 挂账等散落各处的问题逼到一处），再补 Gateway 转默认的三条，之后才是 Circuit Breaker 与受控选择。**基本功能可据此发布，但与 M5 闭环脱钩**，发布说明须写明不含哪些能力、且四个 Integration 均为 `experimental`。
 
 范围：
 
@@ -208,10 +208,12 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - Provider 故障不会造成工具副作用请求的自动重放；
 - 每次路由可解释且可审计；
 - 切换失败不会破坏 Agent 配置；
-- 三个首批 Integration 达到 stable；
-- 用户始终能看到实际 Deployment 和计费主体；
-- 允许推荐非 Apexnova Provider（自 M4 移入，见 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md)；推迟的理由已经用掉一次，不得再推迟）；
-- 用户可以强制隐私约束（自 M4 移入，见 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md)；依赖 Hub 交付需求 12J 的数据处理属性，同样不得再推迟）。
+- 三个首批 Integration 达到 stable（**未满足**：四个 Integration 的 manifest `status` 全部是 `experimental`，`stable` 就在 schema 阶梯的下一档，一个都没升过。这条此前无人过问，因为它要的不是功能而是一个「凭什么算 stable」的判定标准，而那个标准不存在——见 [ADR 0022](decisions/0022-m5-midpoint-review.md) 第 2 节）；
+- 用户始终能看到实际 Deployment 和计费主体。
+
+~~允许推荐非 Apexnova Provider~~、~~用户可以强制隐私约束~~ 两条**已于 2026-09-12 撤销**，见 [ADR 0022](decisions/0022-m5-midpoint-review.md) 第 3 节。这是 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md) 决策 5 要求的第三次决定，两条的理由分别是：**隐私约束指错了责任方**（Connect 侧已做完并验证，缺的是只有 Hub 能发布的事实，本仓库做任何工作都无法满足它）；**非 Apexnova 候选的措辞选错了对象**（推荐实现本就没有 Apexnova 特判，字面交付得到的是一律 `eligible: false` 的假支持，而诚实版本需要凭据签发、价格来源、计费归属三样底座）。
+
+**代价照实记：撤销不等于交付。** 用户今天无法强制隐私约束，Hub 需求 12J 交付前也不会有；Connect 在可预见时间内只推荐 Apexnova 目录内候选，`recommend` 每次运行的该项声明不得去掉。两条**不留挂账**：将来要做是新的里程碑范围，从 ADR 0022 列出的前提开始，不是恢复 M5 的退出条件。
 
 ## M6：Domain Expansion
 
