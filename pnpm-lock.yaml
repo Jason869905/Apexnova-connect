@@ -159,6 +159,10 @@ importers:
       '@apexnova-connect/credential-store':
         specifier: workspace:*
         version: link:../credential-store
+    devDependencies:
+      '@apexnova-connect/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
 
   packages/hub-client:
     dependencies:

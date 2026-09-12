@@ -13,11 +13,16 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@apexnova-connect/credential-store": "workspace:*"
+  },
+  "devDependencies": {
+    "@apexnova-connect/capabilities": "workspace:*"
   }
 }

@@ -31,6 +31,10 @@
     "packages/hub-client/tests/**/*.ts",
     "packages/recommendation/src/**/*.ts",
     "packages/recommendation/tests/**/*.ts",
+    "packages/routing/src/**/*.ts",
+    "packages/routing/tests/**/*.ts",
+    "packages/gateway/src/**/*.ts",
+    "packages/gateway/tests/**/*.ts",
     "sdks/typescript/src/**/*.ts",
     "sdks/typescript/tests/**/*.ts",
     "tests/**/*.ts"
