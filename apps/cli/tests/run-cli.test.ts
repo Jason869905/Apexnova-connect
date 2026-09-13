@@ -396,9 +396,31 @@ describe("CLI", () => {
     expect(result.exitCode).toBe(EXIT_CODES.success);
     expect(JSON.parse(capture.stdout()).data).toMatchObject({ profile: "work", authenticated: true, accountId: "account_1" });
     expect(capture.stderr()).toContain("ABCD-EFGH");
+    // One link, code included: Hub's device page reads `user_code` from the
+    // query, so the user never has to copy the code out of the terminal.
+    expect(capture.stderr()).toContain("https://hub.example.test/device?user_code=ABCD-EFGH");
     expect(`${capture.stdout()}${capture.stderr()}`).not.toContain("access-secret");
     expect(`${capture.stdout()}${capture.stderr()}`).not.toContain("refresh-secret");
     expect(login.mock.calls[0]?.[2]).toBeUndefined();
+  });
+
+  it("opens the verification URI Hub completed rather than rebuilding one", async () => {
+    const capture = captureIo();
+    const login: HubCommandService["login"] = async (_profile, prompt) => {
+      await prompt({
+        userCode: "ABCD-EFGH",
+        verificationUri: "https://hub.example.test/device",
+        verificationUriComplete: "https://hub.example.test/device/ABCD-EFGH",
+        expiresAt: "2026-09-04T12:10:00Z",
+      });
+      return { accessToken: SecretValue.from("access-secret"), tokenType: "Bearer", accountId: "account_1" };
+    };
+
+    const result = await runCli(["login"], { io: capture.io, hubService: mockHub({ login }), createRequestId: () => "local_login" });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(capture.stderr()).toContain("https://hub.example.test/device/ABCD-EFGH");
+    expect(capture.stderr()).not.toContain("?user_code=");
   });
 
   it("names the scopes Hub did not grant instead of failing the login", async () => {

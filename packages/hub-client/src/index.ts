@@ -1,6 +1,7 @@
 export { HubClientError, type HubClientErrorCode } from "./errors.js";
 export { HubOAuthClient, type HubOAuthClientOptions } from "./oauth-client.js";
 export { HubSessionService } from "./session-service.js";
+export { deviceVerificationUrl } from "./device-verification.js";
 export {
   HubControlPlaneClient,
   type HubControlPlaneClientOptions,

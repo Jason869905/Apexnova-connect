@@ -9,7 +9,7 @@ Apexnova AI Hub 公共 API 客户端，包括设备认证、凭证刷新、余�
 - refresh token 刷新、可选旋转和同一 profile 的 single-flight 并发控制；
 - 通过 `HubSessionStore` 把一个完整会话作为单个 secret 存入 `CredentialStore`；
 - HTTPS-only、同源端点路径、禁止 HTTP 重定向、请求超时和响应大小限制；
-- UI prompt 只包含 `user_code` 与验证 URI，不包含 `device_code`。
+- UI prompt 只包含 `user_code` 与验证 URI，不包含 `device_code`；`deviceVerificationUrl()` 给出带验证码的单条链接（优先用服务端的 `verification_uri_complete`）。
 - 严格校验 `/v1/me`、`/v1/billing/balance` 和 `/v1/catalog/snapshot` 的控制面客户端；
 - runtime credential 创建与撤销客户端，secret 只以 `SecretValue` 返回；
 - 控制面 Request ID、认证、权限、限流、余额和网络错误映射；

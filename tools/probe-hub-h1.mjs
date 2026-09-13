@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { HubControlPlaneClient, HubOAuthClient } from "../packages/hub-client/dist/index.js";
+import { HubControlPlaneClient, HubOAuthClient, deviceVerificationUrl } from "../packages/hub-client/dist/index.js";
 
 const baseUrl = process.env.APEXNOVA_HUB_BASE_URL;
 const clientId = process.env.APEXNOVA_OAUTH_CLIENT_ID;
@@ -45,9 +45,13 @@ async function revokeWithRetry(token) {
 await oauth.discover();
 const authorization = await oauth.startDeviceAuthorization();
 if (interactive) {
-  const verificationUrl = new URL(process.env.APEXNOVA_HUB_VERIFICATION_URL ?? authorization.verificationUri);
-  verificationUrl.searchParams.set("user_code", authorization.userCode);
-  process.stderr.write(`Open ${verificationUrl.toString()}\nEnter code: ${authorization.userCode}\nExpires: ${authorization.expiresAt}\n`);
+  const override = process.env.APEXNOVA_HUB_VERIFICATION_URL;
+  const verificationUrl = deviceVerificationUrl(
+    override
+      ? { userCode: authorization.userCode, verificationUri: override }
+      : authorization,
+  );
+  process.stderr.write(`Open ${verificationUrl}\nCode: ${authorization.userCode}\nExpires: ${authorization.expiresAt}\n`);
 }
 const tokens = await oauth.waitForDeviceAuthorization(
   authorization,

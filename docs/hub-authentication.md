@@ -46,6 +46,8 @@ grant_type=urn:ietf:params:oauth:grant-type:device_code
 
 应用 UI 可以显示 `user_code`、`verification_uri`、`verification_uri_complete` 和有效期。`device_code` 只存在于 `SecretValue`，不会传给 UI prompt。
 
+`verification_uri_complete` 是 RFC 8628 的可选字段，服务端省略时 `deviceVerificationUrl()` 会在 `verification_uri` 上补 `user_code` 查询参数（Hub device 页面读的就是这个参数名），保证展示给用户的始终是一条点开即可授权的链接。
+
 ## 会话存储
 
 access token、refresh token 和相关 token 元数据序列化为一个版本化文档，再整体存入操作系统凭证存储。这样避免两个凭证分别更新造成明显的不一致窗口。refresh 响应未返回新 refresh token 时保留旧值；返回新值时覆盖旧值。

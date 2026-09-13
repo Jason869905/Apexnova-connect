@@ -95,7 +95,7 @@ apexnova init --hub-url https://api.example.test --client-id apexnova-connect
 
 ### `apexnova login`
 
-显式发起 Apexnova AI Hub Device Authorization。UI 只展示 `user_code`、验证 URI 和有效期。
+显式发起 Apexnova AI Hub Device Authorization。UI 展示带 `user_code` 的验证 URI（服务端返回 `verification_uri_complete` 时用它，否则在 `verification_uri` 上补 `user_code` 查询参数）、`user_code` 本身和有效期。
 
 ```text
 apexnova login

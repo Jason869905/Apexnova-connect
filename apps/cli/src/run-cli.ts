@@ -17,6 +17,7 @@ import {
 import { IntegrationChangeError } from "@apexnova-connect/core";
 import {
   HubClientError,
+  deviceVerificationUrl,
   verifyHubInference,
   type HubCatalogDeployment,
   type HubCatalogSnapshot,
@@ -786,9 +787,14 @@ async function executeLogin(parsed: ParsedArguments, dependencies: CliDependenci
     parsed.profile,
     (prompt) => {
       promptShown = true;
+      // The link already carries the code, so the usual second step -- open the
+      // page, go back to the terminal, copy the code -- is gone. The code is
+      // still printed because the page asks the user to confirm it matches, and
+      // because a terminal that turns the URL into a truncated link leaves it as
+      // the only way to finish the login by hand.
       io.stderr([
-        `Open ${prompt.verificationUri}`,
-        `Enter code: ${prompt.userCode}`,
+        `Open ${deviceVerificationUrl(prompt)}`,
+        `Code: ${prompt.userCode} (already in the link; type it if the page asks)`,
         `Expires: ${prompt.expiresAt}`,
       ].join("\n") + "\n");
     },

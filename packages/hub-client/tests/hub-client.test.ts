@@ -10,6 +10,7 @@ import {
   HubOAuthClient,
   HubSessionService,
   HubSessionStore,
+  deviceVerificationUrl,
   type HubTokenSet,
 } from "../src/index.js";
 
@@ -57,6 +58,27 @@ function credentials() {
     sessions: new HubSessionStore(credentials),
   };
 }
+
+describe("deviceVerificationUrl", () => {
+  it("prefers the URI Hub completed itself", () => {
+    expect(
+      deviceVerificationUrl({
+        userCode: "ABCD-EFGH",
+        verificationUri: "https://hub.example.test/activate",
+        verificationUriComplete: "https://hub.example.test/activate/ABCD-EFGH",
+      }),
+    ).toBe("https://hub.example.test/activate/ABCD-EFGH");
+  });
+
+  it("carries the code in the URI when the server omits the complete one", () => {
+    expect(
+      deviceVerificationUrl({
+        userCode: "ABCD-EFGH",
+        verificationUri: "https://hub.example.test/activate?next=%2Fhome",
+      }),
+    ).toBe("https://hub.example.test/activate?next=%2Fhome&user_code=ABCD-EFGH");
+  });
+});
 
 describe("HubOAuthClient", () => {
   it("starts a standards-based device authorization without exposing device_code", async () => {

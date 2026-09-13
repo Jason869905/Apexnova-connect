@@ -121,15 +121,15 @@ export APEXNOVA_OAUTH_CLIENT_ID=apexnova-connect
 apexnova login
 ```
 
-CLI 显示设备码和 URL：
+CLI 显示一条已经带上验证码的 URL：
 
 ```
-Open https://console.apexnova-consulting.com/device
-Enter code: ABCD-EFGH
+Open https://console.apexnova-consulting.com/device?user_code=ABCD-EFGH
+Code: ABCD-EFGH (already in the link; type it if the page asks)
 Expires: 2026-09-06T12:00:00Z
 ```
 
-在浏览器打开 URL、输入代码、批准授权。token 存进当前凭证后端（Linux 默认是 `~/.local/share/apexnova-connect/credentials.json`，Windows 是 Credential Manager），不写进任何 Agent 的配置文件。
+在浏览器打开这条 URL，页面会预填验证码，确认无误后批准授权——不需要回到终端复制代码。代码仍然印在下一行，用于核对页面显示的是否是同一个，以及终端把 URL 截断时手工输入。token 存进当前凭证后端（Linux 默认是 `~/.local/share/apexnova-connect/credentials.json`，Windows 是 Credential Manager），不写进任何 Agent 的配置文件。
 
 > **scope 一次性定死**：登录申请的 scope 包括 `api-keys:read/write/revoke`。用旧版 CLI 登录过的 token 没有这些 scope，连接时会收到 `INSUFFICIENT_SCOPE`——重新 `apexnova login` 即可。
 
