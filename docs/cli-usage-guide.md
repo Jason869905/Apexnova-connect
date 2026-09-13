@@ -1,7 +1,6 @@
 # Apexnova-connect CLI 使用指南（通用部分）
 
-> 适用版本：apexnova-connect v0.5.2 + main 分支未发布改动
-> 标了「未发布」的功能只在源码构建里有，一行安装脚本装到的 v0.5.2 还没有
+> 适用版本：apexnova-connect v0.6.0
 > 平台：Windows、Linux。**macOS 不在支持范围内**——Keychain 后端有实现但从未在真实 macOS 上验收过，按 [ADR 0024](decisions/0024-narrow-platform-claims.md) 不再声称支持
 
 本文是所有 Agent 共用的部分：安装、登录、Hub 地址、Key 模式、通用命令、环境变量和安全说明。**某个 Agent 特有的配置字段、限制和恢复方式在各自的指南里**：
@@ -69,7 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/s
 irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
 ```
 
-钉定版本：`APEXNOVA_VERSION=v0.5.2`。其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
+钉定版本：`APEXNOVA_VERSION=v0.6.0`。其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
 
 脚本按顺序做六件事，任何一件失败都会停下并说明原因：
 
@@ -147,7 +146,7 @@ apexnova run <agent> -- <args>  # -- 之后的参数透传给 Agent
 
 ## 凭证存在哪（仅 Linux 可选）
 
-> **未发布**：文件后端及其成为 Linux 默认，都是 v0.5.2 之后的改动，目前只在源码构建里生效。用一行安装脚本装到的 v0.5.2 仍然强制要求 keyring。
+> 自 v0.6.0 起。v0.5.2 及更早版本在 Linux 上强制要求 keyring。
 
 Linux 上**默认就绪，不用做任何事**：token、runtime 凭据和 key 引用写进 `~/.local/share/apexnova-connect/credentials.json`，目录 0700、文件 0600。不需要 `secret-tool`、不需要 D-Bus、不需要 sudo。Windows 默认用 Credential Manager，同样不用准备。
 

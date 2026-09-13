@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 钉定某个 release：
 
 ```bash
-APEXNOVA_VERSION=v0.5.2 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+APEXNOVA_VERSION=v0.6.0 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 ```
 
 可用环境变量覆盖默认行为：`APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
@@ -75,7 +75,7 @@ apexnova init --credential-store system
 apexnova login                                          # 两个后端不共享已存凭证
 ```
 
-切换只发生在你明说的时候：选了 `system` 而 keyring 不应答，命令会报 `BACKEND_UNAVAILABLE` 停下，不会把秘密改写到文件里。（文件后端及其成为 Linux 默认是 v0.5.2 之后的改动，目前只在源码构建里生效。）
+切换只发生在你明说的时候：选了 `system` 而 keyring 不应答，命令会报 `BACKEND_UNAVAILABLE` 停下，不会把秘密改写到文件里。（文件后端自 v0.6.0 起成为 Linux 默认；v0.5.2 及更早版本强制要求 keyring。）
 
 > 注：从源码构建请见下方「开发状态」一节。
 

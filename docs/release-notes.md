@@ -2,6 +2,42 @@
 
 按版本倒序。每条写明**包含什么**与**不包含什么**——后者同样是发布的一部分。
 
+## v0.6.0 — 2026-09-13
+
+**Linux 不再需要 keyring。** 凭证默认存进一个 0600 文件，装完 CLI 直接 `login` 即可——不需要 `libsecret-tools`、不需要 D-Bus、不需要 sudo。初始化流程从五步降到三步：装 → login → run。
+
+### 为什么改
+
+旧默认要求 Secret Service：装 `secret-tool`，并有 keyring daemon 挂在 D-Bus 上。桌面发行版满足，而本 CLI 真正在跑的地方——容器、CI runner、headless SSH、WSL——**四类里没有一类默认满足**。于是「默认」在多数机器上的实际形态是五条命令、两条 sudo，而且失败发生在**用户已经批准设备授权之后**。坚持它换来的保护是 0：那些机器上根本没有 keyring 可以保护任何东西。判定与取舍见 [ADR 0035](decisions/0035-explicit-file-credential-backend.md)、[ADR 0036](decisions/0036-file-backend-becomes-the-linux-default.md)。
+
+### 新增
+
+- **凭证文件后端**（0700 目录 + 0600 文件）。Linux 默认；Windows 仍是 Credential Manager，它在每个会话里都在、已验收过，拿它换便利是纯亏；
+- **`apexnova init --credential-store system|file`** 与 **`APEXNOVA_CREDENTIAL_STORE`**（环境变量优先级更高），两个方向都能切；
+- **`doctor` 新增 `credential-protection` 检查**：用文件后端时固定输出一条警告，并说明怎么切回 `system`。
+
+### 必须说清楚的代价
+
+**这个文件只靠文件权限保护秘密**，没有操作系统加密在背后。headless 机器上没有可派生密钥的操作系统秘密，任何"加密"都得把密钥放在密文旁边——那是混淆，不是保护，所以这里不提供那个假象。三条配套边界：权限被放宽（如 0644）时**拒绝读取**并要求吊销，而不是 `chmod` 修好把暴露事件藏起来；文件解析失败时**不重写**；写入走同目录临时文件 + rename，并用锁文件挡住另一个进程的并发读—改—写。
+
+### 没有改变的规则
+
+**默认不是回退。** 点名了 `system` 而 keyring 不应答时，命令照样报 `BACKEND_UNAVAILABLE` 并停下，绝不改写到文件。秘密在两个后端之间悄悄搬家，会让一台机器一半凭证在这边、一半在那边，而用户对此一无所知。
+
+### 修复
+
+- **非 `--json` 模式下命令的 warnings 被整个丢弃**，只打印结果。环境变量覆盖了刚写的配置文件、凭证后端没有操作系统保护——这类提醒此前只有 `--json` 消费者看得到。现在它们打到 stderr（`Warning: ...`），stdout 只留结果，管道不受影响。
+
+### 升级影响
+
+**Linux 用户从 v0.5.2 升上来会表现为「没登录」**：旧凭证在 keyring 里，新默认读文件。重新 `apexnova login` 即可，或 `apexnova init --credential-store system` 继续用 keyring。**不做自动迁移**——迁移要么把秘密复制到保护更弱的地方而没问过用户，要么按探测决定用哪个后端（回到「一半一半」）。要做也该是显式的命令，不是一次静默的读写。
+
+### 不包含
+
+- **不自动安装 Agent**：`run` 找不到可执行文件仍返回 `AGENT_NOT_FOUND`，OpenCode / Codex / Claude Code / Hermes 要自己装；
+- **安装脚本不碰系统包**：不 `sudo apt-get`，不起 keyring daemon；
+- **Gateway 仍默认关闭**，最后一条门槛还是一次真实的长交互会话。
+
 ## v0.5.2 — 2026-09-13
 
 **四个 Agent Integration 全部升为 `stable`**，M5 的「三个首批 Integration 达到 stable」退出条件因此满足。判定标准见 [ADR 0023](decisions/0023-integration-status-ladder.md)：两条可机检、三条人工逐条判定。
