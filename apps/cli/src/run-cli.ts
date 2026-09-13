@@ -957,7 +957,13 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
       warnings: [] as readonly string[],
       human: backups.length === 0
         ? "No restorable transactions."
-        : backups.map((item) => `${item.transactionId}  ${item.integrationId}  ${item.state}  ${item.appliedAt}${item.restorable ? "  restorable" : ""}`).join("\n"),
+        // The target path is on the line because restoring a transaction that
+        // was applied with `--config` needs that same `--config`, and an id
+        // alone does not say which.
+        : backups.map((item) => [
+            `${item.transactionId}  ${item.integrationId}  ${item.state}  ${item.appliedAt}${item.restorable ? "  restorable" : ""}`,
+            ...item.targetPaths.map((path) => `    ${path}`),
+          ].join("\n")).join("\n"),
     };
   }
   const summary = backups.find((item) => item.transactionId === transactionId);

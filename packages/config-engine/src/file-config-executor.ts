@@ -93,6 +93,16 @@ export interface FileBackupSummary {
    * whose recorded file state still matches the disk.
    */
   readonly restorable: boolean;
+  /**
+   * The files this transaction wrote.
+   *
+   * Listed because a transaction applied with `--config` can only be restored
+   * with the same `--config`: the path has to be inside the allowed roots, and
+   * a listing that showed only an id left the operator guessing. Observed for
+   * real -- a restore failed with PATH_OUTSIDE_ALLOWED_ROOT and the only way to
+   * learn which path it wanted was to open the receipt by hand.
+   */
+  readonly targetPaths: readonly string[];
 }
 
 interface FileTransaction {
@@ -808,6 +818,7 @@ export class FileConfigExecutor implements ChangeExecutor {
         state: transaction.state,
         operationCount: transaction.entries.length,
         restorable,
+        targetPaths: [...new Set(transaction.entries.map((entry) => entry.targetPath))],
       };
     });
   }

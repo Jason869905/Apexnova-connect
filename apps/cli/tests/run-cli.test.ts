@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { SecretValue } from "@apexnova-connect/credential-store";
 import type { CredentialStore } from "@apexnova-connect/credential-store";
-import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { EXIT_CODES, RuntimeBindingStore, runCli, type CliIo, type HubCommandService } from "../src/index.js";
 import { HubClientError } from "@apexnova-connect/hub-client";
@@ -1248,6 +1248,41 @@ describe("CLI", () => {
     expect(result.exitCode).toBe(EXIT_CODES.success);
     expect(JSON.parse(capture.stdout()).data.backups).toEqual([]);
     await expect(access(join(root, "Apexnova", "connect"))).rejects.toBeDefined();
+  });
+
+  it("names the file each transaction wrote, because restoring it needs that path", async () => {
+    // A transaction applied with `--config` can only be restored with the same
+    // `--config`: the target has to fall inside the allowed roots. Observed for
+    // real while clearing this machine -- a restore failed with
+    // PATH_OUTSIDE_ALLOWED_ROOT and the only way to learn which path it wanted
+    // was to open the receipt by hand. An id alone does not say.
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-restore-paths-"));
+    const configPath = join(root, "elsewhere", "opencode.jsonc");
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, "{}\n", "utf8");
+    const state = await isolatedState();
+    const credentials = memoryCredentials();
+    const deps = {
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub(),
+      ...state,
+      cwd: root,
+    };
+
+    const connected = await runCli(
+      ["connect", "opencode", "--config", configPath, "--deployment", "deployment.nova", "--yes"],
+      { io: captureIo().io, ...deps, createRequestId: () => "local_paths_connect" },
+    );
+    expect(connected.exitCode).toBe(EXIT_CODES.success);
+
+    const capture = captureIo();
+    const listed = await runCli(["restore", "--list"], {
+      io: capture.io, ...deps, createRequestId: () => "local_paths_list",
+    });
+
+    expect(listed.exitCode).toBe(EXIT_CODES.success);
+    expect(capture.stdout()).toContain(configPath);
   });
 
   it("loads legacy runtime bindings and upgrades them without inventing a restore target", async () => {
