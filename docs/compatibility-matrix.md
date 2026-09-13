@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-- Generated: 2026-09-13T08:37:04.552Z
+- Generated: 2026-09-13T08:47:30.486Z
 - Test suite: `apexnova.capability-suite` 0.4.0
 - Source: Apexnova-verified test runs. A provider claim is shown as claimed and never counted as verified.
 

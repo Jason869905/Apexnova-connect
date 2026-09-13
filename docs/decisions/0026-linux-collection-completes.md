@@ -56,6 +56,13 @@
 
 两个 Integration 现在机检无缺口，但**这不等于 `stable`**：[ADR 0023](0023-integration-status-ladder.md) 的第 2、3、5 条机器看不见，而 [ADR 0020](0020-gateway-batch-closure.md) 记着 `claude-code` 从未经 Gateway 实跑。升档仍需人的判定，本记录不做。
 
-## 5. 本批证据尚未发布
+## 5. 本批证据已发布（2026-09-13）
 
-自 2026-09-12 起采集的全部证据（`hermes` 8 条、`opencode` 4 条、`codex` 4 条）**都还在本地存储，未 `compatibility sync` 到 Hub**。发布是公开且永久的，留待明确决定。
+自 2026-09-12 起采集的 16 条（`hermes` 8、`opencode` 4、`codex` 4）连同存量记录**已 `sync` 到 Hub：提交 44 条、失败 0 条**，套件 `0.4.0` 已登记。
+
+两件要写明：
+
+- **12 条历史记录 Hub 拒收**，因为它们用的是 id 形式约定之前的 `evidence.<32hex>`（`400 evidence_legacy_id`）。记录不可变，所以**只能留在本地**；要发布得重采那些 subject；
+- **四条被取代的记录在发布后立即撤销。** `sync` 不能按 id 过滤，所以 `hermes × openai-chat` 那四个 subject 的 `0.3.0` 与 `0.4.0` 两批都上传了，随后撤销了 `0.3.0` 那四条并附理由。撤销不是删除：记录仍可按 id 读取，只是不再支持任何判定——那四次运行确实发生过，不该被抹掉，该被抹掉的只是它们对判定的支持力。
+
+明细见 [Hub 联调清单](../hub-h1-integration-checklist.md)。

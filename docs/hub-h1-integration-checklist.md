@@ -467,3 +467,26 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 **`agent.structured-output` 的三协议横比见 [Hub 需求 12K](apexnova-ai-hub-requirements.md)**：没有一个 Deployment 在三个协议上给出相同答案，且 `openai-responses` 上四个全部失败。
 
 本批与 2026-09-12 的全部证据**尚未 `compatibility sync` 到 Hub**。
+
+## 2026-09-13 证据发布到 Hub
+
+`apexnova compatibility sync --yes`。发布是公开且永久的：接受后的证据**可被取代或撤销，不能编辑或删除**。
+
+- **提交 44 条，失败 0 条**。其中本轮新采的 16 条（`hermes` 8、`opencode` 4、`codex` 4）首次发布，其余为 M3／M4 已在 Hub 的记录，重复提交是幂等的（`existing, supports the current verdict, fingerprint match`）；
+- **12 条被跳过**：它们是 id 形式约定之前写的（`evidence.<32hex>`），Hub 以 `400 evidence_legacy_id` 拒收。这些记录不可变，因此**只能留在本地**，要发布须重采对应 subject；
+- 能力套件 `0.4.0` 已在 Hub 登记（`already registered`）。
+
+### 撤销四条被取代的记录
+
+`hermes × openai-chat` 的四个 subject 在存储里各有两条：升版前由套件 `0.3.0` 采集的一条，升版后由 `0.4.0` 重采的一条（原因见 [ADR 0025](decisions/0025-capability-suite-covers-chat-completions.md) 第 3 节）。`sync` 没有按 id 过滤的能力，两批都会上传，于是四条 `0.3.0` 记录在发布后立即撤销：
+
+| 撤销的记录 | Deployment |
+| --- | --- |
+| `ev.sha256.e500ddcd…` | `…cmq4770nr…` |
+| `ev.sha256.a1227b31…` | `…cmqr4cngr…` |
+| `ev.sha256.431028921d70…` | `…cmt0bub5d…` |
+| `ev.sha256.f781596f…` | `…cmtdear4g…` |
+
+理由（随记录公开留存）：*Superseded: collected by capability suite 0.3.0, whose published identity does not cover openai-chat-completions. Re-collected identically under 0.4.0, which does.*
+
+撤销**不是删除**：记录仍可按 id 读取，只是不再支持任何判定，并从此带着这条理由。这正是它该有的处置——那四次运行确实发生过，不该被抹掉；被抹掉的只是它们对判定的支持力。
