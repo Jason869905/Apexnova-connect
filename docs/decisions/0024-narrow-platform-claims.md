@@ -51,7 +51,7 @@ macOS 自 M2 挂账至今（[路线图](../roadmap.md) M2 唯一未满足的退�
 
 ## 4. 本机环境限制，如实记
 
-- `codex` 与 `opencode` 在本机 PATH 上解析到的都是 **Windows 安装**（`/mnt/c/Users/…/AppData/Roaming/npm/`），Linux 侧没有安装。`codex` 那份 Windows 安装本身已经报错。**不用它们采集 Linux 证据**——那会把一份 Windows 安装记成 `linux-x64` 的结论，正是 M4 那次 launcher 静默错配的同一个坑；
+- `codex` 与 `opencode` 在本机 PATH 上解析到的都是 **Windows 安装**（`/mnt/c/Users/…/AppData/Roaming/npm/`），~~Linux 侧没有安装~~。`codex` 那份 Windows 安装本身已经报错。**更正（2026-09-13，[ADR 0026](0026-linux-collection-completes.md) 第 1 节）**：Linux 侧其实早已装好，`~/.npm-global/bin` 里三个客户端都在——当时看到 `/mnt/c` 是因为非交互 shell 没有走到 `.bashrc` 里那段 PATH 设置。对现象的描述是准的，对原因的判断是错的。**不用它们采集 Linux 证据**——那会把一份 Windows 安装记成 `linux-x64` 的结论，正是 M4 那次 launcher 静默错配的同一个坑；
 - Windows 的两个缺口需要一个 Windows 会话，本机是 WSL2。
 
 ## 5. 现状

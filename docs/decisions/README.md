@@ -31,3 +31,4 @@
 - [ADR 0023：Integration 状态阶梯的判定标准](0023-integration-status-ladder.md)
 - [ADR 0024：收窄平台声明，不再声称支持 macOS](0024-narrow-platform-claims.md)
 - [ADR 0025：能力套件扩到 `openai-chat-completions`（套件 0.4.0）](0025-capability-suite-covers-chat-completions.md)
+- [ADR 0026：Linux 两格补齐，只剩 Windows](0026-linux-collection-completes.md)

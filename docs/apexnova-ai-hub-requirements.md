@@ -958,6 +958,27 @@ Connect 这侧的处置（不等 Hub）：`recommend` **不提供** `--region`�
 
 Connect 这侧的处置（不等 Hub）：发布方那一半已实现；运营方那一半在 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 里如实记为「依赖 Hub」，不会用不可逆指纹去区分运营方——指纹只保证「实现变了」，不承载身份，拿它当身份用会得到一个看起来精确的错误答案。
 
+## 12K. `openai-responses` 的 `text.format.json_schema` 似乎没有被转发（2026-09-13，首次三协议横比时发现）
+
+**观察，不是诊断。** 2026-09-13 能力套件扩到第三个协议（[ADR 0025](decisions/0025-capability-suite-covers-chat-completions.md)）之后，`agent.structured-output` 第一次可以在同一批 Deployment 上做三协议横比。结果如下（四个 Deployment，`yes` 表示按请求的 schema 作答）：
+
+| Deployment | `anthropic-messages` | `openai-chat` | `openai-responses` |
+| --- | --- | --- | --- |
+| `…cmq4770nr…`（GLM-5.1） | yes | no | **no** |
+| `…cmqr4cngr…`（GLM-5.2） | yes | no | **no** |
+| `…cmt0bub5d…`（DeepSeek-V4-Pro-0813） | yes | yes | **no** |
+| `…cmtdear4g…` | no | yes | **no** |
+
+**三件事值得 Hub 看一眼：**
+
+1. **`openai-responses` 这一列四个全 `no`**，包括在另外两个协议上都能按 schema 作答的 `…cmt0bub5d…`。套件在该协议上发的是 `text: { format: { type: "json_schema", strict: true, schema } }`，响应是 HTTP 200 但正文是散文，不是 JSON。**同一个模型在 `openai-chat` 的 `response_format` 下能照做，在 `openai-responses` 的 `text.format` 下不照做**，这更像参数在转发途中被丢掉，而不是模型能力差异。请求 id 都在证据记录里，可按 id 回溯；
+
+2. **另两列互不相同，而且方向相反。** GLM 系在 `anthropic-messages` 上 yes、`openai-chat` 上 no；`…cmtdear4g…` 恰好相反。这一条不是问题，是提醒：**结构化输出不是 Deployment 的属性，是（Deployment × 协议）的属性。** Hub 目录若要发布该能力，按部署给一个布尔值会是错的；
+
+3. `…cmtdear4g…` 的 `agent.forced-tool-choice` 在三个协议上都因 `tool_choice` 不接受 `required`／对象形式而失败（上游返回 `litellm.BadRequestError`）。这一条跨协议一致，属于部署侧限制，已如实记入证据，不需要 Hub 处理——列在这里只是为了说明第 1 条的异常**不是**这种一致模式。
+
+Connect 这侧不做处置：证据如实记录 `unsupported` 并带上游原文，`recommend` 据此排序。若 Hub 确认是转发丢参并修复，重跑采集即可，无需改 Connect。
+
 ## 13. 非功能要求
 
 - 上游密钥进入现有加密 Credential/secret 管理链路，绝不进入公共目录；

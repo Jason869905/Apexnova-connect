@@ -452,3 +452,18 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 **一个只有测了第二个协议才看得见的发现**：GLM-5.1 与 GLM-5.2 的 `agent.structured-output` 在 `anthropic-messages` 上是 supported（该路径是强制工具，它们支持），在 `openai-chat-completions` 上是 unsupported（`response_format: json_schema` 它们不照做）。**同一部署、同一 capability、两个协议、两个结论。** 只测一个协议会给出一个看起来完整、实际只对一半的答案。
 
 四条结论在套件 0.3.0 与 0.4.0 下逐项一致（升版后重采，原因见 ADR 0025 第 3 节）。这批证据**尚未 `compatibility sync` 到 Hub**。
+
+## 2026-09-13 OpenCode 与 Codex 的 Linux 采集
+
+[ADR 0026](decisions/0026-linux-collection-completes.md)。两个客户端在本机 `~/.npm-global/bin` 早已装好；此前 `detect` 看到 `/mnt/c` 下的 Windows 安装，是非交互 shell 未走到 `.bashrc` 的 PATH 段所致。补 PATH 后 `detect` 给出 `/home/wanke/.config/opencode/opencode.jsonc` 与 `/home/wanke/.codex/config.toml`，确认是 Linux 安装后再采集。
+
+| 目标 | 四个 Deployment 的结论 |
+| --- | --- |
+| `opencode` linux-x64 / `openai-chat` | `partial` ×3、`compatible` ×1 |
+| `codex` linux-x64 / `openai-responses` | `partial` ×4 |
+
+`opencode` 的四条与同日 `hermes` 在相同 Deployment、相同协议上的结论**逐项一致**——套件测的是（Deployment × 协议），两个 Agent 得到同一组结论是对确定性的交叉印证。
+
+**`agent.structured-output` 的三协议横比见 [Hub 需求 12K](apexnova-ai-hub-requirements.md)**：没有一个 Deployment 在三个协议上给出相同答案，且 `openai-responses` 上四个全部失败。
+
+本批与 2026-09-12 的全部证据**尚未 `compatibility sync` 到 Hub**。
