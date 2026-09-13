@@ -1,10 +1,10 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { detectOpenCode, inspectOpenCode, openCodeIntegration } from "../src/index.js";
+import { createOpenCodeIntegration, detectOpenCode, inspectOpenCode, openCodeIntegration } from "../src/index.js";
 
 const testRoots: string[] = [];
 
@@ -232,10 +232,19 @@ describe("OpenCode inspection", () => {
 });
 
 describe("planLaunch and the configuration it was given", () => {
+  // Paths are built with the host's own `path`, never written with a literal
+  // separator. CI caught the difference: a Windows runner resolved the
+  // hardcoded `/somewhere/config.yaml` to `D:\\somewhere\\config.yaml`, because
+  // `configPath` names a file on the machine Connect is running on and is
+  // resolved with the host's semantics -- which is correct, and what the test
+  // had assumed away.
+  const configDir = resolve(tmpdir(), "apexnova-launch-fixture", "opencode");
+  const configFile = join(configDir, "opencode.jsonc");
+
   const context = (configPath?: string) => ({
     platform: "linux" as const,
-    workingDirectory: "/tmp",
-    homeDirectory: "/home/someone",
+    workingDirectory: tmpdir(),
+    homeDirectory: tmpdir(),
     environment: {} as Record<string, string | undefined>,
     ...(configPath === undefined ? {} : { configPath }),
   });
@@ -246,12 +255,10 @@ describe("planLaunch and the configuration it was given", () => {
     // mechanism the product documents. `XDG_CONFIG_HOME` works, and this
     // integration's own discovery already searched that shape.
     const plan = await openCodeIntegration.planLaunch({
-      context: context("/somewhere/opencode/opencode.jsonc"),
-      credentialEnvironment: {},
-      args: [],
+      context: context(configFile), credentialEnvironment: {}, args: [],
     });
 
-    expect(plan.environment.XDG_CONFIG_HOME).toBe("/somewhere");
+    expect(plan.environment.XDG_CONFIG_HOME).toBe(dirname(configDir));
   });
 
   it("refuses a path XDG_CONFIG_HOME cannot express", async () => {
@@ -259,7 +266,7 @@ describe("planLaunch and the configuration it was given", () => {
     // looks for can be reached. Launching anyway would start it on its own
     // configuration while Connect had written ours somewhere else.
     await expect(openCodeIntegration.planLaunch({
-      context: context("/somewhere/else/my-config.jsonc"),
+      context: context(join(tmpdir(), "elsewhere", "my-config.jsonc")),
       credentialEnvironment: {},
       args: [],
     })).rejects.toMatchObject({ code: "LAUNCH_CONFIG_UNREACHABLE" });

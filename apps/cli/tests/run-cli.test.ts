@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { SecretValue } from "@apexnova-connect/credential-store";
 import type { CredentialStore } from "@apexnova-connect/credential-store";
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -1256,7 +1256,11 @@ describe("CLI", () => {
     // real while clearing this machine -- a restore failed with
     // PATH_OUTSIDE_ALLOWED_ROOT and the only way to learn which path it wanted
     // was to open the receipt by hand. An id alone does not say.
-    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-restore-paths-"));
+    // `realpath` because Windows hands back the 8.3 short form here
+    // (`C:\Users\RUNNER~1\...`) while the CLI prints the long one
+    // (`C:\Users\runneradmin\...`). Same file, two spellings, and comparing
+    // them as strings failed on CI while passing everywhere else.
+    const root = await realpath(await mkdtemp(join(tmpdir(), "apexnova-cli-restore-paths-")));
     const configPath = join(root, "elsewhere", "opencode.jsonc");
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, "{}\n", "utf8");

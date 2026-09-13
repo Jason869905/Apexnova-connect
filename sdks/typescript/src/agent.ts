@@ -152,6 +152,11 @@ export interface AgentIntegration
  */
 export function explicitConfigPath(context: IntegrationContext): string | undefined {
   if (!context.configPath) return undefined;
+  // Host-native on purpose. `configPath` is a path on the machine Connect is
+  // running on -- the file it is about to write, and the file the Agent it
+  // launches will read -- so the host's separator is the right one even when
+  // `context.platform` says otherwise. The platform matters for parsing PATH,
+  // not for this.
   return isAbsolute(context.configPath)
     ? resolve(context.configPath)
     : resolve(context.workingDirectory, context.configPath);

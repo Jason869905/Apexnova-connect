@@ -1,6 +1,6 @@
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -227,10 +227,16 @@ describe("planHermesConfig", () => {
 });
 
 describe("planLaunch and the configuration it was given", () => {
+  // Built with the host's own `path`. A literal `/somewhere` resolved to
+  // `D:\\somewhere` on the Windows runner, because `configPath` names a file on
+  // the machine Connect runs on and is resolved with the host's semantics.
+  const configDir = resolve(tmpdir(), "apexnova-hermes-fixture");
+  const configFile = join(configDir, "config.yaml");
+
   const context = (configPath?: string) => ({
     platform: "linux" as const,
-    workingDirectory: "/tmp",
-    homeDirectory: "/home/someone",
+    workingDirectory: tmpdir(),
+    homeDirectory: tmpdir(),
     environment: {} as Record<string, string | undefined>,
     ...(configPath === undefined ? {} : { configPath }),
   });
@@ -241,17 +247,15 @@ describe("planLaunch and the configuration it was given", () => {
     // along -- an invented variable name was probed instead of the documented
     // one. `hermes config path` follows HERMES_HOME.
     const plan = await hermesIntegration.planLaunch({
-      context: context("/somewhere/config.yaml"),
-      credentialEnvironment: {},
-      args: [],
+      context: context(configFile), credentialEnvironment: {}, args: [],
     });
 
-    expect(plan.environment.HERMES_HOME).toBe("/somewhere");
+    expect(plan.environment.HERMES_HOME).toBe(configDir);
   });
 
   it("refuses a file name HERMES_HOME cannot express", async () => {
     await expect(hermesIntegration.planLaunch({
-      context: context("/somewhere/other.yaml"),
+      context: context(join(configDir, "other.yaml")),
       credentialEnvironment: {},
       args: [],
     })).rejects.toMatchObject({ code: "LAUNCH_CONFIG_UNREACHABLE" });
