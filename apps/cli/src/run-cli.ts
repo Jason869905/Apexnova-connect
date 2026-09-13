@@ -2839,7 +2839,7 @@ async function executeAgents(parsed: ParsedArguments, dependencies: CliDependenc
 async function executeDetect(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
-): Promise<{ readonly data: unknown; readonly warnings: readonly string[]; readonly human: string }> {
+): Promise<{ readonly data: unknown; readonly warnings: readonly string[]; readonly human: string; readonly humanIncludesWarnings: true }> {
   const requestedAgent = agentOperand(parsed, dependencies, { optional: true, command: "detect" });
   // Without the platform filter, an Agent whose manifest excludes this platform
   // (Hermes has no Windows build) is probed anyway and reported as missing.
@@ -2877,6 +2877,11 @@ async function executeDetect(
   return {
     data: requestedAgent ? documents[0] : { agents: documents },
     warnings,
+    // Each warning is already printed under the agent it belongs to, which is
+    // the only place it reads correctly when several agents are detected at
+    // once. The generic stderr echo would repeat the whole list, detached from
+    // the agent that raised it.
+    humanIncludesWarnings: true,
     human,
   };
 }

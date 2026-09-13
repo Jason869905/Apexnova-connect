@@ -192,6 +192,24 @@ describe("CLI", () => {
     expect(capture.stderr()).toBe("");
   });
 
+  it("prints a detect warning once, under the agent that raised it", async () => {
+    const capture = captureIo();
+    const warning = "The OpenCode on PATH is a Windows installation (/mnt/c/npm/opencode).";
+    const result = await runCli(["detect", "opencode"], {
+      io: capture.io,
+      registry: registryWith({ detect: async () => ({ ...installed, warnings: [warning] }) }),
+      createRequestId: () => "local_warned",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const stdout = capture.stdout();
+    expect(stdout).toContain(`Warning: ${warning}`);
+    expect(stdout.split(warning).length - 1).toBe(1);
+    // The generic human-mode echo would repeat the whole list on stderr,
+    // detached from the agent each warning belongs to.
+    expect(capture.stderr()).toBe("");
+  });
+
   it("prints a bound credential for an agent helper with nothing else on stdout", async () => {
     const capture = captureIo();
     const credentials = memoryCredentials();
