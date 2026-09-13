@@ -528,3 +528,17 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 - `restore` 后 6188 字节的真实 `config.yaml` 与运行前 **逐字节一致**（`diff` 确认）。
 
 据此 **Hermes 升为 `stable`，是本项目第一个**。`claude-code` 不升：它声称 Windows 与 Linux，而 **Windows 的 launcher 至今未验证**（本清单第 319 行仍记为 `[partial]`）。
+
+## 2026-09-13 Windows 原生验证（[ADR 0032](decisions/0032-windows-verification.md)）
+
+宿主就是 Windows，把 `pnpm bundle` 的单文件 `apexnova.mjs` 拷过去用 Windows 自己的 Node 跑——**CLI 本身跑在 Windows 上**，而不是从 WSL 驱动 Windows 的 Agent（后者正是 M4 那次错配的形状）。核对确认 `credential-backend: Windows Credential Manager`、`state-root: C:\Users\wakee\AppData\Local\Apexnova\connect`。凭据管理器里已有会话，未重新登录。
+
+| 缺口 | 结果 |
+| --- | --- |
+| `claude-code` Windows launcher | **`[passed]`**：`attributedRequests: 1`，退出 0，5958 字节真实 `settings.json` restore 后逐字节一致 |
+| `opencode` `windows/openai-chat` 证据 | **已采集** `ev.sha256.7bb5b896…`，八项 supported，与 Linux 同部署逐项一致 |
+| `codex` `windows/openai-responses` 证据 | **已采集** `ev.sha256.f303cac4…`，`partial`，与 Linux 一致 |
+
+**`claude-code` 的 Windows 记录不能直接用于升档**：这台机器上有两份 Claude Code，`detect` 报 npm shim 的 2.1.233，而启动器只认 `claude.exe`、跑的是原生安装的 2.1.201。**检测与启动不是同一份安装**，记录会写下错误的版本。详见 ADR 0032 第 3 节。
+
+另记三条：npm 版 Claude Code 在 Windows 上无法被启动（没有 `.exe`，而拒绝消息没说该怎么办）；从 `C:\` 驱动器根运行会被判为非绝对路径；**证据无法跨平台流动**——CLI 只推不拉，本次两份 Windows 证据是手工复制进 Linux 库的。

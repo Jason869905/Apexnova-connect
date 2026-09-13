@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-- Generated: 2026-09-13T08:47:30.486Z
+- Generated: 2026-09-13T12:32:55.816Z
 - Test suite: `apexnova.capability-suite` 0.4.0
 - Source: Apexnova-verified test runs. A provider claim is shown as claimed and never counted as verified.
 
@@ -23,6 +23,7 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 | claude-code | 2.1.261 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | `partial` | 2026-09-09T17:58:30.557Z |
 | claude-code | 2.1.233 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | windows-x64 | `partial` | 2026-09-09T20:37:56.731Z |
 | codex | 0.153.4 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | linux-x64 | `partial` | 2026-09-13T08:34:57.173Z |
+| codex | 0.147.0 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | windows-x64 | `partial` | 2026-09-13T12:32:18.420Z |
 | codex | 0.153.4 | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | openai-responses | linux-x64 | `partial` | 2026-09-13T08:35:57.608Z |
 | codex | 0.153.4 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | openai-responses | linux-x64 | `partial` | 2026-09-13T08:36:11.047Z |
 | codex | 0.153.4 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-responses | linux-x64 | `partial` | 2026-09-13T08:36:50.440Z |
@@ -35,6 +36,7 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 | hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | `partial` | 2026-09-12T12:23:38.872Z |
 | hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-chat | linux-x64 | `partial` | 2026-09-12T12:41:02.879Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-chat | linux-x64 | `partial` | 2026-09-13T08:32:25.376Z |
+| opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-chat | windows-x64 | `partial` | 2026-09-13T12:31:14.845Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` | openai-responses | linux-x64 | `partial` | 2026-09-08T18:10:48.262Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | linux-x64 | `partial` | 2026-09-09T17:56:06.863Z |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | windows-x64 | `partial` | 2026-09-09T20:34:54.153Z |
@@ -68,6 +70,7 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 | claude-code | 2.1.261 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | yes | yes | yes | yes | yes | yes | yes | no | no |
 | claude-code | 2.1.233 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | windows-x64 | yes | yes | yes | yes | yes | yes | yes | no | no |
 | codex | 0.153.4 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
+| codex | 0.147.0 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | windows-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | codex | 0.153.4 | `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`) | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | codex | 0.153.4 | `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`) | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | codex | 0.153.4 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | no | no |
@@ -80,6 +83,7 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 | hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | anthropic-messages | linux-x64 | yes | yes | yes | yes | yes | yes | yes | no | no |
 | hermes | 0.21.0 | `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`) | openai-chat | linux-x64 | yes | yes | yes | yes | yes | yes | yes | no | yes |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-chat | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
+| opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-chat | windows-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | untested | no |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | linux-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | opencode | 1.18.29 | `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`) | openai-responses | windows-x64 | yes | yes | yes | yes | yes | yes | yes | yes | no |
@@ -111,6 +115,7 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 - claude-code 2.1.261, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), anthropic-messages, linux-x64, integration claude-code 0.1.0: `ev.sha256.0334c12be4a6133a5a8c3ce72b9b85534f5b7917d96f3726d7fe2a44036ea6ce`
 - claude-code 2.1.233, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), anthropic-messages, windows-x64, integration claude-code 0.1.0: `ev.sha256.544f46d44c864724966afff05265d1765770d34e48e8c909c1bb5b5e9f9f7164`
 - codex 0.153.4, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-responses, linux-x64, integration codex 0.1.0: `ev.sha256.8eb174c0c45b3e5abc1de0a0cef3196c97b07100b29a64337cf11a4cf20577be`
+- codex 0.147.0, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-responses, windows-x64, integration codex 0.1.0: `ev.sha256.f303cac45c593f744d79e7ef189055dc0d279c756013e4cb5c25bbfe5c204f65`
 - codex 0.153.4, `deployment.apexnova.cmqr4cngr000dn1q69bbrl1vw` (impl `29870b6039ab`), openai-responses, linux-x64, integration codex 0.1.0: `ev.sha256.682cc5f7c350905cf31e0a45fc7831a52e996d04bc05e43d6453cc1639bcc720`
 - codex 0.153.4, `deployment.apexnova.cmt0bub5d0042139w2xobpghn` (impl `052241dbad52`), openai-responses, linux-x64, integration codex 0.1.0: `ev.sha256.70f4bbd4c65392cc17a3952435be098aca727a83b3fc12651a232345032ff6c9`
 - codex 0.153.4, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), openai-responses, linux-x64, integration codex 0.1.0: `ev.sha256.41e502cff1349ac6f39157380f824190001a576111e312e5c6d3331457e90ffe`
@@ -123,6 +128,7 @@ Verdicts: `compatible` every required capability passed, `partial` a preferred c
 - hermes 0.21.0, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), anthropic-messages, linux-x64, integration hermes 0.1.0: `ev.sha256.6c11c42aa69fb50c5ff1f375525edd508b7a72663d75d7317499e22bbb617cdc`
 - hermes 0.21.0, `deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3` (impl `e27721ab47cf`), openai-chat, linux-x64, integration hermes 0.1.0: `ev.sha256.b24ff1f4cd1340d6c8198683bbc290147431f258fab8e249917edaa65c1539c4`
 - opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-chat, linux-x64, integration opencode 0.1.0: `ev.sha256.bcc8939481a6ef92f44cd46d6e5d80b80a21fe5468acd282be4df0fc6b9b6528`
+- opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-chat, windows-x64, integration opencode 0.1.0: `ev.sha256.7bb5b89637f6676e468cc7304993b2f3a515774c41191e40bd58fd6ecd72cc71`
 - opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a`, openai-responses, linux-x64, integration opencode 0.1.0: `evidence.3fa5e35537385cf736270de34394b1de`
 - opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-responses, linux-x64, integration opencode 0.1.0: `ev.sha256.f61ff31afd83aa75c091936cf295f73fee481f9a5e0b5bfe6c34367b64831634`
 - opencode 1.18.29, `deployment.apexnova.cmq4770nr0000edzis38w378a` (impl `e639719dc23b`), openai-responses, windows-x64, integration opencode 0.1.0: `ev.sha256.ac0710a57d0b411b95a814fbed6d786d8b5f9e15b11f1e73dba39215419ff80f`

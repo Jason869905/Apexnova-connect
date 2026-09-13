@@ -86,17 +86,15 @@ function missingCriteria(manifest: Manifest, matrix: readonly MatrixRow[], docs:
  * which is the point -- the author then has to revisit the status too.
  */
 const EXPECTED_GAPS: Readonly<Record<string, readonly string[]>> = {
-  // macOS was dropped from every manifest rather than left as a claim nothing
-  // backs (ADR 0024); the suite grew `openai-chat-completions` (ADR 0025); the
-  // Linux rows were collected once both clients were installed natively rather
-  // than resolved through WSL to the Windows ones (ADR 0026).
+  // All four are mechanically clear as of 2026-09-13 (ADR 0032): macOS was
+  // withdrawn rather than claimed unbacked, the suite grew a third protocol,
+  // and the Windows rows were collected by running the CLI natively on Windows
+  // rather than through WSL.
   //
-  // What is left needs a Windows session. Nothing here can close it.
-  opencode: ["evidence:windows/openai-chat-completions"],
-  codex: ["evidence:windows/openai-responses"],
-  // Mechanically clear. Whether either is `stable` turns on the three criteria
-  // a machine cannot see -- and ADR 0020 records that Claude Code has never run
-  // through the gateway, which is criterion 2's business.
+  // Clear here is not `stable`. Three of ADR 0023's five criteria are human
+  // judgements, and only `hermes` has been through them (ADR 0031).
+  opencode: [],
+  codex: [],
   "claude-code": [],
   hermes: [],
 };
