@@ -417,8 +417,63 @@ describe("CLI", () => {
 
   it("reports when best-effort server logout does not complete", async () => {
     const capture = captureIo();
-    await runCli(["logout", "--json"], { io: capture.io, hubService: mockHub(), createRequestId: () => "local_logout" });
+    // Isolated state and an in-memory credential store. Without them this read
+    // the developer's own machine, and only passed while logout looked at
+    // nothing: the guard below made it fail on a box that happened to have a
+    // live binding. A test whose result depends on the developer's session is
+    // not testing the command.
+    await runCli(["logout", "--json"], {
+      io: capture.io,
+      hubService: mockHub(),
+      credentialStore: memoryCredentials(),
+      ...(await isolatedState()),
+      createRequestId: () => "local_logout",
+    });
     expect(JSON.parse(capture.stdout())).toMatchObject({ ok: true, data: { localSessionDeleted: true, serverRevoked: false } });
+  });
+
+  it("refuses to log out while a connection it could no longer undo is still in place", async () => {
+    // A restore asks Hub to reissue the connection it rolls back to, so once
+    // the session is gone the transaction can never be undone -- the Agent
+    // keeps a configuration pointing at Hub and there is no account left to
+    // manage it with. Walking the user into that and reporting success is the
+    // shape ADR 0019 section 4 named.
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "rtc_1",
+      secret: SecretValue.from("runtime-secret"),
+      expiresAt: "2099-09-05T12:00:00Z",
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+    });
+    const state = await isolatedState();
+    const logout = vi.fn(mockHub().logout);
+    const capture = captureIo();
+
+    const refused = await runCli(["logout"], {
+      io: capture.io,
+      hubService: mockHub({ logout }),
+      credentialStore: credentials,
+      ...state,
+      createRequestId: () => "local_logout_guard",
+    });
+
+    expect(refused.exitCode).toBe(EXIT_CODES.permission);
+    expect(capture.stderr()).toContain("OpenCode");
+    expect(capture.stderr()).toContain("--yes");
+    // Refused means refused: the session must still be there afterwards.
+    expect(logout).not.toHaveBeenCalled();
+
+    const approved = await runCli(["logout", "--yes"], {
+      io: captureIo().io,
+      hubService: mockHub({ logout }),
+      credentialStore: credentials,
+      ...state,
+      createRequestId: () => "local_logout_forced",
+    });
+
+    expect(approved.exitCode).toBe(EXIT_CODES.success);
+    expect(logout).toHaveBeenCalledTimes(1);
   });
 
   it("produces a sanitized connect dry-run without modifying configuration", async () => {

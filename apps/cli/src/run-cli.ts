@@ -229,7 +229,7 @@ const GLOBAL_OPTIONS: ReadonlySet<string> = new Set([
 const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   init: ["--hub-url", "--client-id", "--path-prefix"],
   login: [],
-  logout: [],
+  logout: ["--yes"],
   whoami: [],
   balance: [],
   agents: [],
@@ -771,6 +771,44 @@ async function executeLogin(parsed: ParsedArguments, dependencies: CliDependenci
 
 async function executeLogout(parsed: ParsedArguments, dependencies: CliDependencies) {
   noOperands(parsed);
+
+  // Logging out is the one command that can make a restore impossible. A
+  // restore asks Hub to reissue the connection it is rolling back to, so once
+  // the session is gone the transaction can never be undone: the Agent keeps a
+  // configuration pointing at Hub, and there is no longer an account to manage
+  // it with. Refusing is the same rule `run --gateway` and `restore --yes`
+  // ended up on -- a command must not walk the user into a state with no way
+  // out and report success.
+  if (!parsed.yes) {
+    const restorable = (await (await backupExecutor(parsed, dependencies)).listBackups())
+      .filter((item) => item.restorable);
+    const bindings = new RuntimeBindingStore(credentialStore(dependencies));
+    const connected: string[] = [];
+    for (const integration of integrationRegistry(dependencies).list()) {
+      const binding = await bindings.load(integration.manifest.id, parsed.profile).catch(() => null);
+      if (binding) connected.push(integration.manifest.displayName);
+    }
+    if (restorable.length > 0 || connected.length > 0) {
+      throw new CliError({
+        code: "APPROVAL_REQUIRED",
+        message: [
+          restorable.length > 0
+            ? `${restorable.length} transaction${restorable.length === 1 ? " is" : "s are"} still restorable (${restorable.map((item) => item.transactionId).join(", ")}); logging out makes ${restorable.length === 1 ? "it" : "them"} permanently unrestorable, because a restore needs this session to reissue the previous credential.`
+            : "",
+          connected.length > 0
+            ? `${connected.join(", ")} ${connected.length === 1 ? "is" : "are"} still configured to reach Apexnova AI Hub and will keep a credential this session can no longer revoke.`
+            : "",
+          'Run "apexnova restore <transaction>" first, or re-run logout with --yes to leave it as it is.',
+        ].filter((line) => line.length > 0).join(" "),
+        exitCode: EXIT_CODES.permission,
+        details: {
+          restorable: restorable.map((item) => ({ transactionId: item.transactionId, integrationId: item.integrationId })),
+          connected,
+        },
+      });
+    }
+  }
+
   const result = await hubService(parsed, dependencies).logout(parsed.profile);
   const warnings = result.serverRevoked ? [] : ["The local session was deleted, but server-side token revocation did not complete."];
   return { data: { profile: parsed.profile, localSessionDeleted: true, serverRevoked: result.serverRevoked }, warnings, human: `Logged out profile ${parsed.profile} locally.${result.serverRevoked ? "" : " Server revocation was not performed."}` };
@@ -857,10 +895,15 @@ async function executeModels(parsed: ParsedArguments, dependencies: CliDependenc
   return { data: catalogEnvelope, warnings, human };
 }
 
-async function executeRestore(parsed: ParsedArguments, dependencies: CliDependencies) {
-  if (parsed.operands.length > 1) {
-    throw new CliError({ code: "INVALID_ARGUMENT", message: "restore accepts at most one transaction ID.", exitCode: EXIT_CODES.usage });
-  }
+/**
+ * The executor that owns this profile's backups. One construction, because
+ * `logout` has to see the same transactions `restore` would act on -- a guard
+ * reading a different set would be worse than no guard.
+ */
+async function backupExecutor(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+): Promise<FileConfigExecutor> {
   const registry = integrationRegistry(dependencies);
   const context = integrationContext(parsed, dependencies);
   const backupRoot = join(localStateRoot(dependencies), "backups");
@@ -879,7 +922,15 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
       // An absent known root is not trusted merely because of its name.
     }
   }
-  const executor = new FileConfigExecutor({ allowedRoots, backupRoot });
+  return new FileConfigExecutor({ allowedRoots, backupRoot });
+}
+
+async function executeRestore(parsed: ParsedArguments, dependencies: CliDependencies) {
+  if (parsed.operands.length > 1) {
+    throw new CliError({ code: "INVALID_ARGUMENT", message: "restore accepts at most one transaction ID.", exitCode: EXIT_CODES.usage });
+  }
+  const registry = integrationRegistry(dependencies);
+  const executor = await backupExecutor(parsed, dependencies);
   const transactionId = parsed.operands[0];
   const backups = await executor.listBackups();
   if (transactionId === undefined && (parsed.yes || parsed.dryRun)) {

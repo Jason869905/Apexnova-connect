@@ -98,8 +98,11 @@ H1 staging contract test 通过前，开发版必须显式配置 Hub base URL �
 
 ```text
 apexnova logout
+apexnova logout --yes
 apexnova logout --all-devices
 ```
+
+**还有可恢复事务、或仍有 Agent 连着时，`logout` 拒绝执行**（`APPROVAL_REQUIRED`），并点名具体的事务 id 与 Agent。理由是它**不可逆**：`restore` 需要当前会话向 Hub 重新签发被回滚到的那枚凭据，会话一旦删除，那个事务就**永远无法恢复**——Agent 的配置停在指向 Hub 的状态，而账号已经不在手里。`--yes` 表示知情并照此登出。
 
 `--all-devices` 需要服务端支持和额外确认。
 
