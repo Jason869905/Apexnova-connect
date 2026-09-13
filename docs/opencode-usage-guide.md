@@ -1,6 +1,6 @@
 # OpenCode + Apexnova AI Hub 使用指南
 
-> 适用版本：apexnova-connect v0.5.1 · OpenCode ≥1.18.29 <2.0.0
+> 适用版本：apexnova-connect v0.5.2 · OpenCode ≥1.18.29 <2.0.0
 > 平台：Windows、Linux
 
 > [!NOTE]

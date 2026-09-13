@@ -2,6 +2,39 @@
 
 按版本倒序。每条写明**包含什么**与**不包含什么**——后者同样是发布的一部分。
 
+## v0.5.2 — 2026-09-13
+
+**四个 Agent Integration 全部升为 `stable`**，M5 的「三个首批 Integration 达到 stable」退出条件因此满足。判定标准见 [ADR 0023](decisions/0023-integration-status-ladder.md)：两条可机检、三条人工逐条判定。
+
+**四次判定揪出四件事，没有一件是测试发现的。**
+
+### 修复
+
+- **Windows 上报告的版本与实际运行的二进制不是同一个。** 三个 Windows 启动器都只接受 `<名字>.exe`（`.cmd` 无法以 `shell: false` 启动，本项目不用 shell），而共享探针**明确去跑 `.cmd`**。一台同时装有 npm 版与原生版 Claude Code 的机器上，检测报 2.1.233、启动的是 2.1.201。探针现在取 `where.exe` 结果里的 `.exe`。**一处修改，三个 Integration 同时受益。** 它能活这么久，是因为探针测试全部走注入桩，`defaultProbe` 的 Windows 分支一行未测；
+- **npm 安装的 Codex 在 Windows 上根本无法启动。** npm 只把 `codex.cmd` 放上 PATH，真正的二进制藏在平台子包里。解析器现在会找到它（`opencode` 的解析器一直认识自己的 npm 布局，`codex` 没有）。**用最常见方式安装 Codex 的 Windows 用户，此前 `run codex` 直接失败**；
+- **`claude-code` / `codex` 找不到 `.exe` 时的拒绝消息只说缺什么，没说怎么办。** 现在写明：装原生版，或把 `.exe` 所在目录排到 npm shim 之前。
+
+### 文档修正
+
+- **`opencode` 的 README 停在 M1**，写着「尚未通过 CLI 对用户配置开放」「manifest 继续保持 `planned`」，[新增 Integration 指南](adding-an-integration.md)第 7 节要求的小节一个都没有。已重写；
+- **`hermes` 的 README 声称一个它已不支持的协议**（`openai-responses`，M5 期间被证明不成立后已从 manifest 移除）；
+- **两份 README 的「已知限制」补进了几条一直知道却没写下来的事实**，其中最要紧的两条：**Hermes 在每个请求都被拒绝时仍以退出码 0 结束**（它自己吞掉错误）；**OpenCode 自带 provider，所以「配置没被读到」不会报错**——它照常作答、退出 0，而请求走了别人的账。
+
+### Integration 状态
+
+| Integration | 状态 |
+| --- | --- |
+| `opencode` | `experimental` → **`stable`** |
+| `codex` | `experimental` → **`stable`** |
+| `claude-code` | `experimental` → **`stable`** |
+| `hermes` | `experimental` → **`stable`** |
+
+四个都有每个声称平台（Windows、Linux）的 `connect → run → 归属对账 → restore` 实跑记录。**macOS 不在支持范围内。**
+
+### 仍未改变
+
+**Gateway 默认关闭。** 转默认的三条门槛只剩最后一条——**一次真实的长交互会话**，那需要人去用，不是自动任务能替代的。
+
 ## v0.5.1 — 2026-09-13
 
 修复版。**六个缺陷里有五个属于同一类：命令做错了事，还报告成功。** 它们都是在真实运行中撞出来的，没有一个是既有测试发现的。
