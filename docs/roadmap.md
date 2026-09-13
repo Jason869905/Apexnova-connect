@@ -81,7 +81,7 @@ M6 能跨领域复制
 
 预计：4～6 周。目标版本：`v0.2`。
 
-当前状态：进行中。契约与 registry 重构已完成；四个 Integration 均已实现、通过公共 Contract Test，并在现网 Hub 完成完整生命周期验收（OpenCode/Codex/Claude Code 在 Windows，Hermes 在 Linux/WSL2；含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。唯一未满足的退出条件是 macOS：无实机，Keychain 后端只有 mock command runner 测试。**2026-09-13 已裁决**（[ADR 0027](decisions/0027-m2-exit-condition-two-platforms.md)）：该条改为两个平台（Windows、Linux），并同时把 macOS 凭据后端改为默认拒绝——只改文档会留下「声明说不支持、代码照常服务」这个本项目反复在抓的形状。**五条退出条件现已全部满足**（其余四条已逐条核对，见 ADR 0027 第 5 节），但**M2 的关闭是另一条独立记录**，本阶段状态在那条记录之前不改为已关闭。关闭时须一并交代 M2 期间的限制，例如「社区能够独立实现只读 Detection Integration」至今**没有外部实现走过**——它验的是路径存在，不是有人走过。
+当前状态：**已关闭**（2026-09-13，收口见 [ADR 0028](decisions/0028-m2-closure.md)；2026-09-07 的评审见 [ADR 0003](decisions/0003-m2-milestone-review.md)）。五条退出条件全部满足，**但第五条是修订之后满足的**：macOS 实机从 ADR 0003 起是唯一未满足项，活过 M3、M4 两次收口，最终由 [ADR 0024](decisions/0024-narrow-platform-claims.md) 收窄声明、[ADR 0027](decisions/0027-m2-exit-condition-two-platforms.md) 改小要求结清——**是被取消的，不是被做到的**（收窄先于「M2 能否关闭」发生，顺序可查，见 ADR 0028 第 2 节）。`v0.2` 交付的是 Windows 与 Linux，不含 macOS。另记一条做法教训：M2 评审后又「进行中」六天，其间 M3、M4 关闭、M5 走完三批，**未关闭状态没有阻挡任何工作，只是一条不准确的自述**——里程碑不得以单条外部依赖为由长期悬置（ADR 0028 第 4 节）。契约与 registry 重构已完成；四个 Integration 均已实现、通过公共 Contract Test，并在现网 Hub 完成完整生命周期验收（OpenCode/Codex/Claude Code 在 Windows，Hermes 在 Linux/WSL2；含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。~~唯一未满足的退出条件是 macOS~~：无实机，Keychain 后端只有 mock command runner 测试——已按上述方式结清。修订同时把 macOS 凭据后端改为**默认拒绝**——只改文档会留下「声明说不支持、代码照常服务」这个本项目反复在抓的形状。其余四条已逐条核对（ADR 0027 第 5 节），其中「社区能够独立实现只读 Detection Integration」满足**但有限制**：路径、模板与测试都在，**至今没有任何外部实现走过**——它验的是路径存在，不是有人走过。「尚无外部用户完成核心流程」自 ADR 0003 起六天未变，是本项目最久的一条未变限制，不因关闭而消失。
 
 范围：
 
