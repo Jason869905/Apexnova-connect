@@ -1,6 +1,6 @@
 # Codex + Apexnova AI Hub 使用指南
 
-> 适用版本：apexnova-connect v0.2.1 · Codex CLI ≥0.20.0
+> 适用版本：apexnova-connect v0.5.0 · Codex CLI ≥0.20.0
 > 平台：Windows、Linux（macOS 不在支持范围内，见 [ADR 0024](decisions/0024-narrow-platform-claims.md)）
 
 安装、登录、Hub 地址、Key 模式、通用命令和环境变量见 [CLI 通用指南](cli-usage-guide.md)。本文只讲 Codex 特有的部分。

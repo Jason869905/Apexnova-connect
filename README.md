@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 钉定某个 release：
 
 ```bash
-APEXNOVA_VERSION=v0.2.1 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+APEXNOVA_VERSION=v0.5.0 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 ```
 
 可用环境变量覆盖默认行为：`APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
@@ -164,6 +164,7 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 
 ## M0 设计基线
 
+- [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.5.0`
 - [CLI 使用指南（通用）](docs/cli-usage-guide.md) —— 安装、登录、Key 模式、通用命令
 - Agent 使用指南：[OpenCode](docs/opencode-usage-guide.md)、[Codex](docs/codex-usage-guide.md)、[Claude Code](docs/claude-code-usage-guide.md)、[Hermes Agent](docs/hermes-usage-guide.md)
 - [产品范围与开源/商业边界](docs/product-scope.md)
@@ -233,7 +234,7 @@ Apexnova-connect/
 
 ## 实施路线图
 
-完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。M0 设计基线已经建立，M1 CLI Developer Preview 正在收口；Hub H1 已通过 mock 与本机 Docker 的 GLM 5.2 计费推理，稳定 staging 验收仍是发布门槛。
+完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M4 均已关闭，M5 进行中**；当前发布为 `v0.5.0`，它同时带上 M3、M4 与 M5 至今的成果（M3 的 `v0.3` 与 M4 的 `v0.4` 都没有发过版）。**本发布不代表 M5 闭环**——不包含 Circuit Breaker、受控选择与 Connection Profile，不支持 macOS，本地 Gateway 默认关闭，四个 Integration 均为 `experimental`。逐项见 [发布说明](docs/release-notes.md)。
 
 - [x] 建立 Integration Manifest 和 capability contract v1 初稿；
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；

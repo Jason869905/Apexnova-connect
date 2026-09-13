@@ -1,6 +1,6 @@
 # Apexnova-connect CLI 使用指南（通用部分）
 
-> 适用版本：apexnova-connect v0.2.1
+> 适用版本：apexnova-connect v0.5.0
 > 平台：Windows、Linux。**macOS 不在支持范围内**——Keychain 后端有实现但从未在真实 macOS 上验收过，按 [ADR 0024](decisions/0024-narrow-platform-claims.md) 不再声称支持
 
 本文是所有 Agent 共用的部分：安装、登录、Hub 地址、Key 模式、通用命令、环境变量和安全说明。**某个 Agent 特有的配置字段、限制和恢复方式在各自的指南里**：
@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/s
 irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
 ```
 
-钉定版本：`APEXNOVA_VERSION=v0.2.1`。其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
+钉定版本：`APEXNOVA_VERSION=v0.5.0`。其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
 
 ### 从源码构建
 
