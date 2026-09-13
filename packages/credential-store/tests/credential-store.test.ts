@@ -356,12 +356,22 @@ describe("system backends", () => {
 });
 
 describe("file backend", () => {
+  /**
+   * The tests that write a credential file need a filesystem that keeps POSIX
+   * modes. `chmod` is a no-op on NTFS, so a file written 0600 reads back 0666
+   * and the backend correctly refuses it as exposed -- declaring
+   * `platform: "linux"` asks the backend to behave like Linux, it does not give
+   * Windows a Linux filesystem. The decision-logic tests below touch no files
+   * and run everywhere.
+   */
+  const onPosix = it.skipIf(process.platform === "win32");
+
   async function temporaryFile(prefix: string): Promise<string> {
     const directory = await mkdtemp(join(tmpdir(), prefix));
     return join(directory, "store", "credentials.json");
   }
 
-  it("stores, reads back and deletes without any credential service", async () => {
+  onPosix("stores, reads back and deletes without any credential service", async () => {
     const path = await temporaryFile("apexnova-file-");
     const store = new SystemCredentialStore(new FileCredentialBackend(path, { platform: "linux" }));
 
@@ -382,7 +392,7 @@ describe("file backend", () => {
     await store.delete(key);
   });
 
-  it("keeps the directory and file private to the user", async () => {
+  onPosix("keeps the directory and file private to the user", async () => {
     const path = await temporaryFile("apexnova-file-mode-");
     const store = new SystemCredentialStore(new FileCredentialBackend(path, { platform: "linux" }));
     await store.set(key, SecretValue.from("private"));
@@ -391,7 +401,7 @@ describe("file backend", () => {
     expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
   });
 
-  it("refuses a credential file other users can read instead of repairing it", async () => {
+  onPosix("refuses a credential file other users can read instead of repairing it", async () => {
     const path = await temporaryFile("apexnova-file-exposed-");
     const backend = new FileCredentialBackend(path, { platform: "linux" });
     const store = new SystemCredentialStore(backend);
@@ -405,7 +415,7 @@ describe("file backend", () => {
     await expect(store.get(key)).rejects.toThrowError(/revoke them/);
   });
 
-  it("never overwrites a credential file it cannot parse", async () => {
+  onPosix("never overwrites a credential file it cannot parse", async () => {
     const path = await temporaryFile("apexnova-file-corrupt-");
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeFileSync(path, "not json at all", { mode: 0o600 });

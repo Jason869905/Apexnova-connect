@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, posix, win32 } from "node:path";
 
 import { CredentialStoreError } from "./errors.js";
 import type { CredentialBackend } from "./types.js";
@@ -50,10 +50,14 @@ export function defaultCredentialFilePath(
   platform: NodeJS.Platform = process.platform,
   homeDirectory?: string,
 ): string {
+  // The path flavour follows the `platform` argument rather than the host, so
+  // asking what Linux would use returns a Linux path even when the question is
+  // asked from Windows. On a matching host the two are the same function.
+  const path = platform === "win32" ? win32 : posix;
   const home = homeDirectory ?? environment.USERPROFILE ?? environment.HOME ?? process.cwd();
   if (platform === "win32") {
-    return resolve(
-      environment.APPDATA ?? join(home, "AppData", "Roaming"),
+    return path.resolve(
+      environment.APPDATA ?? path.join(home, "AppData", "Roaming"),
       "Apexnova",
       "connect",
       "credentials.json",
@@ -61,8 +65,8 @@ export function defaultCredentialFilePath(
   }
   // Deliberately not next to config.json: that file is the one users paste into
   // issues and screenshots when something is misconfigured.
-  return resolve(
-    environment.XDG_DATA_HOME ?? join(home, ".local", "share"),
+  return path.resolve(
+    environment.XDG_DATA_HOME ?? path.join(home, ".local", "share"),
     "apexnova-connect",
     "credentials.json",
   );

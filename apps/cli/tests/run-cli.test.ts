@@ -32,6 +32,16 @@ import type {
   IntegrationContext,
 } from "@apexnova-connect/integration-sdk";
 
+/**
+ * The three credential-backend tests below exercise the real file backend on a
+ * simulated Linux profile, and it refuses a file other users can read. `chmod`
+ * is a no-op on NTFS, so a file written 0600 reads back 0666 and the refusal is
+ * correct -- `platform: "linux"` asks the CLI to behave like Linux, it does not
+ * give Windows a Linux filesystem. Every other test here injects an in-memory
+ * store and runs on both.
+ */
+const onPosix = it.skipIf(process.platform === "win32");
+
 function captureIo() {
   let stdout = "";
   let stderr = "";
@@ -1877,7 +1887,7 @@ describe("CLI", () => {
     expect(capture.stderr()).toContain("file permissions alone");
   });
 
-  it("keeps credentials in a file on Linux without being asked to", async () => {
+  onPosix("keeps credentials in a file on Linux without being asked to", async () => {
     const home = await mkdtemp(join(tmpdir(), "apexnova-credential-default-"));
     const context = { environment: {}, platform: "linux" as const, homeDirectory: home };
 
@@ -1913,7 +1923,7 @@ describe("CLI", () => {
     );
   });
 
-  it("stores credentials in a file when asked, and keeps saying that it did", async () => {
+  onPosix("stores credentials in a file when asked, and keeps saying that it did", async () => {
     const home = await mkdtemp(join(tmpdir(), "apexnova-credential-file-"));
     const context = { environment: {}, platform: "linux" as const, homeDirectory: home };
 
@@ -1963,7 +1973,7 @@ describe("CLI", () => {
     );
   });
 
-  it("lets the environment pick the credential backend for one shell", async () => {
+  onPosix("lets the environment pick the credential backend for one shell", async () => {
     const home = await mkdtemp(join(tmpdir(), "apexnova-credential-env-"));
     await runCli(["init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect", "--json"], {
       io: captureIo().io,
