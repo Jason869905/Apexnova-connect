@@ -316,10 +316,34 @@ describe("system backends", () => {
       .toBeInstanceOf(SystemCredentialStore);
     expect(createDefaultCredentialStore({ platform: "linux", commandRunner: runner }))
       .toBeInstanceOf(SystemCredentialStore);
-    expect(createDefaultCredentialStore({ platform: "darwin", commandRunner: runner }))
-      .toBeInstanceOf(SystemCredentialStore);
     expect(() =>
       createDefaultCredentialStore({ platform: "freebsd", commandRunner: runner }),
     ).toThrowError(expect.objectContaining({ code: "UNSUPPORTED_PLATFORM" }));
+  });
+
+  it("refuses macOS by default, and says what taking the opt-in means", () => {
+    const runner = new FakeCommandRunner(() => ({ exitCode: 0, stdout: '{"status":"missing"}', stderr: "" }));
+
+    // ADR 0024 withdrew the macOS claim and ADR 0027 narrowed M2's exit
+    // condition to match. This is the half of that decision that is code: the
+    // backend has only ever run against a mock command runner, and leaving it
+    // selected by default would keep an unverified implementation serving the
+    // credential path on a platform we no longer say we support.
+    let thrown: unknown;
+    try {
+      createDefaultCredentialStore({ platform: "darwin", commandRunner: runner });
+    } catch (cause) {
+      thrown = cause;
+    }
+    expect(thrown).toMatchObject({ code: "UNSUPPORTED_PLATFORM" });
+    // The message has to carry the way out and the caveat, or the refusal is
+    // just a wall.
+    expect((thrown as Error).message).toContain("APEXNOVA_ALLOW_UNVERIFIED_MACOS=1");
+    expect((thrown as Error).message).toContain("never been verified");
+
+    // Opting in is a choice someone can make; it does not make the backend
+    // verified, and the message above says so.
+    expect(createDefaultCredentialStore({ platform: "darwin", commandRunner: runner, allowUnverifiedMacOs: true }))
+      .toBeInstanceOf(SystemCredentialStore);
   });
 });

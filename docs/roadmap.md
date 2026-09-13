@@ -81,7 +81,7 @@ M6 能跨领域复制
 
 预计：4～6 周。目标版本：`v0.2`。
 
-当前状态：进行中。契约与 registry 重构已完成；四个 Integration 均已实现、通过公共 Contract Test，并在现网 Hub 完成完整生命周期验收（OpenCode/Codex/Claude Code 在 Windows，Hermes 在 Linux/WSL2；含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。唯一未满足的退出条件是 macOS：无实机，Keychain 后端只有 mock command runner 测试。**2026-09-12 起本条与产品声明不一致，需要一个自己的决定**：[ADR 0024](decisions/0024-narrow-platform-claims.md) 把四个 Integration 的平台声明收窄为 Windows/Linux，而本阶段的退出条件仍写「三个平台」。ADR 0024 只决定了 Integration 的声明，**没有决定本条退出条件**——它是按两个平台重述，还是保持三个平台并继续记为未满足，尚未裁决。在裁决之前如实记为未满足。
+当前状态：进行中。契约与 registry 重构已完成；四个 Integration 均已实现、通过公共 Contract Test，并在现网 Hub 完成完整生命周期验收（OpenCode/Codex/Claude Code 在 Windows，Hermes 在 Linux/WSL2；含首次真实 `anthropic-messages` 调用），记录见 [Hub 联调清单](hub-h1-integration-checklist.md)。唯一未满足的退出条件是 macOS：无实机，Keychain 后端只有 mock command runner 测试。**2026-09-13 已裁决**（[ADR 0027](decisions/0027-m2-exit-condition-two-platforms.md)）：该条改为两个平台（Windows、Linux），并同时把 macOS 凭据后端改为默认拒绝——只改文档会留下「声明说不支持、代码照常服务」这个本项目反复在抓的形状。**五条退出条件现已全部满足**（其余四条已逐条核对，见 ADR 0027 第 5 节），但**M2 的关闭是另一条独立记录**，本阶段状态在那条记录之前不改为已关闭。关闭时须一并交代 M2 期间的限制，例如「社区能够独立实现只读 Detection Integration」至今**没有外部实现走过**——它验的是路径存在，不是有人走过。
 
 范围：
 
@@ -91,7 +91,7 @@ M6 能跨领域复制
 - Integration 公共 Contract Test；
 - Community Integration 模板；
 - 产品版本漂移和安全拒绝；
-- macOS Keychain 后端与三平台验收。
+- ~~macOS Keychain 后端与三平台验收~~——后端已实现但**从未在真机验证**，macOS 已于 [ADR 0024](decisions/0024-narrow-platform-claims.md) 退出支持范围；该后端自 [ADR 0027](decisions/0027-m2-exit-condition-two-platforms.md) 起**默认拒绝**（`APEXNOVA_ALLOW_UNVERIFIED_MACOS=1` 可显式启用，启用后一切按未验证对待）。
 
 Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标从三个 Agent 变为四个（含 M1 已交付的 OpenCode）。
 
@@ -101,7 +101,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - 产品特有逻辑没有进入 `packages/core` 和 `apps/cli`；
 - 未知配置格式不会被猜测修改；
 - 社区能够独立实现只读 Detection Integration；
-- 三个平台的凭证和恢复流程通过真实环境测试。
+- **两个平台（Windows、Linux）**的凭证和恢复流程通过真实环境测试（原为「三个平台」，2026-09-13 按 [ADR 0027](decisions/0027-m2-exit-condition-two-platforms.md) 修订：[ADR 0024](decisions/0024-narrow-platform-claims.md) 已在前一日因独立理由收窄产品的 macOS 声明，一条退出条件不应继续要求验证一个产品不再交付的平台）。
 
 ## M3：Compatibility Beta
 
