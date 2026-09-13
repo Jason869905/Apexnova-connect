@@ -15,7 +15,7 @@ const subject: EvidenceSubject = {
   agentVersion: "1.18.29",
   integrationId: "opencode",
   integrationVersion: "0.2.1",
-  deploymentId: "deployment.nova",
+  deploymentId: "model.nova",
   protocol: "openai-responses",
   platform: "linux-x64",
 };
@@ -99,10 +99,10 @@ describe("compatibility evidence", () => {
     expect(createEvidence(input()).id).toMatch(/^ev\.sha256\.[0-9a-f]{64}$/);
 
     // Identity has to cover the nested fields too: the same run against a
-    // different deployment is a different record, not the same one.
+    // different model is a different record, not the same one.
     expect(createEvidence(input()).id).not.toBe(
       createEvidence(
-        input({ subject: { ...subject, deploymentId: "deployment.other" } }),
+        input({ subject: { ...subject, deploymentId: "model.other" } }),
       ).id,
     );
     expect(createEvidence(input()).id).not.toBe(

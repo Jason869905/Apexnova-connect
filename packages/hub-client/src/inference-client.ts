@@ -10,7 +10,7 @@ export interface VerifyHubInferenceOptions {
   readonly endpoint: string;
   readonly protocol: "openai-responses" | "openai-chat" | "anthropic-messages";
   readonly model: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly runtimeCredential: SecretValue;
   readonly fetch?: typeof globalThis.fetch;
   readonly requestTimeoutMs?: number;
@@ -52,8 +52,8 @@ function validateOptions(options: VerifyHubInferenceOptions): URL {
   if (!endpoint.pathname.endsWith(expectedSuffix)) {
     throw new HubClientError("INVALID_CONFIG", `Hub inference endpoint does not match ${options.protocol}.`);
   }
-  if (!options.model || options.model.length > 512 || !options.deploymentId || options.deploymentId.length > 256) {
-    throw new HubClientError("INVALID_CONFIG", "Hub inference model or deployment is invalid.");
+  if (!options.model || options.model.length > 512 || !options.modelId || options.modelId.length > 256) {
+    throw new HubClientError("INVALID_CONFIG", "Hub inference model or model id is invalid.");
   }
   if (options.requestTimeoutMs !== undefined && (!Number.isSafeInteger(options.requestTimeoutMs) || options.requestTimeoutMs <= 0)) {
     throw new HubClientError("INVALID_CONFIG", "requestTimeoutMs must be positive.");
@@ -158,9 +158,9 @@ export async function verifyHubInference(options: VerifyHubInferenceOptions): Pr
   const providerId = requiredHeader(response, "x-apexnova-provider-id");
   const requestedModel = requiredHeader(response, "x-apexnova-requested-model");
   const resolvedModel = requiredHeader(response, "x-apexnova-resolved-model");
-  const deploymentId = requiredHeader(response, "x-apexnova-deployment-id");
-  if (requestedModel !== options.model || deploymentId !== options.deploymentId) {
-    throw new HubClientError("INVALID_RESPONSE", "Hub inference response does not match the requested model deployment.", { requestId: verifiedRequestId });
+  const modelId = requiredHeader(response, "x-apexnova-deployment-id");
+  if (requestedModel !== options.model || modelId !== options.modelId) {
+    throw new HubClientError("INVALID_RESPONSE", "Hub inference response does not match the requested model.", { requestId: verifiedRequestId });
   }
   return {
     status: response.status,
@@ -169,6 +169,6 @@ export async function verifyHubInference(options: VerifyHubInferenceOptions): Pr
     providerId,
     requestedModel,
     resolvedModel,
-    deploymentId,
+    modelId,
   };
 }

@@ -17,18 +17,18 @@ export interface RuntimeCredentialBinding {
    */
   readonly issuedAt?: string;
   readonly protocol: string;
-  /** The default deployment: what the Agent starts on. Always in `deploymentIds`. */
-  readonly deploymentId: string;
+  /** The default model: what the Agent starts on. Always in `modelIds`. */
+  readonly modelId: string;
   /**
-   * Every deployment this credential is authorised for, default first.
+   * Every model this credential is authorised for, default first.
    *
    * A product that switches models inside its own UI does so without telling
    * Connect, so the credential has to cover the whole set the configuration
    * offers -- a key scoped to the default alone would fail closed on the second
    * model the user picks. Absent on bindings written before the set existed,
-   * which cover the single deployment named above.
+   * which cover the single model named above.
    */
-  readonly deploymentIds?: readonly string[];
+  readonly modelIds?: readonly string[];
   readonly kind?: "user" | "runtime";
   readonly transactionId?: string;
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
@@ -36,18 +36,18 @@ export interface RuntimeCredentialBinding {
 
 export interface RuntimeCredentialRestoreTarget {
   readonly protocol: string;
-  readonly deploymentId: string;
-  readonly deploymentIds?: readonly string[];
+  readonly modelId: string;
+  readonly modelIds?: readonly string[];
   readonly transactionId?: string;
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
 }
 
 /** The model set a binding covers, for callers that must not care which version wrote it. */
-export function bindingDeploymentIds(
-  binding: Pick<RuntimeCredentialBinding, "deploymentId" | "deploymentIds">,
+export function bindingModelIds(
+  binding: Pick<RuntimeCredentialBinding, "modelId" | "modelIds">,
 ): readonly string[] {
-  const ids = binding.deploymentIds ?? [];
-  return ids.length > 0 ? ids : [binding.deploymentId];
+  const ids = binding.modelIds ?? [];
+  return ids.length > 0 ? ids : [binding.modelId];
 }
 
 interface StoredBindingV1 {
@@ -56,7 +56,7 @@ interface StoredBindingV1 {
   readonly secret: string;
   readonly expiresAt: string;
   readonly protocol: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
 }
 
 interface StoredBindingV2 {
@@ -65,7 +65,7 @@ interface StoredBindingV2 {
   readonly secret: string;
   readonly expiresAt: string;
   readonly protocol: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly transactionId?: string;
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
 }
@@ -77,8 +77,8 @@ interface StoredBindingV5 {
   readonly expiresAt?: string;
   readonly issuedAt?: string;
   readonly protocol: string;
-  readonly deploymentId: string;
-  readonly deploymentIds?: readonly string[];
+  readonly modelId: string;
+  readonly modelIds?: readonly string[];
   readonly kind?: "user" | "runtime";
   readonly transactionId?: string;
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
@@ -91,7 +91,7 @@ interface StoredBindingV4 {
   readonly expiresAt?: string;
   readonly issuedAt?: string;
   readonly protocol: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly kind?: "user" | "runtime";
   readonly transactionId?: string;
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
@@ -103,7 +103,7 @@ interface StoredBindingV3 {
   readonly secret: string;
   readonly expiresAt?: string;
   readonly protocol: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly kind?: "user" | "runtime";
   readonly transactionId?: string;
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
@@ -131,21 +131,21 @@ function requiredString(value: unknown): string {
  * The stored model set, normalised to default-first and deduplicated.
  *
  * The default has to be inside the set: a binding whose default is not one of
- * the deployments its credential covers would send the Agent's first request to
+ * the models its credential covers would send the Agent's first request to
  * a model the key is refused for, and the store is the last place that can tell.
  */
-const MAX_DEPLOYMENTS = 64;
+const MAX_MODELS = 64;
 
-function parseDeploymentIds(value: unknown, defaultDeploymentId: string): readonly string[] {
-  if (value === undefined || value === null) return [defaultDeploymentId];
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_DEPLOYMENTS) {
+function parseModelIds(value: unknown, defaultModelId: string): readonly string[] {
+  if (value === undefined || value === null) return [defaultModelId];
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_MODELS) {
     throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
   }
   const ids = value.map((item) => requiredString(item));
-  if (!ids.includes(defaultDeploymentId)) {
+  if (!ids.includes(defaultModelId)) {
     throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
   }
-  return [defaultDeploymentId, ...ids.filter((id) => id !== defaultDeploymentId)]
+  return [defaultModelId, ...ids.filter((id) => id !== defaultModelId)]
     .filter((id, index, all) => all.indexOf(id) === index);
 }
 
@@ -154,13 +154,13 @@ function parseRestoreTarget(value: unknown, depth = 0): RuntimeCredentialRestore
     throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential restore chain is invalid.");
   }
   const item = value as Partial<RuntimeCredentialRestoreTarget>;
-  const deploymentId = requiredString(item.deploymentId);
+  const modelId = requiredString(item.modelId);
   return {
     protocol: requiredString(item.protocol),
-    deploymentId,
-    ...(item.deploymentIds === undefined
+    modelId,
+    ...(item.modelIds === undefined
       ? {}
-      : { deploymentIds: parseDeploymentIds(item.deploymentIds, deploymentId) }),
+      : { modelIds: parseModelIds(item.modelIds, modelId) }),
     ...(item.transactionId === undefined ? {} : { transactionId: requiredString(item.transactionId) }),
     ...(item.restoreTarget === undefined ? {} : { restoreTarget: parseRestoreTarget(item.restoreTarget, depth + 1) }),
   };
@@ -179,7 +179,7 @@ function parse(value: unknown): StoredBindingV5 {
   if (item.issuedAt !== undefined && (typeof item.issuedAt !== "string" || !Number.isFinite(Date.parse(item.issuedAt)))) {
     throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
   }
-  const deploymentId = requiredString(item.deploymentId);
+  const modelId = requiredString(item.modelId);
   return {
     version: 5,
     credentialId: requiredString(item.credentialId),
@@ -187,10 +187,10 @@ function parse(value: unknown): StoredBindingV5 {
     ...(item.expiresAt !== undefined && item.expiresAt !== null ? { expiresAt: requiredString(item.expiresAt) } : {}),
     ...(item.issuedAt !== undefined && item.issuedAt !== null ? { issuedAt: requiredString(item.issuedAt) } : {}),
     protocol: requiredString(item.protocol),
-    deploymentId,
-    // A binding older than the model set covers exactly the one deployment it
+    modelId,
+    // A binding older than the model set covers exactly the one model it
     // names, which is what its credential was issued for.
-    deploymentIds: parseDeploymentIds(item.deploymentIds, deploymentId),
+    modelIds: parseModelIds(item.modelIds, modelId),
     ...(optionalExpiry && item.kind !== undefined ? { kind: item.kind } : { kind: "runtime" as const }),
     ...((item.version ?? 0) >= 2 && item.transactionId !== undefined ? { transactionId: requiredString(item.transactionId) } : {}),
     ...((item.version ?? 0) >= 2 && item.restoreTarget !== undefined ? { restoreTarget: parseRestoreTarget(item.restoreTarget) } : {}),
@@ -218,8 +218,8 @@ export class RuntimeBindingStore {
       ...(binding.expiresAt ? { expiresAt: binding.expiresAt } : {}),
       ...(binding.issuedAt ? { issuedAt: binding.issuedAt } : {}),
       protocol: binding.protocol,
-      deploymentId: binding.deploymentId,
-      ...(binding.deploymentIds ? { deploymentIds: binding.deploymentIds } : {}),
+      modelId: binding.modelId,
+      ...(binding.modelIds ? { modelIds: binding.modelIds } : {}),
       ...(binding.kind ? { kind: binding.kind } : {}),
       ...(binding.transactionId ? { transactionId: binding.transactionId } : {}),
       ...(binding.restoreTarget ? { restoreTarget: binding.restoreTarget } : {}),
@@ -234,8 +234,8 @@ export class RuntimeBindingStore {
       ...(binding.expiresAt ? { expiresAt: binding.expiresAt } : {}),
       ...(binding.issuedAt ? { issuedAt: binding.issuedAt } : {}),
       protocol: binding.protocol,
-      deploymentId: binding.deploymentId,
-      deploymentIds: bindingDeploymentIds(binding),
+      modelId: binding.modelId,
+      modelIds: bindingModelIds(binding),
       ...(binding.kind ? { kind: binding.kind } : {}),
       ...(binding.transactionId ? { transactionId: binding.transactionId } : {}),
       ...(binding.restoreTarget ? { restoreTarget: binding.restoreTarget } : {}),

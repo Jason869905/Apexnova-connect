@@ -304,7 +304,7 @@ export function describeIntegrationContract(
 
     if (fixtures.unsupportedProtocol && !fixtures.readOnly) {
       const protocol = fixtures.unsupportedProtocol;
-      it(`refuses a ${protocol} deployment instead of guessing`, async () => {
+      it(`refuses a ${protocol} model instead of guessing`, async () => {
         const detection = await availableDetection();
         await expect(
           integration.plan(context, detection, await integration.inspect(context, detection), {

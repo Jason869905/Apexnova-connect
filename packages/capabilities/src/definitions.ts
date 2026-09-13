@@ -57,7 +57,7 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
     category: "protocol-conformance",
     title: "Model ID mapping",
     intent:
-      "The deployment ID from the catalog is accepted by the server and the model echoed back matches it, so a request cannot be served by a different model than the one shown.",
+      "The model ID from the catalog is accepted by the server and the model echoed back matches it, so a request cannot be served by a different model than the one shown.",
     defaultLevel: "required",
     ttlDays: 90,
   },

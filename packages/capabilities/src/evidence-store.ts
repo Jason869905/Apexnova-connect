@@ -22,7 +22,7 @@ export interface EvidenceStoreOptions {
 export interface EvidenceFilter {
   readonly agentId?: string;
   readonly integrationId?: string;
-  readonly deploymentId?: string;
+  readonly modelId?: string;
   readonly protocol?: string;
   readonly platform?: string;
 }
@@ -42,7 +42,7 @@ function subjectMatchesFilter(subject: EvidenceSubject, filter: EvidenceFilter):
   return (
     (filter.agentId === undefined || subject.agentId === filter.agentId) &&
     (filter.integrationId === undefined || subject.integrationId === filter.integrationId) &&
-    (filter.deploymentId === undefined || subject.deploymentId === filter.deploymentId) &&
+    (filter.modelId === undefined || subject.deploymentId === filter.modelId) &&
     (filter.protocol === undefined || subject.protocol === filter.protocol) &&
     (filter.platform === undefined || subject.platform === filter.platform)
   );

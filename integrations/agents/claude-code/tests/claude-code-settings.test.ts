@@ -251,7 +251,7 @@ describe("Claude Code base URL derivation", () => {
       {
         planId: "plan.derive",
         createdAt: "2026-09-07T12:00:00.000Z",
-        deploymentId: "deployment.nova",
+        modelId: "model.nova",
         inferenceAlias: "nova-coder",
         protocol: "anthropic-messages",
         baseUrl: "https://api.apexnova.example/anthropic/v1/messages",

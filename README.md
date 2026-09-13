@@ -188,7 +188,7 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 - [分阶段路线图](docs/roadmap.md)
 - [CLI 命令与输出规范](docs/cli-spec.md)
 - [兼容性证据规范](docs/compatibility-evidence.md)
-- [兼容性矩阵](docs/compatibility-matrix.md) —— 由 `apexnova compatibility matrix` 从证据生成，Deployment ID 与模型别名的对照见 [ADR 0004](docs/decisions/0004-m3-scope-and-evidence-path.md)
+- [兼容性矩阵](docs/compatibility-matrix.md) —— 由 `apexnova compatibility matrix` 从证据生成，Model ID 与模型别名的对照见 [ADR 0004](docs/decisions/0004-m3-scope-and-evidence-path.md)
 - [Apexnova AI Hub 对接需求与 API 契约](docs/apexnova-ai-hub-requirements.md)
 - [机器可读 Schema](schemas/README.md)
 
@@ -254,7 +254,7 @@ Apexnova-connect/
 
 - [x] 建立 Integration Manifest 和 capability contract v1 初稿；
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；
-- [x] 建立 Agent、Model、Deployment、Scenario、Evidence 和 Recommendation 等 M0 Schema 草案；
+- [x] 建立 Agent、Model、Model、Scenario、Evidence 和 Recommendation 等 M0 Schema 草案；
 - [ ] 使用首个真实 integration 验证并冻结 contract v1；
 - [ ] 明确 Apexnova AI Hub 登录、余额、模型元数据和错误语义；
 - [x] 实现 OAuth device flow、刷新与安全会话存储基础模块；

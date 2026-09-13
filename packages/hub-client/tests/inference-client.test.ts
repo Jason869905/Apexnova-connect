@@ -24,7 +24,7 @@ describe("verifyHubInference", () => {
       endpoint: "https://api.example.test/v1/responses",
       protocol: "openai-responses",
       model: "nova",
-      deploymentId: "deployment.nova",
+      modelId: "deployment.nova",
       runtimeCredential: SecretValue.from("runtime-secret"),
       fetch,
     });
@@ -36,7 +36,7 @@ describe("verifyHubInference", () => {
       providerId: "provider.apexnova-ai-hub",
       requestedModel: "nova",
       resolvedModel: "nova",
-      deploymentId: "deployment.nova",
+      modelId: "deployment.nova",
     });
     const request = fetch.mock.calls[0]?.[1];
     expect(JSON.parse(String(request?.body))).toEqual({
@@ -61,7 +61,7 @@ describe("verifyHubInference", () => {
       endpoint: "https://api.example.test/anthropic/v1/messages",
       protocol: "anthropic-messages",
       model: "nova",
-      deploymentId: "deployment.nova",
+      modelId: "deployment.nova",
       runtimeCredential: SecretValue.from("runtime-secret"),
       fetch,
     });
@@ -84,7 +84,7 @@ describe("verifyHubInference", () => {
         endpoint: "https://api.example.test/v1/responses",
         protocol: "anthropic-messages",
         model: "nova",
-        deploymentId: "deployment.nova",
+        modelId: "deployment.nova",
         runtimeCredential: SecretValue.from("runtime-secret"),
         fetch: vi.fn<typeof globalThis.fetch>(),
       }),
@@ -101,7 +101,7 @@ describe("verifyHubInference", () => {
       endpoint: "http://api.localhost:18080/v1/chat/completions",
       protocol: "openai-chat",
       model: "nova",
-      deploymentId: "deployment.nova",
+      modelId: "deployment.nova",
       runtimeCredential: SecretValue.from("runtime-secret"),
       allowInsecureLoopback: true,
       loopbackHostAlias: "localhost",
@@ -120,7 +120,7 @@ describe("verifyHubInference", () => {
       endpoint: "https://api.example.test/v1/responses",
       protocol: "openai-responses",
       model: "nova",
-      deploymentId: "deployment.nova",
+      modelId: "deployment.nova",
       runtimeCredential: SecretValue.from("runtime-secret"),
       fetch,
     })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
@@ -135,7 +135,7 @@ describe("verifyHubInference", () => {
       endpoint: "https://api.example.test/v1/responses",
       protocol: "openai-responses",
       model: "nova",
-      deploymentId: "deployment.nova",
+      modelId: "deployment.nova",
       runtimeCredential: SecretValue.from("runtime-secret"),
       fetch,
     }).catch((value: unknown) => value);

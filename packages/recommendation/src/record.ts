@@ -16,7 +16,7 @@ import type { RecommendationConstraints, RecommendationResult } from "./recommen
  * is where ADR 0007 said it would go.
  */
 export interface RecommendationRecordCandidate {
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly rank: number;
   readonly eligible: boolean;
   readonly score?: number;
@@ -148,7 +148,7 @@ export function recommendationRecord(
 ): RecommendationRecord {
   if (result.candidates.length === 0) {
     // `candidates` is `minItems: 1`. A run that considered nothing -- an empty
-    // catalog, or `--deployment` naming something the catalog does not carry --
+    // catalog, or `--model` naming something the catalog does not carry --
     // has no Recommendation to publish, and inventing an empty one would be a
     // document asserting a choice nobody made.
     throw new RecommendationError(
@@ -169,7 +169,7 @@ export function recommendationRecord(
       : { constraints: { ...constraints } }),
     priorities: [...result.priorities],
     candidates: result.candidates.map((candidate) => ({
-      deploymentId: candidate.deploymentId,
+      modelId: candidate.modelId,
       rank: candidate.rank,
       eligible: candidate.eligible,
       ...(candidate.score === undefined ? {} : { score: candidate.score }),

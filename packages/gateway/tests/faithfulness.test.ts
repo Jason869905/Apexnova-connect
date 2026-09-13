@@ -72,7 +72,7 @@ describe("the gateway against the capability suite", () => {
       endpoint: recording.endpoint,
       protocol: recording.protocol,
       model: recording.model,
-      deploymentId: recording.deploymentId,
+      modelId: recording.modelId,
       credential: SecretValue.from(REPLAY_CREDENTIAL),
       fetch: replayThrough(recording),
     });
@@ -90,7 +90,7 @@ describe("the gateway against the capability suite", () => {
       endpoint: `${gateway.url}${new URL(recording.endpoint).pathname}`,
       protocol: recording.protocol,
       model: recording.model,
-      deploymentId: recording.deploymentId,
+      modelId: recording.modelId,
       credential: SecretValue.from(gateway.localToken),
       allowInsecureLoopback: true,
     });

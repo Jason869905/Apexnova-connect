@@ -50,7 +50,7 @@ export interface CapabilityRecording {
   readonly endpoint: string;
   readonly protocol: SuiteProtocol;
   readonly model: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly interactions: readonly RecordedInteraction[];
 }
 
@@ -123,7 +123,7 @@ export function buildRecording(options: {
   readonly endpoint: string;
   readonly protocol: SuiteProtocol;
   readonly model: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly recordedAt: string;
   readonly interactions: readonly RecordedInteraction[];
 }): CapabilityRecording {
@@ -134,7 +134,7 @@ export function buildRecording(options: {
     endpoint: options.endpoint,
     protocol: options.protocol,
     model: options.model,
-    deploymentId: options.deploymentId,
+    modelId: options.modelId,
     interactions: options.interactions,
   };
 }
@@ -162,7 +162,7 @@ export function parseRecording(value: unknown): CapabilityRecording {
     typeof item.endpoint !== "string" ||
     !SUITE_PROTOCOLS.has(item.protocol as string) ||
     typeof item.model !== "string" ||
-    typeof item.deploymentId !== "string" ||
+    typeof item.modelId !== "string" ||
     typeof item.recordedAt !== "string" ||
     !Array.isArray(item.interactions) ||
     !item.interactions.every(isRecordedInteraction)
@@ -175,7 +175,7 @@ export function parseRecording(value: unknown): CapabilityRecording {
 /**
  * Serves a recording back to the suite. A request the recording does not cover
  * is an error rather than a miss: replaying part of a run and reporting the rest
- * as failures would turn a stale recording into findings about a deployment.
+ * as failures would turn a stale recording into findings about a model.
  */
 export function createReplayFetch(recording: CapabilityRecording): typeof globalThis.fetch {
   const remaining = new Map<string, RecordedInteraction[]>();
@@ -191,7 +191,7 @@ export function createReplayFetch(recording: CapabilityRecording): typeof global
     if (!next) {
       throw new CapabilityError(
         "RECORDING_INCOMPLETE",
-        "The recording does not cover this request; re-record it against the deployment.",
+        "The recording does not cover this request; re-record it against the model.",
       );
     }
     return new Response(next.body, { status: next.status, headers: { ...next.headers } });

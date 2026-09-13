@@ -13,7 +13,7 @@ Apexnova Connect 是开放的 Agent–Model 连接、兼容性验证与场景推
 长期目标是回答三个问题：
 
 1. 一个 Agent 对模型和运行环境有什么要求？
-2. 一个具体 Model Deployment 实际具有什么能力？
+2. 一个具体 Model Model 实际具有什么能力？
 3. 在给定场景、预算、延迟、隐私和区域约束下，应选择哪条模型线路？
 
 Coding Agent 是第一个可验证的领域，不是产品边界。后续可以通过新的 Integration 与 Scenario Pack 扩展到自动化、研究、数据分析、客服、文档、浏览器和语音 Agent。
@@ -55,7 +55,7 @@ detect → inspect → authenticate → select → plan → approve → apply �
 - 在修改前展示字段级或文本级 Change Plan；
 - 应用后验证，不将“写入成功”等同于“连接成功”；
 - 用 Evidence 支撑兼容性结论；
-- 显示实际模型、Provider、Deployment 和计费来源；
+- 显示实际模型、Provider、Model 和计费来源；
 - 在不确定时返回 `unverified`，不猜测兼容；
 - 对失败切换执行确定性恢复。
 
@@ -81,7 +81,7 @@ detect → inspect → authenticate → select → plan → approve → apply �
 - Agent Profile；
 - Model Profile；
 - Provider Profile；
-- Model Deployment；
+- Model Model；
 - Scenario Profile；
 - Compatibility Evidence 与 Verdict。
 
@@ -97,9 +97,9 @@ Registry 可以先以版本化静态资产发布，后续由 Apexnova AI Hub 提
 
 - 账号、设备授权和凭证撤销；
 - 余额、账单、用量和价格；
-- Provider 与 Model Deployment 目录；
+- Provider 与 Model Model 目录；
 - 推理协议入口和服务端路由；
-- Deployment 健康状态；
+- Model 健康状态；
 - 托管兼容性证据、推荐和付费策略；
 - 小团队的共享目录、预算和虚拟凭证。
 

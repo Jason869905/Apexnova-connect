@@ -24,19 +24,19 @@ const subject: EvidenceSubject = {
   agentVersion: "1.18.29",
   integrationId: "opencode",
   integrationVersion: "0.1.0",
-  deploymentId: "deployment.cheap",
+  deploymentId: "model.cheap",
   protocol: "openai-responses",
   platform: "linux-x64",
 };
 
 function evidenceFor(
-  deploymentId: string,
+  modelId: string,
   overrides: Readonly<Record<string, CapabilitySupport>> = {},
   patch: Partial<EvidenceSubject> = {},
 ): CompatibilityEvidence {
   return createEvidence({
     sourceType: "maintainer-test",
-    subject: { ...subject, deploymentId, ...patch },
+    subject: { ...subject, deploymentId: modelId, ...patch },
     observedAt: OBSERVED_AT,
     outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({
       capabilityId: definition.id,
@@ -46,12 +46,12 @@ function evidenceFor(
 }
 
 function candidate(
-  deploymentId: string,
+  modelId: string,
   overrides: Partial<Record<keyof RecommendationCandidate, unknown>> = {},
 ): RecommendationCandidate {
   const base = {
-    deploymentId,
-    displayName: deploymentId,
+    modelId,
+    displayName: modelId,
     protocols: ["openai-responses"],
     availability: "available",
     pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "0.6", output: "2.2" },
@@ -73,15 +73,15 @@ function options(overrides: Partial<RecommendOptions> = {}): RecommendOptions {
     platform: "linux-x64",
     agentProtocols: ["openai-responses"],
     catalogVersion: "cat_1",
-    candidates: [candidate("deployment.cheap")],
-    evidence: [evidenceFor("deployment.cheap")],
+    candidates: [candidate("model.cheap")],
+    evidence: [evidenceFor("model.cheap")],
     now: NOW,
     ...overrides,
   };
 }
 
 describe("recommend", () => {
-  it("ranks a deployment whose required capabilities all passed, and says what carried it", () => {
+  it("ranks a model whose required capabilities all passed, and says what carried it", () => {
     const result = recommend(options());
 
     expect(result.candidates).toHaveLength(1);
@@ -108,23 +108,23 @@ describe("recommend", () => {
     expect(weights).toBeCloseTo(1, 10);
   });
 
-  it("excludes a deployment whose required capability failed, rather than scoring it down", () => {
+  it("excludes a model whose required capability failed, rather than scoring it down", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.cheap"), candidate("deployment.broken")],
+      candidates: [candidate("model.cheap"), candidate("model.broken")],
       evidence: [
-        evidenceFor("deployment.cheap"),
+        evidenceFor("model.cheap"),
         // Cheapest possible and a required capability failed: no weighting may
         // rescue it.
-        evidenceFor("deployment.broken", { "agent.single-tool-call": "unsupported" }),
+        evidenceFor("model.broken", { "agent.single-tool-call": "unsupported" }),
       ],
     }));
 
-    const broken = result.candidates.find((entry) => entry.deploymentId === "deployment.broken")!;
+    const broken = result.candidates.find((entry) => entry.modelId === "model.broken")!;
     expect(broken.eligible).toBe(false);
     expect(broken.score).toBeUndefined();
     expect(broken.reasons.join(" ")).toContain("agent.single-tool-call");
     // Ineligible candidates rank below every eligible one.
-    expect(result.candidates[0]?.deploymentId).toBe("deployment.cheap");
+    expect(result.candidates[0]?.modelId).toBe("model.cheap");
   });
 
   it("refuses to answer for a platform it has no evidence for", () => {
@@ -134,50 +134,50 @@ describe("recommend", () => {
     expect(only.eligible).toBe(false);
     expect(only.reasons.join(" ")).toContain("win32-x64");
     expect(only.reasons.join(" ")).toContain("does not carry over");
-    expect(result.summary).toContain("No deployment can be recommended");
+    expect(result.summary).toContain("No model can be recommended");
   });
 
   it("does not treat evidence from a different implementation as current", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.cheap", { implementationFingerprint: "impl-999999999999" })],
-      evidence: [evidenceFor("deployment.cheap", {}, { implementationFingerprint: "impl-a1b2c3d4e5f6" })],
+      candidates: [candidate("model.cheap", { implementationFingerprint: "impl-999999999999" })],
+      evidence: [evidenceFor("model.cheap", {}, { implementationFingerprint: "impl-a1b2c3d4e5f6" })],
     }));
 
     expect(result.candidates[0]?.eligible).toBe(false);
     expect(result.candidates[0]?.reasons.join(" ")).toContain("No compatibility evidence");
   });
 
-  it("prefers the cheaper deployment when compatibility ties, and says why", () => {
+  it("prefers the cheaper model when compatibility ties, and says why", () => {
     const result = recommend(options({
       candidates: [
-        candidate("deployment.dear", { pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "6", output: "18" } }),
-        candidate("deployment.cheap"),
+        candidate("model.dear", { pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "6", output: "18" } }),
+        candidate("model.cheap"),
       ],
-      evidence: [evidenceFor("deployment.cheap"), evidenceFor("deployment.dear")],
+      evidence: [evidenceFor("model.cheap"), evidenceFor("model.dear")],
     }));
 
-    expect(result.candidates.map((entry) => entry.deploymentId)).toEqual(["deployment.cheap", "deployment.dear"]);
+    expect(result.candidates.map((entry) => entry.modelId)).toEqual(["model.cheap", "model.dear"]);
     expect(result.candidates[0]?.dimensions?.find((dimension) => dimension.priority === "cost")?.detail)
       .toContain("per million blended");
   });
 
-  it("scores one unpriced deployment at zero rather than assuming it is cheap", () => {
+  it("scores one unpriced model at zero rather than assuming it is cheap", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.cheap"), candidate("deployment.unpriced", { pricing: undefined })],
-      evidence: [evidenceFor("deployment.cheap"), evidenceFor("deployment.unpriced")],
+      candidates: [candidate("model.cheap"), candidate("model.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("model.cheap"), evidenceFor("model.unpriced")],
     }));
 
-    const unpriced = result.candidates.find((entry) => entry.deploymentId === "deployment.unpriced")!;
+    const unpriced = result.candidates.find((entry) => entry.modelId === "model.unpriced")!;
     const cost = unpriced.dimensions!.find((dimension) => dimension.priority === "cost")!;
     expect(cost.score).toBe(0);
     expect(cost.detail).toContain("rather than being assumed cheap");
-    expect(result.candidates[0]?.deploymentId).toBe("deployment.cheap");
+    expect(result.candidates[0]?.modelId).toBe("model.cheap");
   });
 
   it("drops cost entirely when nothing eligible has a price, and says so", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.a", { pricing: undefined }), candidate("deployment.b", { pricing: undefined })],
-      evidence: [evidenceFor("deployment.a"), evidenceFor("deployment.b")],
+      candidates: [candidate("model.a", { pricing: undefined }), candidate("model.b", { pricing: undefined })],
+      evidence: [evidenceFor("model.a"), evidenceFor("model.b")],
     }));
 
     // Scoring every candidate zero would keep cost's weight while carrying no
@@ -188,31 +188,31 @@ describe("recommend", () => {
   });
 
   it("treats a published price of zero as free, now that null carries the absence", () => {
-    // 12H was raised because the catalog quoted every deployment at 0, where it
+    // 12H was raised because the catalog quoted every model at 0, where it
     // could not be told apart from "no price published" and would have ranked
     // the dearest model first. Hub now publishes real prices and an explicit
     // null for the projections that carry none, so a published zero means what
     // it says -- one of the live ones is named "North Mini Code (free)".
     const free = { currency: "USD", billingMode: "token", unit: 1_000_000, input: "0", output: "0" };
     const result = recommend(options({
-      candidates: [candidate("deployment.zero", { pricing: free }), candidate("deployment.cheap")],
-      evidence: [evidenceFor("deployment.zero"), evidenceFor("deployment.cheap")],
+      candidates: [candidate("model.zero", { pricing: free }), candidate("model.cheap")],
+      evidence: [evidenceFor("model.zero"), evidenceFor("model.cheap")],
     }));
 
-    const zero = result.candidates.find((entry) => entry.deploymentId === "deployment.zero")!;
+    const zero = result.candidates.find((entry) => entry.modelId === "model.zero")!;
     const cost = zero.dimensions!.find((dimension) => dimension.priority === "cost")!;
     expect(cost.score).toBe(1);
     expect(cost.detail).toContain("0.0000 USD per million");
     // Free beats cheap on cost, and cost is enough to decide it here.
-    expect(result.candidates[0]?.deploymentId).toBe("deployment.zero");
+    expect(result.candidates[0]?.modelId).toBe("model.zero");
   });
 
   it("still refuses a price it cannot rank on", () => {
     // Absent and negative are not zero: neither is a statement anyone can rank.
     const negative = { currency: "USD", billingMode: "token", unit: 1_000_000, input: "-1", output: "-1" };
     const result = recommend(options({
-      candidates: [candidate("deployment.negative", { pricing: negative })],
-      evidence: [evidenceFor("deployment.negative")],
+      candidates: [candidate("model.negative", { pricing: negative })],
+      evidence: [evidenceFor("model.negative")],
       constraints: { maxBlendedPricePerMillion: "5" },
     }));
 
@@ -223,23 +223,23 @@ describe("recommend", () => {
   it("excludes what the Agent cannot speak to, or the catalog has withdrawn", () => {
     const result = recommend(options({
       candidates: [
-        candidate("deployment.other-protocol", { protocols: ["apexnova-media-videos"] }),
-        candidate("deployment.down", { availability: "maintenance" }),
-        candidate("deployment.cheap"),
+        candidate("model.other-protocol", { protocols: ["apexnova-media-videos"] }),
+        candidate("model.down", { availability: "maintenance" }),
+        candidate("model.cheap"),
       ],
-      evidence: [evidenceFor("deployment.cheap")],
+      evidence: [evidenceFor("model.cheap")],
     }));
 
-    const byId = new Map(result.candidates.map((entry) => [entry.deploymentId, entry]));
-    expect(byId.get("deployment.other-protocol")?.eligible).toBe(false);
-    expect(byId.get("deployment.other-protocol")?.reasons[0]).toContain("this Agent speaks");
-    expect(byId.get("deployment.down")?.reasons[0]).toContain("maintenance");
+    const byId = new Map(result.candidates.map((entry) => [entry.modelId, entry]));
+    expect(byId.get("model.other-protocol")?.eligible).toBe(false);
+    expect(byId.get("model.other-protocol")?.reasons[0]).toContain("this Agent speaks");
+    expect(byId.get("model.down")?.reasons[0]).toContain("maintenance");
   });
 
   it("honours a price ceiling as a filter with a stated reason", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.dear", { pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "6", output: "18" } })],
-      evidence: [evidenceFor("deployment.dear")],
+      candidates: [candidate("model.dear", { pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "6", output: "18" } })],
+      evidence: [evidenceFor("model.dear")],
       constraints: { maxBlendedPricePerMillion: "1" },
     }));
 
@@ -247,15 +247,15 @@ describe("recommend", () => {
     expect(result.candidates[0]?.reasons[0]).toContain("above the 1 ceiling");
   });
 
-  it("refuses to count an unpriced deployment as inside a price ceiling", () => {
-    // The catalog publishes zero for every deployment (12H), which `recommend`
+  it("refuses to count an unpriced model as inside a price ceiling", () => {
+    // The catalog publishes zero for every model (12H), which `recommend`
     // reads as no price. Letting those through made `--max-price` match
     // everything while reading as "filtered to your budget": the ceiling had no
     // effect and nothing said so. Required capabilities already work this way --
     // unknown is not a pass -- and a budget is no different.
     const result = recommend(options({
-      candidates: [candidate("deployment.unpriced", { pricing: undefined })],
-      evidence: [evidenceFor("deployment.unpriced")],
+      candidates: [candidate("model.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("model.unpriced")],
       constraints: { maxBlendedPricePerMillion: "1" },
     }));
 
@@ -264,10 +264,10 @@ describe("recommend", () => {
     expect(result.candidates[0]?.reasons[0]).toContain("Unknown is not within budget");
   });
 
-  it("leaves an unpriced deployment alone when no ceiling was asked for", () => {
+  it("leaves an unpriced model alone when no ceiling was asked for", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.unpriced", { pricing: undefined })],
-      evidence: [evidenceFor("deployment.unpriced")],
+      candidates: [candidate("model.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("model.unpriced")],
     }));
 
     // Nothing was claimed about price, so nothing has to be proven about it.
@@ -277,8 +277,8 @@ describe("recommend", () => {
 
   it("names what actually excluded everything, rather than one fixed cause", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.unpriced", { pricing: undefined })],
-      evidence: [evidenceFor("deployment.unpriced")],
+      candidates: [candidate("model.unpriced", { pricing: undefined })],
+      evidence: [evidenceFor("model.unpriced")],
       constraints: { maxBlendedPricePerMillion: "1" },
     }));
 
@@ -292,13 +292,13 @@ describe("recommend", () => {
 
   it("does not call a dimension unmeasured on the strength of an empty set", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.priced")],
-      evidence: [evidenceFor("deployment.priced")],
+      candidates: [candidate("model.priced")],
+      evidence: [evidenceFor("model.priced")],
       constraints: { maxBlendedPricePerMillion: "0.0001" },
     }));
 
     expect(result.candidates.every((entry) => !entry.eligible)).toBe(true);
-    // Nothing eligible means no set to look in. "No eligible deployment has a
+    // Nothing eligible means no set to look in. "No eligible model has a
     // price" is vacuously true and would report every runtime dimension as
     // unmeasured; what happened is that nothing got that far, and the exclusion
     // reasons are where that belongs.
@@ -309,25 +309,25 @@ describe("recommend", () => {
   it("excludes a publisher the run refuses, and says which", () => {
     const result = recommend(options({
       candidates: [
-        candidate("deployment.cheap", { publisher: "Zhipu AI" }),
-        candidate("deployment.other", { publisher: "DeepSeek" }),
+        candidate("model.cheap", { publisher: "Zhipu AI" }),
+        candidate("model.other", { publisher: "DeepSeek" }),
       ],
-      evidence: [evidenceFor("deployment.cheap"), evidenceFor("deployment.other")],
+      evidence: [evidenceFor("model.cheap"), evidenceFor("model.other")],
       constraints: { excludePublishers: ["zhipu ai"] },
     }));
 
-    const byId = new Map(result.candidates.map((entry) => [entry.deploymentId, entry]));
+    const byId = new Map(result.candidates.map((entry) => [entry.modelId, entry]));
     // Matched case-insensitively: nobody should have to guess the catalog's
     // capitalisation to keep their code away from a publisher.
-    expect(byId.get("deployment.cheap")?.eligible).toBe(false);
-    expect(byId.get("deployment.cheap")?.reasons[0]).toContain("Published by Zhipu AI");
-    expect(byId.get("deployment.other")?.eligible).toBe(true);
+    expect(byId.get("model.cheap")?.eligible).toBe(false);
+    expect(byId.get("model.cheap")?.reasons[0]).toContain("Published by Zhipu AI");
+    expect(byId.get("model.other")?.eligible).toBe(true);
   });
 
-  it("will not pass a deployment whose publisher the catalog does not name", () => {
+  it("will not pass a model whose publisher the catalog does not name", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.cheap", { publisher: undefined })],
-      evidence: [evidenceFor("deployment.cheap")],
+      candidates: [candidate("model.cheap", { publisher: undefined })],
+      evidence: [evidenceFor("model.cheap")],
       constraints: { excludePublishers: ["Anthropic"] },
     }));
 
@@ -339,36 +339,36 @@ describe("recommend", () => {
 
   it("leaves an unnamed publisher alone when no publisher was excluded", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.cheap", { publisher: undefined })],
-      evidence: [evidenceFor("deployment.cheap")],
+      candidates: [candidate("model.cheap", { publisher: undefined })],
+      evidence: [evidenceFor("model.cheap")],
     }));
 
     expect(result.candidates[0]?.eligible).toBe(true);
   });
 
-  it("considers only the deployments an allowlist names", () => {
+  it("considers only the models an allowlist names", () => {
     const result = recommend(options({
-      candidates: [candidate("deployment.cheap"), candidate("deployment.other"), candidate("deployment.third")],
+      candidates: [candidate("model.cheap"), candidate("model.other"), candidate("model.third")],
       evidence: [
-        evidenceFor("deployment.cheap"),
-        evidenceFor("deployment.other"),
-        evidenceFor("deployment.third"),
+        evidenceFor("model.cheap"),
+        evidenceFor("model.other"),
+        evidenceFor("model.third"),
       ],
-      constraints: { deploymentIds: ["deployment.cheap", "deployment.third"] },
+      constraints: { modelIds: ["model.cheap", "model.third"] },
     }));
 
     // Not "ranked lower": the ones outside the list never entered, so they are
     // absent from the record rather than sitting in it as excluded.
-    expect(result.candidates.map((entry) => entry.deploymentId)).toEqual([
-      "deployment.cheap",
-      "deployment.third",
+    expect(result.candidates.map((entry) => entry.modelId)).toEqual([
+      "model.cheap",
+      "model.third",
     ]);
   });
 
   it("produces the same bytes twice for the same input", () => {
     const input = options({
-      candidates: [candidate("deployment.b"), candidate("deployment.a"), candidate("deployment.c")],
-      evidence: [evidenceFor("deployment.a"), evidenceFor("deployment.b"), evidenceFor("deployment.c")],
+      candidates: [candidate("model.b"), candidate("model.a"), candidate("model.c")],
+      evidence: [evidenceFor("model.a"), evidenceFor("model.b"), evidenceFor("model.c")],
     });
 
     // Same score for all three, so only the tiebreak keeps the order stable.
@@ -376,8 +376,8 @@ describe("recommend", () => {
     const second = JSON.stringify(recommend({ ...input, candidates: [...input.candidates].reverse() }));
 
     expect(first).toBe(second);
-    expect(JSON.parse(first).candidates.map((entry: { deploymentId: string }) => entry.deploymentId))
-      .toEqual(["deployment.a", "deployment.b", "deployment.c"]);
+    expect(JSON.parse(first).candidates.map((entry: { modelId: string }) => entry.modelId))
+      .toEqual(["model.a", "model.b", "model.c"]);
   });
 
   it("keeps sponsorship out of the ranking", () => {

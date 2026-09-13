@@ -87,12 +87,8 @@ function twoModelCatalog(): Awaited<ReturnType<HubCommandService["catalog"]>> {
   return {
     schemaVersion: "0.1", catalogVersion: "cat_2", generatedAt: "2026-09-04T12:00:00Z", expiresAt: "2026-09-04T12:15:00Z", providers: [],
     models: [
-      { id: "model.nova", name: "Nova Coder", publisher: "apexnova", modelType: "chat", capabilities: [], deploymentIds: ["deployment.nova"] },
-      { id: "model.aux", name: "Aux Reasoner", publisher: "apexnova", modelType: "chat", capabilities: [], deploymentIds: ["deployment.aux"] },
-    ],
-    deployments: [
-      { id: "deployment.nova", providerId: "provider.apexnova-ai-hub", modelId: "model.nova", displayName: "Nova Coder", inferenceAlias: "nova", aliases: ["nova"], protocols: [base], limits: { contextWindow: 128000, maxOutputTokens: 8192 }, capabilities: [], capabilityStatements: [], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } },
-      { id: "deployment.aux", providerId: "provider.apexnova-ai-hub", modelId: "model.aux", displayName: "Aux Reasoner", inferenceAlias: "aux", aliases: ["aux"], protocols: [base], limits: { contextWindow: 64000, maxOutputTokens: 4096 }, capabilities: [], capabilityStatements: [], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } },
+      { id: "model.nova", providerId: "provider.apexnova-ai-hub", displayName: "Nova Coder", publisher: "apexnova", modelType: "chat", inferenceAlias: "nova", aliases: ["nova"], protocols: [base], limits: { contextWindow: 128000, maxOutputTokens: 8192 }, capabilities: [], capabilityStatements: [], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } },
+      { id: "model.aux", providerId: "provider.apexnova-ai-hub", displayName: "Aux Reasoner", publisher: "apexnova", modelType: "chat", inferenceAlias: "aux", aliases: ["aux"], protocols: [base], limits: { contextWindow: 64000, maxOutputTokens: 4096 }, capabilities: [], capabilityStatements: [], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } },
     ],
   };
 }
@@ -108,19 +104,18 @@ function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService 
     balance: async () => ({ currency: "USD", normalBalance: "20.000000", held: "2.000000", normalAvailable: "18.000000", promoCredits: [], asOf: "2026-09-04T12:00:00Z" }),
     catalog: async () => ({
       schemaVersion: "0.1", catalogVersion: "cat_1", generatedAt: "2026-09-04T12:00:00Z", expiresAt: "2026-09-04T12:15:00Z", providers: [],
-      models: [{ id: "model.nova", name: "Nova Coder", publisher: "apexnova", modelType: "chat", capabilities: ["tool.calling"], deploymentIds: ["deployment.nova"] }],
-      deployments: [{ id: "deployment.nova", providerId: "provider.apexnova-ai-hub", modelId: "model.nova", displayName: "Nova Coder", inferenceAlias: "nova", aliases: ["nova"], protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }], limits: { contextWindow: 128000, maxOutputTokens: 8192 }, capabilities: ["tool.calling"], capabilityStatements: [{ capabilityId: "tool.calling", support: "supported" as const, sourceType: "provider-claim" as const }], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } }],
+      models: [{ id: "model.nova", providerId: "provider.apexnova-ai-hub", displayName: "Nova Coder", publisher: "apexnova", modelType: "chat", inferenceAlias: "nova", aliases: ["nova"], protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }], limits: { contextWindow: 128000, maxOutputTokens: 8192 }, capabilities: ["tool.calling"], capabilityStatements: [{ capabilityId: "tool.calling", support: "supported" as const, sourceType: "provider-claim" as const }], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } }],
     }),
-    estimatePricing: async () => ({ deploymentId: "deployment.nova", model: "nova", currency: "USD", billingMode: "token", listAmount: "0.000120", discountRate: "0.5", amount: "0.000060", priceVersion: "2026-09-05T10:00:00Z", estimateOnly: true }),
+    estimatePricing: async () => ({ modelId: "model.nova", model: "nova", currency: "USD", billingMode: "token", listAmount: "0.000120", discountRate: "0.5", amount: "0.000060", priceVersion: "2026-09-05T10:00:00Z", estimateOnly: true }),
     usage: async () => undefined,
     usageQuery: async () => ({ items: [], asOf: "2026-09-06T12:00:00Z" }),
     createRuntimeCredential: async () => ({ credentialId: "rtc_1", expiresAt: "2099-09-05T12:00:00Z", deviceId: "device_1", secret: SecretValue.from("runtime-secret") }),
-    runtimeCredentials: async () => [{ credentialId: "rtc_1", name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], expiresAt: "2099-09-05T12:00:00Z", createdAt: "2026-09-05T12:00:00Z" }],
+    runtimeCredentials: async () => [{ credentialId: "rtc_1", name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1", protocols: ["openai-responses"], modelIds: ["model.nova"], expiresAt: "2099-09-05T12:00:00Z", createdAt: "2026-09-05T12:00:00Z" }],
     revokeRuntimeCredential: async () => undefined,
-    createApiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z", secret: SecretValue.from("api-key-secret") }),
+    createApiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], modelIds: ["model.nova"], createdAt: "2026-09-06T12:00:00Z", secret: SecretValue.from("api-key-secret") }),
     apiKeys: async () => [],
-    apiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z" }),
-    updateApiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], createdAt: "2026-09-06T12:00:00Z" }),
+    apiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], modelIds: ["model.nova"], createdAt: "2026-09-06T12:00:00Z" }),
+    updateApiKey: async () => ({ id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user", protocols: ["openai-responses"], modelIds: ["model.nova"], createdAt: "2026-09-06T12:00:00Z" }),
     revokeApiKey: async () => undefined,
     submitEvidence: async (_profile, evidence) => ({
       record: {
@@ -237,7 +232,7 @@ describe("CLI", () => {
       credentialId: "key_1",
       secret: SecretValue.from("helper-secret"),
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
       kind: "user",
     });
 
@@ -311,7 +306,7 @@ describe("CLI", () => {
 
   it("refuses to plan against a product version the manifest does not cover", async () => {
     const capture = captureIo();
-    const result = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--dry-run", "--json"], {
+    const result = await runCli(["connect", "opencode", "--model", "model.nova", "--dry-run", "--json"], {
       io: capture.io,
       hubService: mockHub(),
       registry: registryWith({
@@ -466,12 +461,12 @@ describe("CLI", () => {
     expect(output.warnings.join(" ")).toContain("compatibility:write");
   });
 
-  it("joins and filters Hub catalog deployments for OpenCode", async () => {
+  it("joins and filters Hub catalog models for OpenCode", async () => {
     const capture = captureIo();
     const result = await runCli(["models", "--agent", "opencode", "--compatible-only", "--json"], { io: capture.io, hubService: mockHub(), createRequestId: () => "local_models" });
     const output = JSON.parse(capture.stdout());
     expect(result.exitCode).toBe(EXIT_CODES.success);
-    expect(output.data.deployments[0]).toMatchObject({ id: "deployment.nova", model: { name: "Nova Coder" }, compatibility: "adapter-supported-unverified" });
+    expect(output.data.models[0]).toMatchObject({ id: "model.nova", displayName: "Nova Coder", inferenceAlias: "nova", compatibility: "adapter-supported-unverified" });
     expect(output.warnings[0]).toContain("not Agent compatibility evidence");
   });
 
@@ -504,7 +499,7 @@ describe("CLI", () => {
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
     const state = await isolatedState();
     const logout = vi.fn(mockHub().logout);
@@ -542,7 +537,7 @@ describe("CLI", () => {
     const original = "{\n  // keep this\n  \"theme\": \"dark\"\n}\n";
     await writeFile(configPath, original, "utf8");
     const capture = captureIo();
-    const result = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--dry-run", "--json"], {
+    const result = await runCli(["connect", "opencode", "--model", "model.nova", "--dry-run", "--json"], {
       io: capture.io,
       hubService: mockHub(),
       registry: registryWith({ detect: async () => ({ ...installed, configPath }), inspect: async () => ({ agentId: "opencode", configPath, status: "not-configured", managed: false, warnings: [] }) }),
@@ -550,7 +545,7 @@ describe("CLI", () => {
     });
     const output = JSON.parse(capture.stdout());
     expect(result.exitCode).toBe(EXIT_CODES.success);
-    expect(output.data).toMatchObject({ dryRun: true, deploymentId: "deployment.nova", protocol: "openai-responses" });
+    expect(output.data).toMatchObject({ dryRun: true, modelId: "model.nova", protocol: "openai-responses" });
     expect(output.data.plan.operations[0]).not.toHaveProperty("content");
     expect(output.data.plan.operations[0].contentBytes).toBeGreaterThan(0);
     expect(await readFile(configPath, "utf8")).toBe(original);
@@ -565,43 +560,43 @@ describe("CLI", () => {
       createRequestId: () => "local_alias",
     };
 
-    // "nova" is the inference alias of deployment.nova; a user reads it off
+    // "nova" is the inference alias of model.nova; a user reads it off
     // `apexnova models`, not the long catalog ID.
     const capture = captureIo();
     const byAlias = await runCli(
-      ["connect", "opencode", "--deployment", "nova", "--dry-run", "--json"],
+      ["connect", "opencode", "--model", "nova", "--dry-run", "--json"],
       { ...common, io: capture.io, hubService: mockHub() },
     );
     expect(byAlias.exitCode).toBe(EXIT_CODES.success);
-    expect(JSON.parse(capture.stdout()).data).toMatchObject({ deploymentId: "deployment.nova" });
+    expect(JSON.parse(capture.stdout()).data).toMatchObject({ modelId: "model.nova" });
 
-    // Two deployments answering to one alias is not something to guess at.
+    // Two models answering to one alias is not something to guess at.
     const base = await mockHub().catalog("default", new AbortController().signal);
-    const first = base.deployments[0]!;
+    const first = base.models[0]!;
     const ambiguous = mockHub({
       catalog: async () => ({
         ...base,
-        deployments: [first, { ...first, id: "deployment.nova-eu" }],
+        models: [first, { ...first, id: "model.nova-eu" }],
       }),
     });
     const ambiguousCapture = captureIo();
     const refused = await runCli(
-      ["connect", "opencode", "--deployment", "nova", "--dry-run", "--json"],
+      ["connect", "opencode", "--model", "nova", "--dry-run", "--json"],
       { ...common, io: ambiguousCapture.io, hubService: ambiguous },
     );
     expect(refused.exitCode).toBe(EXIT_CODES.usage);
     const error = JSON.parse(ambiguousCapture.stdout()).error;
-    expect(error.code).toBe("DEPLOYMENT_AMBIGUOUS");
-    expect(error.details.deploymentIds).toEqual(["deployment.nova", "deployment.nova-eu"]);
+    expect(error.code).toBe("MODEL_AMBIGUOUS");
+    expect(error.details.modelIds).toEqual(["model.nova", "model.nova-eu"]);
 
-    // An ID still wins outright, so an alias cannot shadow another deployment.
+    // An ID still wins outright, so an alias cannot shadow another model.
     const idCapture = captureIo();
     const byId = await runCli(
-      ["connect", "opencode", "--deployment", "deployment.nova-eu", "--dry-run", "--json"],
+      ["connect", "opencode", "--model", "model.nova-eu", "--dry-run", "--json"],
       { ...common, io: idCapture.io, hubService: ambiguous },
     );
     expect(byId.exitCode).toBe(EXIT_CODES.success);
-    expect(JSON.parse(idCapture.stdout()).data).toMatchObject({ deploymentId: "deployment.nova-eu" });
+    expect(JSON.parse(idCapture.stdout()).data).toMatchObject({ modelId: "model.nova-eu" });
   });
 
   it("requires explicit approval before issuing a runtime credential", async () => {
@@ -610,7 +605,7 @@ describe("CLI", () => {
     await writeFile(configPath, "{}\n", "utf8");
     const capture = captureIo();
     const issue = vi.fn(mockHub().createRuntimeCredential);
-    const result = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--json"], { io: capture.io, hubService: mockHub({ createRuntimeCredential: issue }), registry: registryWith({ detect: async () => ({ ...installed, configPath }) }), createRequestId: () => "local_approval" });
+    const result = await runCli(["connect", "opencode", "--model", "model.nova", "--json"], { io: capture.io, hubService: mockHub({ createRuntimeCredential: issue }), registry: registryWith({ detect: async () => ({ ...installed, configPath }) }), createRequestId: () => "local_approval" });
     expect(result.exitCode).toBe(EXIT_CODES.permission);
     expect(JSON.parse(capture.stdout()).error.code).toBe("APPROVAL_REQUIRED");
     expect(issue).not.toHaveBeenCalled();
@@ -636,7 +631,7 @@ describe("CLI", () => {
       cwd: root,
       createRequestId: () => "local_connect",
     };
-    const connected = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--yes", "--json"], common);
+    const connected = await runCli(["connect", "opencode", "--model", "model.nova", "--yes", "--json"], common);
     const output = JSON.parse(capture.stdout());
     expect(connected.exitCode).toBe(EXIT_CODES.success);
     expect(output.data).toMatchObject({ connected: true, credentialId: "rtc_1" });
@@ -674,15 +669,15 @@ describe("CLI", () => {
     const configPath = join(root, "opencode.jsonc");
     await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
     const credentials = memoryCredentials();
-    const createApiKey = vi.fn(async (_profile: string, input: { publicDeploymentIds?: readonly string[] }) => ({
+    const createApiKey = vi.fn(async (_profile: string, input: { modelIds?: readonly string[] }) => ({
       id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user" as const,
-      protocols: ["openai-responses"], publicDeploymentIds: [...(input.publicDeploymentIds ?? [])],
+      protocols: ["openai-responses"], modelIds: [...(input.modelIds ?? [])],
       createdAt: "2026-09-06T12:00:00Z", secret: SecretValue.from("api-key-secret"),
     }));
     const capture = captureIo();
 
     const result = await runCli(
-      ["run", "opencode", "--deployment", "deployment.nova", "--deployment", "deployment.aux", "--json"],
+      ["run", "opencode", "--model", "model.nova", "--model", "model.aux", "--json"],
       {
         io: capture.io,
         credentialStore: credentials,
@@ -703,7 +698,7 @@ describe("CLI", () => {
     // One key for the whole set: the Agent switches models inside its own UI,
     // and a key scoped to the default alone would fail closed on the second one.
     expect(createApiKey.mock.calls[0]?.[1]).toMatchObject({
-      publicDeploymentIds: ["deployment.nova", "deployment.aux"],
+      modelIds: ["model.nova", "model.aux"],
       expiresIn: null,
     });
     const config = JSON.parse(await readFile(configPath, "utf8")) as {
@@ -712,9 +707,281 @@ describe("CLI", () => {
     };
     expect(Object.keys(config.provider.apexnova.models)).toEqual(["nova", "aux"]);
     expect(config.model).toBe("apexnova/nova");
-    expect(JSON.parse(capture.stdout()).data).toMatchObject({ deploymentId: "deployment.nova", credentialKind: "user" });
+    expect(JSON.parse(capture.stdout()).data).toMatchObject({ modelId: "model.nova", credentialKind: "user" });
     const binding = await new RuntimeBindingStore(credentials).load("opencode", "default");
-    expect(binding?.deploymentIds).toEqual(["deployment.nova", "deployment.aux"]);
+    expect(binding?.modelIds).toEqual(["model.nova", "model.aux"]);
+  });
+
+  it("lists models without touching the configuration, even on a terminal", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-models-read-"));
+    const configPath = join(root, "opencode.jsonc");
+    const before = "{\n  \"theme\": \"dark\"\n}\n";
+    await writeFile(configPath, before, "utf8");
+    const credentials = memoryCredentials();
+    const createApiKey = vi.fn(async () => { throw new Error("listing models must not issue a credential"); });
+    const capture = captureIo();
+
+    const result = await runCli(["models", "--agent", "opencode"], {
+      io: { ...capture.io, isInteractive: true },
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({
+        catalog: async () => twoModelCatalog(),
+        createApiKey: createApiKey as unknown as HubCommandService["createApiKey"],
+      }),
+      // A picker offered here would be the old behaviour: `models` reads.
+      pick: (async () => { throw new Error("models must not ask the user to choose"); }) as never,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_models_read",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    expect(createApiKey).not.toHaveBeenCalled();
+    expect(await readFile(configPath, "utf8")).toBe(before);
+    expect(await new RuntimeBindingStore(credentials).load("opencode", "default")).toBeNull();
+    expect(capture.stdout()).toContain("model.nova");
+    expect(capture.stdout()).toContain("model.aux");
+  });
+
+  it("refuses a named switch target on a terminal that cannot be asked", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-approve-"));
+    const configPath = join(root, "opencode.jsonc");
+    const before = "{\n  \"theme\": \"dark\"\n}\n";
+    await writeFile(configPath, before, "utf8");
+    const credentials = memoryCredentials();
+    const capture = captureIo();
+
+    const result = await runCli(["switch", "opencode", "--model", "model.aux", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({ catalog: async () => twoModelCatalog() }),
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_switch_approve",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.permission);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "APPROVAL_REQUIRED" } });
+    expect(await readFile(configPath, "utf8")).toBe(before);
+  });
+
+  it("shows the model set a switch would leave behind, and writes nothing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-dry-"));
+    const configPath = join(root, "opencode.jsonc");
+    const before = "{\n  \"theme\": \"dark\"\n}\n";
+    await writeFile(configPath, before, "utf8");
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "key_1",
+      secret: SecretValue.from("api-key-secret"),
+      protocol: "openai-responses",
+      modelId: "model.nova",
+      kind: "user",
+    });
+    const capture = captureIo();
+
+    const result = await runCli(["switch", "opencode", "--model", "model.aux", "--dry-run", "--json"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({ catalog: async () => twoModelCatalog() }),
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_switch_dry",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    // The plan names both, because the write keeps both. A dry-run that showed
+    // only the new model would be describing `connect`, not this.
+    expect(JSON.parse(capture.stdout()).data).toMatchObject({
+      dryRun: true,
+      modelId: "model.aux",
+      modelIds: ["model.aux", "model.nova"],
+      addedToConfiguration: true,
+    });
+    expect(await readFile(configPath, "utf8")).toBe(before);
+  });
+
+  it("keeps the permanent key when a switch fails to verify", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-keep-key-"));
+    const configPath = join(root, "opencode.jsonc");
+    const before = "{\n  \"theme\": \"dark\"\n}\n";
+    await writeFile(configPath, before, "utf8");
+    const credentials = memoryCredentials();
+    const bindings = new RuntimeBindingStore(credentials);
+    await bindings.save("opencode", "default", {
+      credentialId: "key_1",
+      secret: SecretValue.from("api-key-secret"),
+      protocol: "openai-responses",
+      modelId: "model.nova",
+      kind: "user",
+    });
+    const revokeApiKey = vi.fn(async () => undefined);
+    const capture = captureIo();
+
+    const result = await runCli(["switch", "opencode", "--model", "model.aux", "--yes"], {
+      io: capture.io,
+      credentialStore: credentials,
+      registry: registryWith({
+        detect: async () => ({ ...installed, configPath }),
+        verify: async () => ({ valid: false as const, reason: "the written configuration did not read back" }),
+      }),
+      hubService: mockHub({
+        catalog: async () => twoModelCatalog(),
+        updateApiKey: (async (_profile: string, id: string, input: { modelIds?: readonly string[] }) => ({
+          id, name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user" as const,
+          protocols: ["openai-responses"], modelIds: [...(input.modelIds ?? [])],
+          createdAt: "2026-09-06T12:00:00Z",
+        })) as unknown as HubCommandService["updateApiKey"],
+        revokeApiKey,
+      }),
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_switch_keep_key",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.verification);
+    // The key was widened, not issued, so it is not this command's to revoke --
+    // and revoking it would take away the key every configured model runs on.
+    expect(revokeApiKey).not.toHaveBeenCalled();
+    expect(await readFile(configPath, "utf8")).toBe(before);
+    expect((await bindings.load("opencode", "default"))?.credentialId).toBe("key_1");
+  });
+
+  it("asks before applying a named switch target, and applies nothing when the answer is no", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-ask-"));
+    const configPath = join(root, "opencode.jsonc");
+    const before = "{\n  \"theme\": \"dark\"\n}\n";
+    await writeFile(configPath, before, "utf8");
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "key_1",
+      secret: SecretValue.from("api-key-secret"),
+      protocol: "openai-responses",
+      modelId: "model.nova",
+      kind: "user",
+    });
+    const createApiKey = vi.fn(async () => { throw new Error("a declined switch must not issue anything"); });
+    const asked: string[] = [];
+    const capture = captureIo();
+
+    const declined = await runCli(["switch", "opencode", "--model", "model.aux"], {
+      io: { ...capture.io, isInteractive: true },
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({
+        catalog: async () => twoModelCatalog(),
+        createApiKey: createApiKey as unknown as HubCommandService["createApiKey"],
+      }),
+      confirm: async (message: string) => { asked.push(message); return false; },
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_switch_ask",
+    });
+
+    expect(asked).toHaveLength(1);
+    expect(declined.exitCode).toBe(EXIT_CODES.permission);
+    expect(createApiKey).not.toHaveBeenCalled();
+    expect(await readFile(configPath, "utf8")).toBe(before);
+    // What it is about to do is on screen before the question, because
+    // --model alone says nothing about which models stay or which key pays.
+    expect(capture.stdout()).toContain("model.aux");
+    expect(capture.stdout()).toContain("model.aux, model.nova");
+    expect(capture.stdout()).toContain("Key key_1 is widened, not replaced.");
+  });
+
+  it("applies a named switch target once the answer is yes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-ask-yes-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
+    const credentials = memoryCredentials();
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "key_1",
+      secret: SecretValue.from("api-key-secret"),
+      protocol: "openai-responses",
+      modelId: "model.nova",
+      kind: "user",
+    });
+    const capture = captureIo();
+
+    const result = await runCli(["switch", "opencode", "--model", "model.aux"], {
+      io: { ...capture.io, isInteractive: true },
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({
+        catalog: async () => twoModelCatalog(),
+        updateApiKey: (async (_profile: string, id: string, input: { modelIds?: readonly string[] }) => ({
+          id, name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user" as const,
+          protocols: ["openai-responses"], modelIds: [...(input.modelIds ?? [])],
+          createdAt: "2026-09-06T12:00:00Z",
+        })) as unknown as HubCommandService["updateApiKey"],
+      }),
+      confirm: async () => true,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_switch_ask_yes",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const binding = await new RuntimeBindingStore(credentials).load("opencode", "default");
+    expect(binding?.credentialId).toBe("key_1");
+    expect(binding?.modelIds).toEqual(["model.aux", "model.nova"]);
+  });
+
+  it("lists and offers models in the order the catalog hands them over", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-models-order-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
+    // The catalog arrives in the order Hub lists its models, which is the order
+    // the model plaza shows. Every list Connect draws from it is that order, so
+    // a reader comparing the two never has to work out why they disagree --
+    // `joinCatalog` establishes it, and nothing here re-sorts.
+    const base = twoModelCatalog();
+    const catalog = { ...base, models: [...base.models].reverse() };
+    expect(catalog.models.map((model) => model.id)).toEqual(["model.aux", "model.nova"]);
+
+    const listed = captureIo();
+    const result = await runCli(["models", "--agent", "opencode", "--json"], {
+      io: listed.io,
+      credentialStore: memoryCredentials(),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({ catalog: async () => catalog }),
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_models_order",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const data = JSON.parse(listed.stdout()).data as { models: readonly { id: string }[] };
+    expect(data.models.map((model) => model.id)).toEqual(["model.aux", "model.nova"]);
+
+    // The picker reads the same catalog, so it offers the same order.
+    const offered: string[] = [];
+    await runCli(["switch", "opencode"], {
+      io: { ...captureIo().io, isInteractive: true },
+      credentialStore: memoryCredentials(),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({ catalog: async () => catalog }),
+      pick: (async (_message: string, items: readonly { value: { id: string } }[]) => {
+        offered.push(...items.map((item) => item.value.id));
+        // Reading the list is the whole assertion; nothing past it matters.
+        throw new Error("stop after the list was offered");
+      }) as never,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_switch_order",
+    });
+    expect(offered).toEqual(["model.aux", "model.nova"]);
   });
 
   it("adds a switched-to model to the configuration on the key that is already there", async () => {
@@ -727,19 +994,19 @@ describe("CLI", () => {
       credentialId: "key_1",
       secret: SecretValue.from("api-key-secret"),
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
       kind: "user",
     });
     const createApiKey = vi.fn(async () => { throw new Error("a switch must not mint a second key"); });
-    const updateApiKey = vi.fn(async (_profile: string, id: string, input: { publicDeploymentIds?: readonly string[] }) => ({
+    const updateApiKey = vi.fn(async (_profile: string, id: string, input: { modelIds?: readonly string[] }) => ({
       id, name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user" as const,
-      protocols: ["openai-responses"], publicDeploymentIds: [...(input.publicDeploymentIds ?? [])],
+      protocols: ["openai-responses"], modelIds: [...(input.modelIds ?? [])],
       createdAt: "2026-09-06T12:00:00Z",
     }));
     const revokeApiKey = vi.fn(async () => undefined);
     const capture = captureIo();
 
-    const result = await runCli(["models", "--agent", "opencode"], {
+    const result = await runCli(["switch", "opencode"], {
       io: { ...capture.io, isInteractive: true },
       credentialStore: credentials,
       registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
@@ -750,7 +1017,7 @@ describe("CLI", () => {
         revokeApiKey,
       }),
       pick: (async (_message: string, items: readonly { value: { id: string } }[]) =>
-        items.find((item) => item.value.id === "deployment.aux")!.value) as never,
+        items.find((item) => item.value.id === "model.aux")!.value) as never,
       platform: "win32",
       environment: { LOCALAPPDATA: root },
       homeDirectory: root,
@@ -762,7 +1029,7 @@ describe("CLI", () => {
     expect(createApiKey).not.toHaveBeenCalled();
     expect(revokeApiKey).not.toHaveBeenCalled();
     expect(updateApiKey.mock.calls[0]?.[1]).toBe("key_1");
-    expect(updateApiKey.mock.calls[0]?.[2]).toMatchObject({ publicDeploymentIds: ["deployment.aux", "deployment.nova"] });
+    expect(updateApiKey.mock.calls[0]?.[2]).toMatchObject({ modelIds: ["model.aux", "model.nova"] });
     const config = JSON.parse(await readFile(configPath, "utf8")) as {
       model: string;
       provider: { apexnova: { models: Record<string, unknown> } };
@@ -773,8 +1040,8 @@ describe("CLI", () => {
     const binding = await new RuntimeBindingStore(credentials).load("opencode", "default");
     expect(binding?.credentialId).toBe("key_1");
     expect(binding?.secret.reveal()).toBe("api-key-secret");
-    expect(binding?.deploymentId).toBe("deployment.aux");
-    expect(binding?.deploymentIds).toEqual(["deployment.aux", "deployment.nova"]);
+    expect(binding?.modelId).toBe("model.aux");
+    expect(binding?.modelIds).toEqual(["model.aux", "model.nova"]);
     expect(capture.stdout()).toContain("2 models stay configured");
   });
 
@@ -796,7 +1063,7 @@ describe("CLI", () => {
       // The default is a choice of its own: taking whichever the checkbox listed
       // first would be a decision nobody made.
       pick: (async (_message: string, items: readonly { value: { id: string } }[]) =>
-        items.find((item) => item.value.id === "deployment.aux")!.value) as never,
+        items.find((item) => item.value.id === "model.aux")!.value) as never,
       platform: "win32",
       environment: { LOCALAPPDATA: root },
       homeDirectory: root,
@@ -813,12 +1080,12 @@ describe("CLI", () => {
     expect(capture.stderr()).toContain("2 models on one key");
   });
 
-  describe("a switch that fails", () => {
-    // The exit condition is that a failed switch does not damage the Agent
+  describe("a reconnect that fails", () => {
+    // The exit condition is that a failed reconnect does not damage the Agent
     // configuration. Until now only the success path had been exercised, so
-    // each of the three places a switch can fail is injected here and the
-    // profile is asserted back at where it started -- configuration, binding and
-    // which credential Hub still has.
+    // each of the three places it can fail is injected here and the profile is
+    // asserted back at where it started -- configuration, binding and which
+    // credential Hub still has.
     async function connectedProfile(name: string) {
       const root = await mkdtemp(join(tmpdir(), `apexnova-cli-switch-${name}-`));
       const configPath = join(root, "opencode.jsonc");
@@ -828,10 +1095,10 @@ describe("CLI", () => {
       const baseCatalog = await mockHub().catalog("default", new AbortController().signal);
       const catalog = {
         ...baseCatalog,
-        deployments: baseCatalog.deployments.map((deployment) => ({
-          ...deployment,
+        models: baseCatalog.models.map((model) => ({
+          ...model,
           protocols: [
-            ...deployment.protocols,
+            ...model.protocols,
             { protocol: "openai-chat", baseUrl: "https://api.example.test/v1/chat/completions" },
           ],
         })),
@@ -855,7 +1122,7 @@ describe("CLI", () => {
           prefix: "anrt_test...test",
           deviceId: "device_1",
           protocols: ["openai-responses", "openai-chat"],
-          publicDeploymentIds: ["deployment.nova"],
+          modelIds: ["model.nova"],
           expiresAt: "2099-09-05T12:00:00Z",
           createdAt: "2026-09-05T12:00:00Z",
         })),
@@ -872,7 +1139,7 @@ describe("CLI", () => {
       };
 
       const connected = await runCli(
-        ["connect", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-responses", "--yes", "--json"],
+        ["connect", "opencode", "--model", "model.nova", "--protocol", "openai-responses", "--yes", "--json"],
         { ...common, io: captureIo().io },
       );
       expect(connected.exitCode).toBe(EXIT_CODES.success);
@@ -893,7 +1160,7 @@ describe("CLI", () => {
       const capture = captureIo();
 
       const result = await runCli(
-        ["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes"],
+        ["connect", "opencode", "--model", "model.nova", "--protocol", "openai-chat", "--yes"],
         {
           ...profile.common,
           io: capture.io,
@@ -916,7 +1183,7 @@ describe("CLI", () => {
       const capture = captureIo();
 
       const result = await runCli(
-        ["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes"],
+        ["connect", "opencode", "--model", "model.nova", "--protocol", "openai-chat", "--yes"],
         {
           ...profile.common,
           io: capture.io,
@@ -948,7 +1215,7 @@ describe("CLI", () => {
       };
 
       const result = await runCli(
-        ["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes"],
+        ["connect", "opencode", "--model", "model.nova", "--protocol", "openai-chat", "--yes"],
         { ...profile.common, io: capture.io, credentialStore: failingStore },
       );
 
@@ -964,7 +1231,7 @@ describe("CLI", () => {
     });
   });
 
-  it("reissues the previous runtime target when restoring a switch, then disconnects on the initial restore", async () => {
+  it("reissues the previous runtime target when restoring a reconnect, then disconnects on the initial restore", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-restore-"));
     const configPath = join(root, "opencode.jsonc");
     const original = "{\n  \"theme\": \"dark\"\n}\n";
@@ -974,21 +1241,21 @@ describe("CLI", () => {
     const baseCatalog = await mockHub().catalog("default", new AbortController().signal);
     const catalog = {
       ...baseCatalog,
-      deployments: baseCatalog.deployments.map((deployment) => ({
-        ...deployment,
+      models: baseCatalog.models.map((model) => ({
+        ...model,
         protocols: [
-          ...deployment.protocols,
+          ...model.protocols,
           { protocol: "openai-chat", baseUrl: "https://api.example.test/v1/chat/completions" },
         ],
       })),
     };
-    const active = new Map<string, { readonly protocol: string; readonly deploymentId: string; readonly expiresAt: string }>();
+    const active = new Map<string, { readonly protocol: string; readonly modelId: string; readonly expiresAt: string }>();
     let credentialSequence = 0;
     const createRuntimeCredential: HubCommandService["createRuntimeCredential"] = async (_profile, input) => {
       credentialSequence += 1;
       const credentialId = `rtc_${credentialSequence}`;
       const expiresAt = "2099-09-05T12:00:00Z";
-      active.set(credentialId, { protocol: input.protocols[0]!, deploymentId: input.publicDeploymentIds[0]!, expiresAt });
+      active.set(credentialId, { protocol: input.protocols[0]!, modelId: input.modelIds[0]!, expiresAt });
       return { credentialId, expiresAt, deviceId: "device_1", secret: SecretValue.from(`runtime-secret-${credentialSequence}`) };
     };
     const revokeRuntimeCredential = vi.fn(async (_profile: string, credentialId: string) => { active.delete(credentialId); });
@@ -998,7 +1265,7 @@ describe("CLI", () => {
       prefix: "anrt_test...test",
       deviceId: "device_1",
       protocols: [item.protocol],
-      publicDeploymentIds: [item.deploymentId],
+      modelIds: [item.modelId],
       expiresAt: item.expiresAt,
       createdAt: "2026-09-05T12:00:00Z",
     }));
@@ -1015,12 +1282,12 @@ describe("CLI", () => {
     };
 
     const connectCapture = captureIo();
-    const connected = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-responses", "--yes", "--json"], { ...common, io: connectCapture.io });
+    const connected = await runCli(["connect", "opencode", "--model", "model.nova", "--protocol", "openai-responses", "--yes", "--json"], { ...common, io: connectCapture.io });
     expect(connected.exitCode).toBe(EXIT_CODES.success);
     const initialTransactionId = JSON.parse(connectCapture.stdout()).data.transactionId as string;
 
     const switchCapture = captureIo();
-    const switched = await runCli(["switch", "opencode", "--deployment", "deployment.nova", "--protocol", "openai-chat", "--yes", "--json"], { ...common, io: switchCapture.io });
+    const switched = await runCli(["connect", "opencode", "--model", "model.nova", "--protocol", "openai-chat", "--yes", "--json"], { ...common, io: switchCapture.io });
     expect(switched.exitCode).toBe(EXIT_CODES.success);
     const switchTransactionId = JSON.parse(switchCapture.stdout()).data.transactionId as string;
     expect(switchTransactionId).not.toBe(initialTransactionId);
@@ -1028,7 +1295,7 @@ describe("CLI", () => {
       credentialId: "rtc_2",
       protocol: "openai-chat",
       transactionId: switchTransactionId,
-      restoreTarget: { protocol: "openai-responses", deploymentId: "deployment.nova", transactionId: initialTransactionId },
+      restoreTarget: { protocol: "openai-responses", modelId: "model.nova", transactionId: initialTransactionId },
     });
     const storedAfterSwitch = await credentials.get({ integrationId: "opencode", accountId: "default", kind: "runtime-credential" });
     expect(storedAfterSwitch?.reveal()).not.toContain("runtime-secret-1");
@@ -1069,14 +1336,14 @@ describe("CLI", () => {
     }).list();
     expect(audit.map((entry) => `${entry.event}/${entry.command}/${entry.grounds ?? "-"}`)).toEqual([
       "selected/connect/explicit",
-      "selected/switch/explicit",
+      "selected/connect/explicit",
       "selected/restore/restore",
       "released/restore/-",
     ]);
     // Undoing the switch puts the first target back; undoing the first connect
     // leaves none, and says so rather than recording a selection of nothing.
-    expect(audit[2]).toMatchObject({ deploymentId: "deployment.nova", protocol: "openai-responses" });
-    expect(audit[3]?.deploymentId).toBeUndefined();
+    expect(audit[2]).toMatchObject({ modelId: "model.nova", protocol: "openai-responses" });
+    expect(audit[3]?.modelId).toBeUndefined();
   });
 
   it("restores the transaction the backups name even when the stored binding disagrees", async () => {
@@ -1099,7 +1366,7 @@ describe("CLI", () => {
       cwd: root,
       createRequestId: () => "local_binding_drift",
     };
-    const connected = await runCli(["connect", "opencode", "--deployment", "deployment.nova", "--yes", "--json"], common);
+    const connected = await runCli(["connect", "opencode", "--model", "model.nova", "--yes", "--json"], common);
     expect(connected.exitCode).toBe(EXIT_CODES.success);
     const transactionId = JSON.parse(capture.stdout()).data.transactionId as string;
 
@@ -1110,7 +1377,7 @@ describe("CLI", () => {
     await bindings.save("opencode", "default", {
       ...stored!,
       transactionId: "transaction-1757000000000-2b1de0f4-2f5c-4a0e-9d0f-1f9a0b6c7d8e",
-      restoreTarget: { protocol: "openai-responses", deploymentId: "deployment.nova" },
+      restoreTarget: { protocol: "openai-responses", modelId: "model.nova" },
     });
 
     const restoreCapture = captureIo();
@@ -1135,7 +1402,7 @@ describe("CLI", () => {
       secret: SecretValue.from("old-runtime-secret"),
       expiresAt: "2026-09-05T10:30:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
     const issue = vi.fn(async () => ({ credentialId: "rtc_new", expiresAt: "2026-09-06T10:00:00Z", deviceId: "device_1", secret: SecretValue.from("new-runtime-secret") }));
     const revoke = vi.fn(async () => undefined);
@@ -1147,7 +1414,7 @@ describe("CLI", () => {
       registry: registryWith({ detect: async () => installed }),
       hubService: mockHub({
         createRuntimeCredential: issue,
-        runtimeCredentials: async () => [{ credentialId: "rtc_new", name: "OpenCode", prefix: "anrt_new...test", deviceId: "device_1", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"], expiresAt: "2026-09-06T10:00:00Z", createdAt: "2026-09-05T10:00:00Z" }],
+        runtimeCredentials: async () => [{ credentialId: "rtc_new", name: "OpenCode", prefix: "anrt_new...test", deviceId: "device_1", protocols: ["openai-responses"], modelIds: ["model.nova"], expiresAt: "2026-09-06T10:00:00Z", createdAt: "2026-09-05T10:00:00Z" }],
         revokeRuntimeCredential: revoke,
       }),
       launchAgent: async ({ args: _args, environment: environment }) => { launchedSecret = environment.APEXNOVA_API_KEY; return 0; },
@@ -1175,7 +1442,7 @@ describe("CLI", () => {
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2026-12-01T10:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
     // Before the launch the hour is empty; afterwards two requests exist, paid
     // for by a long-lived key nobody here issued. That is the 2026-09-11 failure
@@ -1198,7 +1465,7 @@ describe("CLI", () => {
                   bucketStart: "2026-09-11T15:00:00Z",
                   apiKeyId: "key_theirs",
                   apiKeyName: "myopencode",
-                  publicDeploymentId: "deployment.other",
+                  publicDeploymentId: "model.other",
                   resolvedModel: "glm-5.2",
                   requestCount: 2,
                   normalCost: "0.005693",
@@ -1232,7 +1499,7 @@ describe("CLI", () => {
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2026-12-01T10:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
     let call = 0;
     const capture = captureIo();
@@ -1249,7 +1516,7 @@ describe("CLI", () => {
             items: [{
               bucketStart: "2026-09-11T15:00:00Z",
               apiKeyId: "rtc_ours",
-              publicDeploymentId: "deployment.nova",
+              publicDeploymentId: "model.nova",
               requestCount,
               normalCost: "0.001",
               currency: "USD",
@@ -1281,7 +1548,7 @@ describe("CLI", () => {
       secret: SecretValue.from("old-runtime-secret"),
       expiresAt: "2026-09-05T10:30:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
     const revoke = vi.fn(async () => undefined);
     const launch = vi.fn(async () => 0);
@@ -1355,7 +1622,7 @@ describe("CLI", () => {
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
     const live = vi.fn();
     const result = await runCli(["verify", "opencode", "--live", "--json"], {
@@ -1383,9 +1650,9 @@ describe("CLI", () => {
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
-    const live = vi.fn(async () => ({ status: 200, protocol: "openai-responses" as const, requestId: "req_live", providerId: "provider.apexnova-ai-hub", requestedModel: "nova", resolvedModel: "nova", deploymentId: "deployment.nova" }));
+    const live = vi.fn(async () => ({ status: 200, protocol: "openai-responses" as const, requestId: "req_live", providerId: "provider.apexnova-ai-hub", requestedModel: "nova", resolvedModel: "nova", modelId: "model.nova" }));
     const result = await runCli(["verify", "opencode", "--live", "--yes", "--json"], {
       io: capture.io,
       credentialStore: credentials,
@@ -1401,8 +1668,8 @@ describe("CLI", () => {
     });
 
     expect(result.exitCode).toBe(EXIT_CODES.success);
-    expect(JSON.parse(capture.stdout())).toMatchObject({ data: { valid: true, level: "live", inference: { requestId: "req_live", deploymentId: "deployment.nova" } } });
-    expect(live).toHaveBeenCalledWith(expect.objectContaining({ model: "nova", deploymentId: "deployment.nova", protocol: "openai-responses" }));
+    expect(JSON.parse(capture.stdout())).toMatchObject({ data: { valid: true, level: "live", inference: { requestId: "req_live", modelId: "model.nova" } } });
+    expect(live).toHaveBeenCalledWith(expect.objectContaining({ model: "nova", modelId: "model.nova", protocol: "openai-responses" }));
     expect(capture.stdout()).not.toContain("runtime-secret");
   });
 
@@ -1414,9 +1681,9 @@ describe("CLI", () => {
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
-    const live = vi.fn(async () => ({ status: 200, protocol: "openai-responses" as const, requestId: "req_billed", providerId: "provider.apexnova-ai-hub", requestedModel: "nova", resolvedModel: "nova", deploymentId: "deployment.nova" }));
+    const live = vi.fn(async () => ({ status: 200, protocol: "openai-responses" as const, requestId: "req_billed", providerId: "provider.apexnova-ai-hub", requestedModel: "nova", resolvedModel: "nova", modelId: "model.nova" }));
     const usage = vi.fn(async () => ({
       id: "use_1", requestId: "req_billed", at: "2026-09-05T23:00:00Z", status: "success" as const,
       resolvedModel: "nova", source: "api", currency: "USD", amount: "0.006978",
@@ -1479,7 +1746,7 @@ describe("CLI", () => {
     };
 
     const connected = await runCli(
-      ["connect", "opencode", "--config", configPath, "--deployment", "deployment.nova", "--yes"],
+      ["connect", "opencode", "--config", configPath, "--model", "model.nova", "--yes"],
       { io: captureIo().io, ...deps, createRequestId: () => "local_paths_connect" },
     );
     expect(connected.exitCode).toBe(EXIT_CODES.success);
@@ -1502,20 +1769,20 @@ describe("CLI", () => {
       secret: "legacy-runtime-secret",
       expiresAt: "2099-09-05T12:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     })));
     const bindings = new RuntimeBindingStore(credentials);
 
     const loaded = await bindings.load("opencode", "legacy");
-    expect(loaded).toMatchObject({ credentialId: "rtc_legacy", protocol: "openai-responses", deploymentId: "deployment.nova" });
+    expect(loaded).toMatchObject({ credentialId: "rtc_legacy", protocol: "openai-responses", modelId: "model.nova" });
     expect(loaded?.restoreTarget).toBeUndefined();
     await bindings.save("opencode", "legacy", loaded!);
 
     const stored = JSON.parse((await credentials.get(key))!.reveal()) as Record<string, unknown>;
     expect(stored).toMatchObject({ version: 5, credentialId: "rtc_legacy", kind: "runtime" });
-    // A binding written before the model set covers the one deployment it named
+    // A binding written before the model set covers the one model it named
     // -- exactly what its credential was issued for, nothing widened by upgrade.
-    expect(stored.deploymentIds).toEqual(["deployment.nova"]);
+    expect(stored.modelIds).toEqual(["model.nova"]);
     // `issuedAt` is not invented for a binding that never carried one. Guessing
     // it would silently change the renewal window, which is derived from it --
     // a made-up issue time is a made-up lifetime.
@@ -1787,7 +2054,7 @@ describe("CLI", () => {
 
     const connectCapture = captureIo();
     const connect = await runCli(
-      ["connect", "opencode", "--deployment", "deployment.nova", "--dry-run", "--json"],
+      ["connect", "opencode", "--model", "model.nova", "--dry-run", "--json"],
       { ...shared, io: connectCapture.io, createRequestId: () => "local_big_connect" },
     );
     expect(connect.exitCode).toBe(EXIT_CODES.conflict);
@@ -1796,14 +2063,14 @@ describe("CLI", () => {
     // The one-command path used to skip this guard entirely.
     const openCodeCapture = captureIo();
     const openCode = await runCli(
-      ["opencode", "--deployment", "deployment.nova", "--json"],
+      ["opencode", "--model", "model.nova", "--json"],
       { ...shared, io: openCodeCapture.io, createRequestId: () => "local_big_opencode" },
     );
     expect(openCode.exitCode).toBe(EXIT_CODES.conflict);
     expect(JSON.parse(openCodeCapture.stdout())).toMatchObject({ error: { code: "CONFIG_TOO_LARGE" } });
   });
 
-  it("refuses to guess a deployment on a non-interactive first run", async () => {
+  it("refuses to guess a model on a non-interactive first run", async () => {
     const capture = captureIo();
     const result = await runCli(["opencode", "--json"], {
       io: capture.io,
@@ -1817,7 +2084,7 @@ describe("CLI", () => {
       createRequestId: () => "local_pick",
     });
     expect(result.exitCode).toBe(EXIT_CODES.usage);
-    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "DEPLOYMENT_REQUIRED" } });
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "MODEL_REQUIRED" } });
   });
 
   it("retries a rate-limited control-plane call using Retry-After and succeeds", async () => {
@@ -1882,7 +2149,7 @@ describe("CLI", () => {
     agentVersion: "1.18.29",
     integrationId: "opencode",
     integrationVersion: "0.1.0",
-    deploymentId: "deployment.nova",
+    deploymentId: "model.nova",
     protocol: "openai-responses",
     platform: `windows-${process.arch}`,
   };
@@ -1938,7 +2205,7 @@ describe("CLI", () => {
       verdict: "compatible",
       appliesToInstalled: true,
       collectedOnThisPlatform: true,
-      subject: { deploymentId: "deployment.nova", protocol: "openai-responses" },
+      subject: { deploymentId: "model.nova", protocol: "openai-responses" },
     });
     expect(explained.subjects[0].capabilities).toHaveLength(CAPABILITY_DEFINITIONS.length);
     expect(explained.subjects[0].capabilities[0].evidenceId).toBe(record.id);
@@ -1998,25 +2265,25 @@ describe("CLI", () => {
     expect(output.warnings.join(" ")).toContain("covers 1.18.29, but 1.19.0 is installed");
   });
 
-  it("filters by deployment and answers plainly when nothing was collected", async () => {
+  it("filters by model and answers plainly when nothing was collected", async () => {
     const { root, store } = await withEvidence();
     await store.append(
       createEvidence({
         sourceType: "maintainer-test",
-        subject: { ...evidenceSubject, deploymentId: "deployment.other" },
+        subject: { ...evidenceSubject, deploymentId: "model.other" },
         observedAt: "2026-09-08T10:00:00.000Z",
         outcomes: [{ capabilityId: "auth.endpoint-reachable", support: "supported" }],
       }),
     );
     const capture = captureIo();
 
-    await runCli(["compatibility", "explain", "opencode", "--deployment", "deployment.other", "--json"], {
+    await runCli(["compatibility", "explain", "opencode", "--model", "model.other", "--json"], {
       ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
       io: capture.io,
     });
     const filtered = JSON.parse(capture.stdout()).data.agents[0].subjects;
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].subject.deploymentId).toBe("deployment.other");
+    expect(filtered[0].subject.deploymentId).toBe("model.other");
 
     const emptyCapture = captureIo();
     const empty = await mkdtemp(join(tmpdir(), "apexnova-cli-compat-empty-"));
@@ -2042,7 +2309,7 @@ describe("CLI", () => {
     const rendered = capture.stdout();
     expect(rendered).toContain("# Compatibility Matrix");
     expect(rendered).toContain("apexnova.capability-suite");
-    expect(rendered).toContain("deployment.nova");
+    expect(rendered).toContain("model.nova");
     // A published verdict has to name the record it rests on.
     expect(rendered).toContain(record.id);
     expect(rendered).toContain("`partial`");
@@ -2072,7 +2339,7 @@ describe("CLI", () => {
         endpoint: "https://api.example.test/v1/responses",
         protocol: "openai-responses",
         model: "nova",
-        deploymentId: "deployment.nova",
+        modelId: "model.nova",
         interactions: [],
       }),
       "utf8",
@@ -2087,7 +2354,7 @@ describe("CLI", () => {
 
     expect(result.exitCode).toBe(EXIT_CODES.success);
     const output = JSON.parse(capture.stdout());
-    expect(output.data).toMatchObject({ replayed: true, deploymentId: "deployment.nova" });
+    expect(output.data).toMatchObject({ replayed: true, modelId: "model.nova" });
     expect(output.warnings[0]).toContain("A replay is not evidence");
     // The recording came from an older suite, which the reader has to be told.
     expect(output.warnings.join(" ")).toContain("recording came from suite 0.1.0");
@@ -2141,7 +2408,7 @@ describe("CLI", () => {
     expect(capture.stdout()).toContain("No evidence expires within 7 days.");
   });
 
-  it("re-collects a subject whose deployment changed implementation, expiry or not", async () => {
+  it("re-collects a subject whose model changed implementation, expiry or not", async () => {
     const { root } = await withEvidence({}, {
       ...evidenceSubject,
       implementationFingerprint: "impl-a1b2c3d4e5f6",
@@ -2157,8 +2424,8 @@ describe("CLI", () => {
           const base = await mockHub().catalog("default", new AbortController().signal);
           return {
             ...base,
-            deployments: base.deployments.map((deployment) => ({
-              ...deployment,
+            models: base.models.map((model) => ({
+              ...model,
               implementationFingerprint: "impl-999999999999",
               implementationChangedAt: "2026-09-15T10:00:00.000Z",
             })),
@@ -2207,11 +2474,11 @@ describe("CLI", () => {
     const result = await runCli(["compatibility", "refresh", "--yes", "--json"], {
       ...runDependencies(root, { now: () => new Date("2026-10-20T10:00:00.000Z") }),
       io: capture.io,
-      // The deployment the evidence was collected against is gone.
+      // The model the evidence was collected against is gone.
       hubService: mockHub({
         catalog: async () => {
           const base = await mockHub().catalog("default", new AbortController().signal);
-          return { ...base, deployments: [] };
+          return { ...base, models: [] };
         },
       }),
       runCapabilitySuite: async () => suiteResult(),
@@ -2316,7 +2583,7 @@ describe("CLI", () => {
     expect(JSON.parse(noReason.stdout()).error.message).toContain("--reason");
 
     const unapproved = captureIo();
-    const pending = await runCli(["compatibility", "revoke", id, "--reason", "collected against the wrong deployment", "--json"], {
+    const pending = await runCli(["compatibility", "revoke", id, "--reason", "collected against the wrong model", "--json"], {
       ...runDependencies(root),
       io: unapproved.io,
       hubService: mockHub({ revokeEvidence }),
@@ -2326,14 +2593,14 @@ describe("CLI", () => {
     expect(revokeEvidence).not.toHaveBeenCalled();
 
     const approved = captureIo();
-    const done = await runCli(["compatibility", "revoke", id, "--reason", "collected against the wrong deployment", "--yes", "--json"], {
+    const done = await runCli(["compatibility", "revoke", id, "--reason", "collected against the wrong model", "--yes", "--json"], {
       ...runDependencies(root),
       io: approved.io,
       hubService: mockHub({ revokeEvidence }),
     });
     expect(done.exitCode).toBe(EXIT_CODES.success);
-    expect(JSON.parse(approved.stdout()).data).toMatchObject({ evidenceId: id, reason: "collected against the wrong deployment" });
-    expect(revokeEvidence).toHaveBeenCalledWith("default", id, "collected against the wrong deployment", expect.any(AbortSignal));
+    expect(JSON.parse(approved.stdout()).data).toMatchObject({ evidenceId: id, reason: "collected against the wrong model" });
+    expect(revokeEvidence).toHaveBeenCalledWith("default", id, "collected against the wrong model", expect.any(AbortSignal));
   });
 
   it("rejects a subcommand it does not have", async () => {
@@ -2388,7 +2655,7 @@ describe("CLI", () => {
     const capture = captureIo();
 
     const result = await runCli(
-      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--json"],
+      ["compatibility", "run", "opencode", "--model", "model.nova", "--json"],
       { ...runDependencies(root), io: capture.io, hubService: mockHub({ createRuntimeCredential }), runCapabilitySuite: suite },
     );
 
@@ -2406,7 +2673,7 @@ describe("CLI", () => {
     const suite = vi.fn(async () => suiteResult());
     const expensive = mockHub({
       estimatePricing: async () => ({
-        deploymentId: "deployment.nova", model: "nova", currency: "USD", billingMode: "token",
+        modelId: "model.nova", model: "nova", currency: "USD", billingMode: "token",
         listAmount: "0.900000", discountRate: "0", amount: "0.900000",
         priceVersion: "2026-09-05T10:00:00Z", estimateOnly: true,
       }),
@@ -2414,7 +2681,7 @@ describe("CLI", () => {
     const capture = captureIo();
 
     const refused = await runCli(
-      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      ["compatibility", "run", "opencode", "--model", "model.nova", "--yes", "--json"],
       { ...runDependencies(root), io: capture.io, hubService: expensive, runCapabilitySuite: suite },
     );
 
@@ -2425,7 +2692,7 @@ describe("CLI", () => {
     // The ceiling is a guard, not a wall: raising it deliberately lets the run through.
     const raisedCapture = captureIo();
     const raised = await runCli(
-      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--budget", "1", "--yes", "--json"],
+      ["compatibility", "run", "opencode", "--model", "model.nova", "--budget", "1", "--yes", "--json"],
       { ...runDependencies(root), io: raisedCapture.io, hubService: expensive, runCapabilitySuite: suite },
     );
 
@@ -2444,7 +2711,7 @@ describe("CLI", () => {
       at: "2026-09-08T10:00:00.000Z",
       status: "success",
       resolvedModel: "nova",
-      resolvedDeploymentId: "deployment.nova",
+      resolvedModelId: "model.nova",
       source: "capability-suite",
       usage: { inputTokens: 17, outputTokens: 70 },
       currency: "USD",
@@ -2453,7 +2720,7 @@ describe("CLI", () => {
     const capture = captureIo();
 
     const result = await runCli(
-      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      ["compatibility", "run", "opencode", "--model", "model.nova", "--yes", "--json"],
       {
         ...runDependencies(root),
         io: capture.io,
@@ -2470,7 +2737,7 @@ describe("CLI", () => {
       // opens no ledger row for a request it refused before authentication.
       billed: { amount: "0.000200", currency: "USD", settledRequests: 2, attributedRequests: 3, preAuthRequests: 1 },
       requestIds: ["req_capability_1", "req_capability_2", "req_capability_rejected"],
-      subject: { agentVersion: "1.18.29", deploymentId: "deployment.nova", protocol: "openai-responses" },
+      subject: { agentVersion: "1.18.29", deploymentId: "model.nova", protocol: "openai-responses" },
     });
 
     // The credential exists only for the run.
@@ -2493,7 +2760,7 @@ describe("CLI", () => {
     const capture = captureIo();
 
     const result = await runCli(
-      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      ["compatibility", "run", "opencode", "--model", "model.nova", "--yes", "--json"],
       {
         ...runDependencies(root),
         io: capture.io,
@@ -2537,7 +2804,7 @@ describe("CLI", () => {
     };
 
     const result = await runCli(
-      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      ["compatibility", "run", "opencode", "--model", "model.nova", "--yes", "--json"],
       {
         ...runDependencies(root),
         io: capture.io,
@@ -2570,7 +2837,7 @@ describe("CLI", () => {
     const capture = captureIo();
 
     const result = await runCli(
-      ["compatibility", "run", "opencode", "--deployment", "deployment.nova", "--yes", "--json"],
+      ["compatibility", "run", "opencode", "--model", "model.nova", "--yes", "--json"],
       {
         ...runDependencies(root),
         io: capture.io,
@@ -2611,7 +2878,7 @@ describe("CLI", () => {
     expect(output.data.platform).toBeUndefined();
 
     const top = output.data.candidates[0];
-    expect(top).toMatchObject({ deploymentId: "deployment.nova", rank: 1, eligible: true, sponsored: false });
+    expect(top).toMatchObject({ modelId: "model.nova", rank: 1, eligible: true, sponsored: false });
     expect(top.evidenceRefs).toContain(record.id);
     // The schema has no field for a dimension's score and weight, so they are
     // written into `reasons` rather than dropped -- the numbers that produced
@@ -2625,7 +2892,7 @@ describe("CLI", () => {
     const { root } = await withEvidence();
     const capture = captureIo();
 
-    const bad = await runCli(["recommend", "opencode", "--model-allowlist", "deployment.nova,not-a-model"], {
+    const bad = await runCli(["recommend", "opencode", "--model-allowlist", "model.nova,not-a-model"], {
       ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
       io: capture.io,
       hubService: mockHub(),
@@ -2636,7 +2903,7 @@ describe("CLI", () => {
     expect(bad.exitCode).toBe(EXIT_CODES.unavailable);
 
     const ok = captureIo();
-    const good = await runCli(["recommend", "opencode", "--model-allowlist", "deployment.nova", "--json"], {
+    const good = await runCli(["recommend", "opencode", "--model-allowlist", "model.nova", "--json"], {
       ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
       io: ok.io,
       hubService: mockHub(),
@@ -2647,15 +2914,15 @@ describe("CLI", () => {
     expect(data.candidates).toHaveLength(1);
     // The constraints that were applied are recorded on the document, so a
     // reader can tell a narrow ranking from a narrow catalog.
-    expect(data.constraints).toMatchObject({ deploymentIds: ["deployment.nova"] });
+    expect(data.constraints).toMatchObject({ modelIds: ["model.nova"] });
   });
 
-  it("refuses --deployment and --model-allowlist together rather than guessing", async () => {
+  it("refuses --model and --model-allowlist together rather than guessing", async () => {
     const { root } = await withEvidence();
     const capture = captureIo();
 
     const result = await runCli(
-      ["recommend", "opencode", "--deployment", "deployment.nova", "--model-allowlist", "deployment.nova"],
+      ["recommend", "opencode", "--model", "model.nova", "--model-allowlist", "model.nova"],
       { ...explainDependencies(root, "2026-09-20T10:00:00.000Z"), io: capture.io, hubService: mockHub() },
     );
 
@@ -2691,7 +2958,7 @@ describe("CLI", () => {
     let duringLaunch = "";
     const capture = captureIo();
 
-    const result = await runCli(["run", "opencode", "--gateway", "--deployment", "deployment.nova", "--json"], {
+    const result = await runCli(["run", "opencode", "--gateway", "--model", "model.nova", "--json"], {
       io: capture.io,
       credentialStore: credentials,
       registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
@@ -2785,15 +3052,15 @@ describe("CLI", () => {
       },
       catalog: async () => ({
         ...base,
-        deployments: base.deployments.map((deployment) => ({
-          ...deployment,
+        models: base.models.map((model) => ({
+          ...model,
           protocols: [{ protocol: "openai-responses", baseUrl: `http://127.0.0.1:${port}/v1/responses` }],
         })),
       }),
       runtimeCredentials: async () =>
         created.map((credentialId) => ({
           credentialId, name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1",
-          protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"],
+          protocols: ["openai-responses"], modelIds: ["model.nova"],
           expiresAt: issued.find((item) => item.credentialId === credentialId)!.expiresAt,
           createdAt: "2026-09-12T09:00:00.000Z",
         })),
@@ -2801,7 +3068,7 @@ describe("CLI", () => {
     });
 
     const capture = captureIo();
-    const result = await runCli(["run", "opencode", "--gateway", "--deployment", "deployment.nova", "--json"], {
+    const result = await runCli(["run", "opencode", "--gateway", "--model", "model.nova", "--json"], {
       io: capture.io,
       credentialStore: memoryCredentials(),
       registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
@@ -2861,8 +3128,8 @@ describe("CLI", () => {
     // Split, not totalled: one line for the run would put all three requests on
     // a credential that paid for two of them.
     expect(run.attributed?.attribution?.billedTo).toEqual([
-      { apiKeyId: "rtc_1", deploymentId: "deployment.nova", requestCount: 1 },
-      { apiKeyId: "rtc_2", deploymentId: "deployment.nova", requestCount: 2 },
+      { apiKeyId: "rtc_1", modelId: "model.nova", requestCount: 1 },
+      { apiKeyId: "rtc_2", modelId: "model.nova", requestCount: 2 },
     ]);
     expect(run.capture.stdout()).toContain("renewed mid-run");
   });
@@ -2888,7 +3155,7 @@ describe("CLI", () => {
     expect(run.created).toEqual(["rtc_1", "rtc_2"]);
     expect(run.presented).toEqual(Array.from({ length: 8 }, () => "Bearer secret-second"));
     expect(run.attributed?.attribution?.billedTo).toEqual([
-      { apiKeyId: "rtc_2", deploymentId: "deployment.nova", requestCount: 8 },
+      { apiKeyId: "rtc_2", modelId: "model.nova", requestCount: 8 },
     ]);
     // Well under seven lock waits. Removing the single-flight makes this fail.
     expect(elapsed).toBeLessThan(400);
@@ -2915,7 +3182,7 @@ describe("CLI", () => {
     expect(run.attempts).toBe(2);
     expect(run.capture.stdout()).toContain("could not be renewed mid-run");
     expect(run.attributed?.attribution?.billedTo).toEqual([
-      { apiKeyId: "rtc_1", deploymentId: "deployment.nova", requestCount: 4 },
+      { apiKeyId: "rtc_1", modelId: "model.nova", requestCount: 4 },
     ]);
   });
 
@@ -2931,7 +3198,7 @@ describe("CLI", () => {
     const capture = captureIo();
     let duringLaunch = "";
 
-    const result = await runCli(["run", "opencode", "--gateway", "--deployment", "deployment.nova"], {
+    const result = await runCli(["run", "opencode", "--gateway", "--model", "model.nova"], {
       io: capture.io,
       credentialStore: memoryCredentials(),
       registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
@@ -2982,7 +3249,7 @@ describe("CLI", () => {
       runtimeCredentials: async () =>
         created.map((credentialId) => ({
           credentialId, name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1",
-          protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"],
+          protocols: ["openai-responses"], modelIds: ["model.nova"],
           expiresAt: new Date(clock + 600_000).toISOString(), createdAt: "2026-09-13T09:00:00.000Z",
         })),
     });
@@ -3001,7 +3268,7 @@ describe("CLI", () => {
 
     const capture = captureIo();
     const first = await runCli(
-      ["run", "opencode", "--credential-ttl", "600", "--deployment", "deployment.nova", "--json"],
+      ["run", "opencode", "--credential-ttl", "600", "--model", "model.nova", "--json"],
       { io: capture.io, ...deps(), createRequestId: () => "local_ttl" },
     );
     if (first.exitCode !== EXIT_CODES.success) throw new Error(`${capture.stdout()}${capture.stderr()}`);
@@ -3033,7 +3300,7 @@ describe("CLI", () => {
     const capture = captureIo();
 
     const result = await runCli(
-      ["connect", "claude-code", "--deployment", "deployment.nova", "--api-key-helper", "--dry-run", "--json"],
+      ["connect", "claude-code", "--model", "model.nova", "--api-key-helper", "--dry-run", "--json"],
       {
         io: capture.io,
         credentialStore: memoryCredentials(),
@@ -3060,7 +3327,7 @@ describe("CLI", () => {
       secret: SecretValue.from("runtime-secret"),
       expiresAt: "2099-09-05T12:00:00Z",
       protocol: "openai-responses",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
     });
     const capture = captureIo();
 
@@ -3088,7 +3355,7 @@ describe("CLI", () => {
       agentId: "opencode",
       profile: "default",
       command: "connect",
-      deploymentId: "deployment.nova",
+      modelId: "model.nova",
       protocol: "openai-responses",
       grounds: "recommendation",
       recommendationId: `rec.sha256.${"c".repeat(64)}`,
@@ -3123,9 +3390,9 @@ describe("CLI", () => {
 
     expect(result.exitCode).toBe(EXIT_CODES.success);
     const output = capture.stdout();
-    // The three questions a route has to answer, together: which deployment, on
+    // The three questions a route has to answer, together: which model, on
     // what grounds, and who actually paid.
-    expect(output).toContain("deployment.nova");
+    expect(output).toContain("model.nova");
     expect(output).toContain("chosen: recommendation (rec.sha256.");
     expect(output).toContain("billed (run): confirmed via gateway, 2 requests — 2 on rtc_1");
     // The per-request line is routing detail, printed as a single reading and
@@ -3169,7 +3436,7 @@ describe("CLI", () => {
     });
 
     expect(result.exitCode).toBe(EXIT_CODES.success);
-    // Four ranked deployments read as "the best four there are" unless the
+    // Four ranked models read as "the best four there are" unless the
     // boundary is on the page: a Provider outside the catalog is not ranked
     // lower, it never entered. ADR 0008 keeps this stated until M5 supplies a
     // second candidate source.

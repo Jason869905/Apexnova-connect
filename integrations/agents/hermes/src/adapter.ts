@@ -44,7 +44,7 @@ import { hermesManifest } from "./manifest.js";
  * not allowed to use the openai-chat protocol", because the credential was
  * minted for the protocol we declared.
  *
- * Verified on 2026-09-12 against a live deployment: chat-completions and
+ * Verified on 2026-09-12 against a live model: chat-completions and
  * anthropic-messages both return the expected answer, responses does not.
  * Declaring a protocol the integration cannot actually consume is the same
  * claim-without-measurement this project refuses everywhere else.

@@ -1,7 +1,7 @@
 import { CAPABILITY_DEFINITIONS, capabilityDefinition, type CapabilityLevel } from "@apexnova-connect/capabilities";
 
 /**
- * What a Scenario asks of a Deployment. The shape is frozen in
+ * What a Scenario asks of a Model. The shape is frozen in
  * `scenario-profile.schema.json`; this is the typed view of it.
  *
  * `priorities` is ordered, most important first, and the order is the only
@@ -78,7 +78,7 @@ export const CODING_GENERAL: ScenarioProfile = {
     { capabilityId: "agent.forced-tool-choice", level: "preferred", reason: "Carrying a schema on a protocol with no structured-output mode needs it." },
     { capabilityId: "agent.structured-output", level: "preferred", reason: "Structured edits are easier to apply than prose that contains them." },
   ],
-  // Compatibility first on purpose: a cheaper deployment that cannot call
+  // Compatibility first on purpose: a cheaper model that cannot call
   // tools is not a cheaper way to do this job, it is a different job.
   //
   // The list is everything this Scenario cares about, not the subset something
@@ -102,7 +102,7 @@ export const CODING_GENERAL: ScenarioProfile = {
     "quality",
     "privacy",
   ],
-  applicability: "Text-generation deployments reachable over a protocol the Agent speaks.",
+  applicability: "Text-generation models reachable over a protocol the Agent speaks.",
   scoringRuleVersion: SCORING_RULE_VERSION,
 };
 

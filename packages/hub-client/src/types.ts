@@ -118,7 +118,7 @@ export interface HubPricingDiscount {
 }
 
 export interface HubPricingEstimate {
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly model: string;
   readonly currency: string;
   readonly billingMode: string;
@@ -137,7 +137,7 @@ export interface HubInferenceVerification {
   readonly providerId: string;
   readonly requestedModel: string;
   readonly resolvedModel: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
 }
 
 export interface HubCatalogProtocol {
@@ -165,15 +165,7 @@ export interface HubCatalogCapabilityStatement {
   readonly expiresAt?: string;
 }
 
-export interface HubCatalogModel {
-  readonly id: string;
-  readonly name: string;
-  readonly publisher?: string;
-  readonly publisherName?: string;
-  readonly modelType: string;
-  readonly capabilities: readonly string[];
-  readonly deploymentIds: readonly string[];
-}
+
 
 /** Sell-side price only; upstream cost never appears in the public catalog. */
 export interface HubCatalogPricing {
@@ -192,15 +184,31 @@ export interface HubCatalogPricing {
   readonly priceValidUntil?: string;
 }
 
-export interface HubCatalogDeployment {
+/**
+ * One model in Hub's public catalog.
+ *
+ * Hub's wire format splits this in two: a `models[]` entry carrying the
+ * publisher and model type, and a `deployments[]` entry carrying the id that is
+ * actually authorised, routed and billed against, plus the alias, protocols,
+ * price and availability. Connect has no second concept for the second half --
+ * a model served from two regions is two models in Hub's catalog, with two ids
+ * and two aliases -- so the pair is merged here, at the only layer that has to
+ * know Hub's wire shape, and `id` is the one Hub bills.
+ */
+export interface HubCatalogModel {
+  /** The id Hub authorises, routes and bills against. Never an alias. */
   readonly id: string;
   readonly providerId: string;
-  readonly modelId: string;
   readonly displayName: string;
+  readonly publisher?: string;
+  readonly publisherName?: string;
+  /** Absent when Hub published the callable entry without its `models[]` row. */
+  readonly modelType?: string;
+  /** The name the Agent sends as its model, and what its own picker shows. */
   readonly inferenceAlias: string;
   readonly aliases: readonly string[];
   readonly protocols: readonly HubCatalogProtocol[];
-  /** Changes when the deployment's implementation does; absent until Hub ships it. */
+  /** Changes when the model's implementation does; absent until Hub ships it. */
   readonly implementationFingerprint?: string;
   readonly implementationChangedAt?: string;
   readonly limits?: {
@@ -225,14 +233,14 @@ export interface HubCatalogSnapshot {
   readonly expiresAt: string;
   readonly providers: readonly HubCatalogProvider[];
   readonly models: readonly HubCatalogModel[];
-  readonly deployments: readonly HubCatalogDeployment[];
 }
 
 export interface CreateRuntimeCredentialInput {
   readonly name: string;
   readonly workspaceId?: string;
   readonly protocols: readonly string[];
-  readonly publicDeploymentIds: readonly string[];
+  /** The models this credential may call. Hub's `publicDeploymentIds`. */
+  readonly modelIds: readonly string[];
   readonly expiresIn?: number;
 }
 
@@ -251,7 +259,8 @@ export interface RuntimeCredentialSummary {
   readonly deviceId?: string;
   readonly workspaceId?: string;
   readonly protocols: readonly string[];
-  readonly publicDeploymentIds: readonly string[];
+  /** The models this credential may call. Hub's `publicDeploymentIds`. */
+  readonly modelIds: readonly string[];
   readonly expiresAt?: string;
   readonly createdAt: string;
   readonly lastUsedAt?: string;
@@ -272,9 +281,9 @@ export interface HubUsageRecord {
   readonly status?: "success" | "error";
   readonly statusCode?: number;
   readonly requestedModel?: string;
-  readonly requestedDeploymentId?: string;
+  readonly requestedModelId?: string;
   readonly resolvedModel: string;
-  readonly resolvedDeploymentId?: string;
+  readonly resolvedModelId?: string;
   readonly fallbackApplied?: boolean;
   readonly workspaceId?: string;
   readonly source: string;
@@ -319,7 +328,7 @@ export interface HubEvidenceReceived {
   /** `none` means no signature was submitted; `unverified` means one was and Hub has not checked it. */
   readonly signatureStatus?: EvidenceSignatureStatus;
   readonly payloadBytes?: number;
-  /** Hub's own reading of the deployment fingerprint, beside the collector's claim in `subject`. */
+  /** Hub's own reading of the model's implementation fingerprint, beside the collector's claim in `subject`. */
   readonly implementationFingerprint?: string;
   readonly revokedAt?: string;
   readonly revokedReason?: string;
@@ -374,7 +383,7 @@ export interface HubEvidenceQuery {
   readonly agentVersion?: string;
   readonly integrationId?: string;
   readonly integrationVersion?: string;
-  readonly deploymentId?: string;
+  readonly modelId?: string;
   readonly protocol?: string;
   readonly platform?: string;
   readonly suiteId?: string;
@@ -419,7 +428,8 @@ export interface CreateApiKeyInput {
   readonly name: string;
   readonly workspaceId?: string;
   readonly protocols?: readonly string[];
-  readonly publicDeploymentIds?: readonly string[];
+  /** The models this credential may call. Sent as `publicDeploymentIds`. */
+  readonly modelIds?: readonly string[];
   readonly expiresIn?: number | null;
   readonly scopes?: readonly string[];
 }
@@ -432,7 +442,8 @@ export interface CreatedApiKey {
   readonly kind: "user";
   readonly workspaceId?: string;
   readonly protocols: readonly string[];
-  readonly publicDeploymentIds: readonly string[];
+  /** The models this credential may call. Hub's `publicDeploymentIds`. */
+  readonly modelIds: readonly string[];
   readonly expiresAt?: string;
   readonly createdAt: string;
   readonly lastUsedAt?: string;
@@ -445,7 +456,8 @@ export interface ApiKeySummary {
   readonly kind: "user";
   readonly workspaceId?: string;
   readonly protocols: readonly string[];
-  readonly publicDeploymentIds: readonly string[];
+  /** The models this credential may call. Hub's `publicDeploymentIds`. */
+  readonly modelIds: readonly string[];
   readonly expiresAt?: string;
   readonly createdAt: string;
   readonly lastUsedAt?: string;
@@ -454,7 +466,8 @@ export interface ApiKeySummary {
 export interface UpdateApiKeyInput {
   readonly name?: string;
   readonly protocols?: readonly string[];
-  readonly publicDeploymentIds?: readonly string[];
+  /** The models this credential may call. Sent as `publicDeploymentIds`. */
+  readonly modelIds?: readonly string[];
   readonly expiresIn?: number | null;
 }
 
@@ -476,7 +489,7 @@ export interface UsageAggregateRecord {
   readonly bucketStart: string;
   readonly apiKeyId?: string;
   readonly apiKeyName?: string;
-  readonly publicDeploymentId?: string;
+  readonly modelId?: string;
   readonly requestedModel?: string;
   readonly resolvedModel?: string;
   readonly requestCount: number;

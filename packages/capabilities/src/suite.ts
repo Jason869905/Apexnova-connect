@@ -23,9 +23,9 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 export interface CapabilitySuiteOptions {
   readonly endpoint: string;
   readonly protocol: SuiteProtocol;
-  /** The inference alias the Agent would send, not the catalog deployment ID. */
+  /** The inference alias the Agent would send, not the catalog model ID. */
   readonly model: string;
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly credential: SecretValue;
   readonly fetch?: typeof globalThis.fetch;
   readonly signal?: AbortSignal;
@@ -58,7 +58,7 @@ interface Probe {
   readonly status: number;
   readonly requestId?: string;
   readonly requestedModel?: string;
-  readonly deploymentId?: string;
+  readonly modelId?: string;
   readonly body?: Record<string, unknown>;
   readonly events?: readonly string[];
   readonly aborted?: boolean;
@@ -121,14 +121,14 @@ async function post(
   });
 }
 
-function probeHeaders(response: Response): Pick<Probe, "requestId" | "requestedModel" | "deploymentId"> {
+function probeHeaders(response: Response): Pick<Probe, "requestId" | "requestedModel" | "modelId"> {
   const requestId = response.headers.get("x-apexnova-request-id") ?? undefined;
   const requestedModel = response.headers.get("x-apexnova-requested-model") ?? undefined;
-  const deploymentId = response.headers.get("x-apexnova-deployment-id") ?? undefined;
+  const modelId = response.headers.get("x-apexnova-deployment-id") ?? undefined;
   return {
     ...(requestId ? { requestId } : {}),
     ...(requestedModel ? { requestedModel } : {}),
-    ...(deploymentId ? { deploymentId } : {}),
+    ...(modelId ? { modelId } : {}),
   };
 }
 
@@ -155,7 +155,7 @@ async function jsonProbe(
     response = await post(options, body, overrides);
   } catch (cause) {
     // A broken transport -- a replay with no recording for this request, say --
-    // is a problem with the harness, not a finding about the deployment.
+    // is a problem with the harness, not a finding about the model.
     if (cause instanceof CapabilityError) throw cause;
     return { ok: false, status: 0, failure: truncate(`request failed: ${(cause as Error).name}`) };
   }
@@ -330,7 +330,7 @@ function longerStreamBody(options: CapabilitySuiteOptions): unknown {
 /**
  * Declares one tool and asks for it, without forcing the choice. Forcing is a
  * stronger claim than the capability makes -- an Agent loop offers tools and
- * lets the model decide -- and some deployments reject a forced `tool_choice`
+ * lets the model decide -- and some models reject a forced `tool_choice`
  * outright, which would report tool calling as broken on a model that calls
  * tools perfectly well.
  */
@@ -620,8 +620,8 @@ function streamOrder(protocol: SuiteProtocol): { readonly first: string; readonl
 }
 
 /**
- * Runs the first batch against one deployment and protocol. Every probe that
- * fails becomes an outcome, never an exception: a deployment that cannot stream
+ * Runs the first batch against one model and protocol. Every probe that
+ * fails becomes an outcome, never an exception: a model that cannot stream
  * is a finding, not a broken run. Six of the eight requests are billable.
  */
 export async function runCapabilitySuite(
@@ -664,7 +664,7 @@ export async function runCapabilitySuite(
   );
 
   const modelMatches =
-    minimal.requestedModel === options.model && minimal.deploymentId === options.deploymentId;
+    minimal.requestedModel === options.model && minimal.modelId === options.modelId;
   outcomes.push(
     !minimal.ok
       ? outcome("protocol.model-id-mapping", "unknown", "no successful response to read the mapping from", [minimal.requestId])
@@ -673,14 +673,14 @@ export async function runCapabilitySuite(
             "protocol.model-id-mapping",
             typeof minimal.body?.model === "string" ? "supported" : "partial",
             typeof minimal.body?.model === "string"
-              ? `requested ${options.model} was served by deployment ${options.deploymentId}`
+              ? `requested ${options.model} was served by model ${options.modelId}`
               : `headers matched, but the body carried no model field`,
             [minimal.requestId],
           )
         : outcome(
             "protocol.model-id-mapping",
             "unsupported",
-            `requested ${options.model} on ${options.deploymentId}, served as ${minimal.requestedModel ?? "unknown"} on ${minimal.deploymentId ?? "unknown"}`,
+            `requested ${options.model} on ${options.modelId}, served as ${minimal.requestedModel ?? "unknown"} on ${minimal.modelId ?? "unknown"}`,
             [minimal.requestId],
           ),
   );

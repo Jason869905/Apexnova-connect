@@ -18,7 +18,7 @@ describeIntegrationContract({
   intent: {
     planId: "plan.claude-code-contract",
     createdAt: "2026-09-07T12:00:00.000Z",
-    deploymentId: "deployment.nova",
+    modelId: "model.nova",
     inferenceAlias: "nova-coder",
     modelName: "Nova Coder",
     protocol: "anthropic-messages",

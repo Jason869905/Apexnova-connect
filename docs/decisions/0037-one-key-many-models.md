@@ -13,7 +13,7 @@ OpenCode 自己有模型选择器。它能切换的，是配置里 `provider.ape
 Connect 一直只往里写一项——`ConnectionIntent` 只描述一个 deployment，适配器把它包成一个单元素数组。于是：
 
 - 用户在 OpenCode 里打开模型选择器，只看得到一个模型；
-- 想换一个，得退出 OpenCode，回到 Connect 跑 `apexnova models`，**换来一枚新 key**、一次配置改写、一次重启；
+- 想换一个，得退出 OpenCode，回到 Connect 跑 `apexnova models`（今为 `apexnova switch`），**换来一枚新 key**、一次配置改写、一次重启；
 - 换完之后原来那个模型又从选择器里消失了。
 
 **这不是「少了个功能」，是把目标产品已经做好的那部分能力挡在了外面。** 一个 Agent 的模型选择器是它的核心交互之一，而 Connect 配置出来的 Agent 里它只有一个选项。
@@ -59,6 +59,8 @@ Hub 的 PATCH 是整体替换，所以发的是并集而不是增量。返回的
 
 ## 5. 切换是「加上并置顶」，不是「换掉」
 
+> 这个选择器当时在 `apexnova models` 里。[ADR 0038](0038-models-reads-switch-writes.md) 把它搬到了 `apexnova switch`：`models` 只读，`switch` 换模型，本节的语义原样不变。下文的 `apexnova models` 读作 `apexnova switch <agent>`。
+
 `apexnova models` 选中一个模型后：
 
 - 不在配置里 → 加进去，并成为默认；
@@ -75,7 +77,7 @@ Hub 的 PATCH 是整体替换，所以发的是并集而不是增量。返回的
 
 模型集合只在**凭据本身活过这次改动**的路径上累积，也就是默认的永久 key。其余三条都签发新凭据、各自有替换或回滚语义，集合就是这次命令选中的那些：
 
-- `connect` / `switch`：显式的单目标命令，`--dry-run` 里已经把要配的那一个给用户看过了；
+- `connect`：显式的单目标命令，`--dry-run` 里已经把要配的那一个给用户看过了；（当时 `switch` 是它的别名，[ADR 0038](0038-models-reads-switch-writes.md) 之后 `switch` 走的是第 5 节那条路，不在此列）
 - `--rotating` / `--credential-ttl`：凭据本来就在轮换；
 - `--gateway`：运行结束会把自己的写入取回（[ADR 0029](0029-launch-must-honour-the-configured-file.md) 第 4 节）。
 

@@ -17,7 +17,7 @@ export const HERMES_PROVIDER_ID = "custom" as const;
 /**
  * `api_mode` values Hermes accepts, from `main_provider_setup.py`. An empty
  * value means auto-detect; this integration always states the mode instead, so
- * a Responses deployment cannot silently fall back to chat completions.
+ * a Responses model cannot silently fall back to chat completions.
  */
 export type HermesApiMode =
   | "chat_completions"

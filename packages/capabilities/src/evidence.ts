@@ -25,16 +25,29 @@ export type EvidenceVerdict = "verified" | "compatible" | "partial" | "incompati
 
 export type CapabilitySupport = "supported" | "partial" | "unsupported" | "unknown";
 
+/**
+ * What one evidence record is a statement about.
+ *
+ * This type is the serialized record, and the record's ID is a sha256 over its
+ * canonical JSON -- **a rule pinned with Hub, which recomputes the same hash to
+ * check immutability**. So `deploymentId` keeps Hub's spelling even though
+ * Connect otherwise has no Deployment: renaming the key here would change the
+ * ID of every record with identical content, and Hub would compute a different
+ * one for the record we hand it. See `schemas/fixtures/evidence-canonical-vectors.json`,
+ * which both sides pin. It is the model id, and Connect calls it that
+ * everywhere the value is not being hashed.
+ */
 export interface EvidenceSubject {
   readonly agentId: string;
   readonly agentVersion: string;
   readonly integrationId: string;
   readonly integrationVersion: string;
+  /** The model id. Named for Hub's pinned hash contract, not for Connect. */
   readonly deploymentId: string;
   /** The catalog's own protocol value, so one protocol never gets two spellings. */
   readonly protocol: string;
   readonly platform: string;
-  /** The deployment's implementation at collection time, once the catalog exposes one. */
+  /** The model's implementation at collection time, once the catalog exposes one. */
   readonly implementationFingerprint?: string;
   /** The Scenario a result was measured under, once Scenario Quality exists. */
   readonly scenarioId?: string;
@@ -47,7 +60,7 @@ export interface EvidenceSubject {
  * a field added to the type reached whichever of the three someone remembered.
  *
  * The optional fields stand only for themselves. A record carrying no
- * implementation fingerprint says nothing about a deployment that has one: the
+ * implementation fingerprint says nothing about a model that has one: the
  * fingerprint is part of the subject (12B.4), and merging the two would let a
  * result from the old implementation stand for the new one, the silent drift
  * 12A.5(a) was raised about. A record measured under a Scenario is likewise not

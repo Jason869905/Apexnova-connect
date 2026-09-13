@@ -2,6 +2,66 @@
 
 按版本倒序。每条写明**包含什么**与**不包含什么**——后者同样是发布的一部分。
 
+## 未发布
+
+**统一术语：Connect 只有 Model，没有 Deployment。** 以及 `models` 只读、`switch` 换模型。三条都是破坏性的，趁 1.0 之前一次改净，**不提供兼容层**。
+
+### 破坏性变更
+
+**1. `--deployment` 不存在了，选模型一律 `--model`。**
+
+```bash
+apexnova switch opencode --model glm-5.2 --yes      # ID 和别名都收
+```
+
+旧参数落到 `UNKNOWN_OPTION`，没有别名、没有「已改名」提示。保留任何一种，那个词就继续活在 CLI 表面上，而这次改动的目的正是让它消失。
+
+**2. `--json` 信封与错误码改名。**
+
+| 旧 | 新 |
+| --- | --- |
+| `deploymentId` / `deploymentIds` | `modelId` / `modelIds` |
+| `DEPLOYMENT_REQUIRED` / `_NOT_FOUND` / `_UNAVAILABLE` / `_AMBIGUOUS` | `MODEL_REQUIRED` / `_NOT_FOUND` / `_UNAVAILABLE` / `_AMBIGUOUS` |
+
+读这些字段的脚本要跟着改。
+
+**3. 已有的绑定和审计行读不出来。** 落盘格式里 `deploymentId` 改成 `modelId`，且**不做迁移读**：
+
+- 升级后第一次跑任何命令，已配置的 profile 会报 `SESSION_CORRUPT`——**重新 `apexnova run <agent>` 或 `apexnova connect <agent>` 即可**，配置文件本身不受影响；
+- 改名前写的路由审计行校验不过，会从 `apexnova audit` 的输出里消失。日志是 append-only 的，这些行仍在磁盘上，只是不再被解析。
+
+**4. Integration SDK 字段改名。** `ConnectionIntent.deploymentId` → `modelId`，`ConnectionModel.deploymentId` → `modelId`。仓内四个 integration 已同步；**仓外适配器需要跟改**。
+
+**5. `apexnova models` 不再换模型，`apexnova switch` 才换。** 详见下。
+
+### 为什么
+
+Domain Model 原本把模型拆成两层：`ModelProfile` 描述抽象模型版本，`ModelDeployment` 描述「某个 Provider 在特定区域和协议入口提供的可调用线路」。
+
+**这一层对用户不存在**——用户看不到 Hub 内部的部署，他知道的只有「我在用哪个模型」。而在 Hub 上这个维度本身也是空的：46 个条目的 `providerId` 全是 `provider.apexnova-ai-hub`，公共投影里从来没有 `region`，Model 与 Deployment 一一对应。一个不承载信息的维度，占着代码里约 1800 处、文档里 582 处。
+
+同一份权重在多个区域提供时，**由 Provider 侧作为多个 Model 发布**（`glm-5.2-ap`、`glm-5.2-eu`），选哪一个和在任意两个模型之间做选择没有区别。见 [ADR 0039](decisions/0039-connect-only-has-models.md)。
+
+### `models` 只读，`switch` 换模型
+
+之前 `apexnova models` 在 TTY 下会弹选择器并写配置——一个读形状的名字，默认路径上会写盘；而 `apexnova switch` 只是 `connect` 的另一个拼法。于是「换模型」有两种后果不同的语义，取决于敲的是哪条命令。
+
+现在：
+
+- **`apexnova models`** —— 只列目录，不改任何东西。顺序跟 Hub 的模型广场一致，且只按模型自身的属性排；
+- **`apexnova switch <agent>`** —— 换默认模型。不带目标从列表里挑，带 `--model` / `--best` 则先打印影响再问一次 y/N（默认 N），`--yes` 是这个问题的非交互答案。语义是「加上并置顶」：**key 不变**，已配置的模型全部保留；
+- **`apexnova connect <agent>`** —— 不变，建立绑定并签发一枚 24 小时 runtime credential。需要旧 `switch` 行为的用它。
+
+`switch` 不再接受 `--credential-ttl` / `--rotating`：它们的意思是「签发新凭据」，正是 switch 承诺不做的事。
+
+见 [ADR 0038](decisions/0038-models-reads-switch-writes.md)。
+
+### 不包含
+
+- **没有改 Hub 的线格式**。`/catalog` 仍返回 `models[]` + `deployments[]`，创建 key 的 body 仍是 `publicDeploymentIds`，响应头仍是 `x-apexnova-deployment-id`。这些只出现在 `packages/hub-client` 这一层，并在边界上合并成 Model；
+- **没有改 Compatibility Evidence 的 `subject.deploymentId`**。这条记录的 ID 是其 canonical JSON 的 sha256，规则与 Hub 双向钉死（`schemas/fixtures/evidence-canonical-vectors.json` 两边各存一份）。改键名会让每条内容相同的记录换一个 ID，而 Hub 算出来的是另一个，提交会被拒。**它装的就是 model id**，类型和 Schema 上都已写明；要真正改掉需要 Hub 侧协同改哈希规则并重新钉 vector；
+- **没有做任何兼容读**。这是刻意的，代价见上。
+
 ## v0.6.1 — 2026-09-13
 
 **`detect` 的 warning 不再打印两遍。** 只有这一条。
@@ -139,7 +199,7 @@ Gateway 转默认的前两条已达成（凭据跨过到期的实跑、Claude Co
 - **Gateway 默认关闭，且不建议设为默认。** 转默认的三个条件都未满足：凭据续期已实现但**没有一次跨过到期的实跑**；Claude Code 经 Gateway 的端到端**从未跑过**；**没有一次真实的长交互会话**（见 [ADR 0020](decisions/0020-gateway-batch-closure.md) 第 3 节）；
 - **四个 Integration 全部是 `experimental`，没有一个是 `stable`。** 判定标准见 [ADR 0023](decisions/0023-integration-status-ladder.md)。`claude-code` 与 `hermes` 已满足其中可机检的两条，`opencode` 与 `codex` 各缺一格 Windows 证据；
 - **至今没有任何外部用户完成过核心流程。** 这句话自 2026-09-07 的 [ADR 0003](decisions/0003-m2-milestone-review.md) 起一次未变，也没有外部实现过 Detection Integration；
-- **结构化输出因协议而异。** 同一个 Deployment 的 `agent.structured-output` 在三个协议上可以给出三个不同答案，`openai-responses` 上实测四个部署全部失败（[Hub 需求 12K](apexnova-ai-hub-requirements.md)）。**不要按部署去理解这项能力**；
+- **结构化输出因协议而异。** 同一个 Model 的 `agent.structured-output` 在三个协议上可以给出三个不同答案，`openai-responses` 上实测四个部署全部失败（[Hub 需求 12K](apexnova-ai-hub-requirements.md)）。**不要按部署去理解这项能力**；
 - **12 条历史 Evidence 无法发布**：它们用的是 id 约定之前的形式，Hub 以 `400 evidence_legacy_id` 拒收，且记录不可变，因此只能留在本地。
 
 ### 里程碑状态

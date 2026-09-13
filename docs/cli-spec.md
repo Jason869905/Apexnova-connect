@@ -129,18 +129,18 @@ apexnova logout --yes
 
 一行命令完成连接与启动：选模型 → 创建 key → 写配置 → 启动目标 Agent。已经连接过的 profile 直接启动，不再生成计划。
 
-**可以一次选多个模型。**交互模式下首次运行弹出多选框（空格勾选、回车确认），勾了不止一个时再问一次「先用哪个」；勾选的全部写进 Agent 的配置，用**同一枚 key**授权，之后在 Agent 自己的界面里换模型不需要再回到 Connect。非交互模式重复传 `--deployment` 达到同样效果，第一个是默认模型。
+**可以一次选多个模型。**交互模式下首次运行弹出多选框（空格勾选、回车确认），勾了不止一个时再问一次「先用哪个」；勾选的全部写进 Agent 的配置，用**同一枚 key**授权，之后在 Agent 自己的界面里换模型不需要再回到 Connect。非交互模式重复传 `--model` 达到同样效果，第一个是默认模型。
 
 ```text
 apexnova run opencode
-apexnova run codex --deployment <id>
-apexnova run opencode --deployment <id-a> --deployment <id-b>   # 两个模型，一枚 key，默认 a
+apexnova run codex --model <id>
+apexnova run opencode --model <id-a> --model <id-b>   # 两个模型，一枚 key，默认 a
 apexnova run claude-code --key <keyId>
 apexnova run opencode --rotating
 apexnova run opencode -- --model apexnova/glm-5.2
 ```
 
-一个 Agent 只配置一个 endpoint，所以一组模型必须在**同一个 protocol 且同一个 baseUrl** 上：做不到时报 `PROTOCOL_NOT_SHARED` 并列出分歧的 deployment，而不是悄悄少配一个——那会让用户拿到一个选得中、用不了的模型。
+一个 Agent 只配置一个 endpoint，所以一组模型必须在**同一个 protocol 且同一个 baseUrl** 上：做不到时报 `PROTOCOL_NOT_SHARED` 并列出分歧的 model，而不是悄悄少配一个——那会让用户拿到一个选得中、用不了的模型。
 
 `apexnova opencode` 保留为 `apexnova run opencode` 的别名，v0.1 的文档和安装脚本继续有效。
 
@@ -149,8 +149,8 @@ apexnova run opencode -- --model apexnova/glm-5.2
 选项：
 
 ```text
---deployment <id>      指定模型；可重复，第一个是默认模型。省略时交互模式弹出多选框，
-                       非交互模式在没有已绑定 deployment 时报 DEPLOYMENT_REQUIRED
+--model <id>      指定模型；可重复，第一个是默认模型。省略时交互模式弹出多选框，
+                       非交互模式在没有已绑定 model 时报 MODEL_REQUIRED
 --key <id>             绑定已有 API key（跳过创建，用于按工具追踪用量）
 --rotating             使用 24h 短期 runtime credential 而非永久 key
 --gateway              经本地 Gateway 转发（默认关闭；蕴含 --rotating，见下）
@@ -158,7 +158,7 @@ apexnova run opencode -- --model apexnova/glm-5.2
 -- <agent args>        透传参数给 OpenCode
 ```
 
-流程：`detect → resolve deployment → ensure key → plan → apply → launch`。
+流程：`detect → resolve model → ensure key → plan → apply → launch`。
 
 `ensure key` 行为：默认 `POST /v1/api-keys` 创建永久 `sk-` key，`publicDeploymentIds` 覆盖**这次配置的全部模型**；`--rotating` 创建 24h `anrt_`（同样覆盖全部模型）；`--key <id>` 验证存在并提示输入 secret。已有配置时跳过 plan/apply 直接 launch。永久 key 不过期无需续期；`--rotating` 剩余不足 1 小时时自动续期，续期后的凭据覆盖同一组模型。
 
@@ -178,7 +178,7 @@ apexnova credential print claude-code --profile default
 
 ### `apexnova models`
 
-查询 Model 与 Deployment 目录。交互模式下列出模型，上下键选择并回车切换。
+查询 Model 目录。**只读**：它不写配置、不签发凭据、不问问题。
 
 ```text
 apexnova models
@@ -187,9 +187,11 @@ apexnova models --protocol openai-responses
 apexnova models --compatible-only
 ```
 
-`--compatible-only` 只隐藏明确不兼容项；未验证项必须单独标记，不能当作兼容。交互模式（TTY + 非 `--json` + 非 `--non-interactive`）：上下键选择，回车切换，Esc 取消。已经配置过的模型在描述里标 `configured`。
+`--compatible-only` 只隐藏明确不兼容项；未验证项必须单独标记，不能当作兼容。
 
-**切换是「加上并置顶」，不是「换掉」**：选中的模型不在配置里就加进去，已经在就只把默认模型指向它；其余已配置的模型全部保留，key 不变（不新建、不撤销，必要时按上面的规则 PATCH 扩大范围）。这样在 Agent 界面里换模型和在 Connect 里换模型得到的是同一份可用模型集合。目录里已经消失、或不再在同一 endpoint 上提供的旧模型会被移出配置并给出警告——没有东西可以用来描述它了。
+**排序跟 Hub 的模型广场走，且只按模型自身的属性排。**目录到达 Connect 时已经是广场那一份顺序（`hub-client` 的 `joinCatalog` 负责保住它），`models`、`switch` 的选择器和 `run` 首次运行的多选框读的是同一个数组，所以三处顺序必然一致——不一致在结构上做不到。Connect 不引入部署维度，也不在这里重排。
+
+> v0.6 及之前，交互模式下的 `models` 会弹出选择器并把选中的模型写进配置——一个读形状的名字，默认路径上会写盘。选模型现在是 [`apexnova switch`](#apexnova-switch-agent)，选择器也搬去了那里（[ADR 0038](decisions/0038-models-reads-switch-writes.md)）。
 
 ### `apexnova usage`
 
@@ -212,20 +214,20 @@ apexnova usage --key <keyId> --from 2026-09-01T00:00:00Z --to 2026-09-07T00:00:0
 生成并可选执行 ConnectionProfile 对应的 Change Plan。
 
 ```text
-apexnova connect opencode --deployment apexnova/model-x --dry-run
-apexnova connect codex --deployment apexnova/model-x --yes
+apexnova connect opencode --model apexnova/model-x --dry-run
+apexnova connect codex --model apexnova/model-x --yes
 apexnova connect opencode --best --yes
 ```
 
 选项：
 
 ```text
---deployment <id>          指定 Deployment
+--model <id>          指定 Model
 --best                     连到推荐排名第一的，并把依据写进审计
---protocol <id>            指定协议（Deployment 暴露多个时）
+--protocol <id>            指定协议（Model 暴露多个时）
 --scenario <id>            --best 使用的 Scenario（默认 coding-general）
 --max-price <per-1M>       --best 的混合单价上限
---model-allowlist <refs>   --best 只考虑这些 Deployment（逗号分隔）
+--model-allowlist <refs>   --best 只考虑这些 Model（逗号分隔）
 --exclude-publisher <names> --best 永不选择这些发布方
 --credential-ttl <秒>      运行时凭据有效期，120～86400（默认 86400），蕴含 --rotating
 --api-key-helper           让 Agent 自己取凭据（仅支持该机制的 Agent，如 Claude Code）
@@ -256,7 +258,7 @@ apexnova verify opencode --live
 # 展示非约束 estimate 及其假设后退出，不产生推理费用
 
 apexnova verify opencode --live --yes
-# 执行真实请求，并验证 Request ID、Provider、requested/resolved model 与 Deployment 响应头
+# 执行真实请求，并验证 Request ID、Provider、requested/resolved model 与 Model 响应头
 ```
 
 `verify` 不接受明文密钥，也不输出响应正文、Prompt 或源码。
@@ -271,16 +273,32 @@ M1 不承诺 Agent 进程启动后的热更新；超长会话的无感轮换需�
 
 ### `apexnova switch <agent>`
 
-切换到已存在 ConnectionProfile 或 Deployment，仍必须生成 Plan。
+换这个 Agent 打开时用的模型。日常操作，不换 key，不产生费用。
 
 ```text
-apexnova switch opencode --deployment apexnova/model-y --yes
+apexnova switch opencode                                      # 上下键选，回车确认，Esc 取消
+apexnova switch opencode --model apexnova/model-y --yes
 apexnova switch opencode --best --yes
+apexnova switch opencode --model apexnova/model-y --dry-run
 ```
 
-选项与 `connect` 相同（`--connection-profile` 同样**尚未实现**）。
+**切换是「加上并置顶」，不是「换掉」**：选中的模型不在配置里就加进去，已经在就只把默认模型指向它；其余已配置的模型全部保留，key 不变（不新建、不撤销，必要时按 `connect` 那节的规则 PATCH 扩大范围）。这样在 Agent 界面里换模型和在 Connect 里换模型得到的是同一份可用模型集合。目录里已经消失、或不再在同一 endpoint 上提供的旧模型会被移出配置并给出**点名的**警告——没有东西可以用来描述它了。
 
-首版只提供显式切换，不承诺当前 Agent 会话内热切换。每次切换写一条 `selected` 审计记录，并把上一次连接留成可恢复事务。
+**每次切换都要确认，问法按目标是怎么来的分**：
+
+- 从列表里挑的，那次选择本身就是确认，不再问第二遍；
+- 显式目标（`--model` / `--best`）在命令运行之前就定了，所以先把要做的事打出来——目标 model、协议、**切换之后的完整模型集合**、key 会不会被替换、哪些模型会被移出——再问一次 y/N，默认 N。`--yes` 是这个问题的非交互答案，给了就不问；
+- 不可交互时（`--json`、`--non-interactive`、非 TTY）没有显式 `--yes` 直接返回 `APPROVAL_REQUIRED`（退出码 3），不做任何假设。
+
+回答 N 时不写任何东西，同样以 `APPROVAL_REQUIRED` 退出。
+
+非交互环境（`--json`、`--non-interactive`、CI）没有显式目标时返回 `MODEL_REQUIRED`（退出码 2），不会替你挑一个。已经配置过的模型在列表描述里标 `configured`，**不隐藏**——选中它就是「把默认改回这个」。
+
+`--dry-run` 列出的模型集合就是写入之后的那一组，和真正的写入调用同一段计算。选项与 `connect` 相同，但**不接受 `--credential-ttl` / `--rotating`**：它们的意思是「签发一枚新凭据」，而那正是 switch 承诺不做的事（`--connection-profile` 同样**尚未实现**）。
+
+每次切换写一条 `selected` 审计记录，并把上一次配置留成可恢复事务。首版不承诺当前 Agent 会话内热切换。
+
+> v0.6 及之前，`switch` 是 `connect` 的另一个拼法：它签发一枚 24 小时 runtime credential 并替换绑定。需要那个行为的用 `connect`（[ADR 0038](decisions/0038-models-reads-switch-writes.md)）。
 
 ### `apexnova audit [agent]`
 
@@ -293,7 +311,7 @@ apexnova audit opencode --limit 20
 
 选项：`--limit <n>`。
 
-记录回答三句话：**选了哪个 Deployment、依据是什么、实际由谁计费**。依据（`grounds`）取值 `explicit` / `recommendation` / `existing` / `interactive` / `restore`；来自推荐时引用具体的 `rec.sha256.<hash>`。计费的 `method` 为 `gateway`（逐请求，含 Hub 的 `requestId`）或 `ledger-window`（台账前后差值）。
+记录回答三句话：**选了哪个 Model、依据是什么、实际由谁计费**。依据（`grounds`）取值 `explicit` / `recommendation` / `existing` / `interactive` / `restore`；来自推荐时引用具体的 `rec.sha256.<hash>`。计费的 `method` 为 `gateway`（逐请求，含 Hub 的 `requestId`）或 `ledger-window`（台账前后差值）。
 
 **不得只写「切到了 X」**——那是结果，不是可审计的依据。台账未结算时记 `unconfirmed`，而不是记成已确认的零次。
 
@@ -315,24 +333,24 @@ apexnova restore <transaction-id>
 
 顺序的判定来源是备份目录本身：同一 integration 中只有最新的事务可恢复，`restore --list` 会标出它，`--dry-run` 走同一检查。凭据绑定只承载凭据链，不参与顺序判定——绑定指向别的事务时（旧版本可能留下这种状态）配置照样恢复，CLI 撤销当前凭据、删除绑定并以警告说明该 profile 已断开，需要重新 `connect`。
 
-恢复一次 `switch` 时，凭据库只保存上一个 Deployment/协议及事务链，不保存已撤销的旧 secret。CLI 会先为上一个目标签发并通过控制面确认一枚新 runtime credential，再回滚配置、原子保存新绑定并撤销当前凭据。恢复最初的 `connect` 则回到连接前配置、撤销当前凭据并删除本地绑定。若新凭据签发或验证失败，文件保持不变；若配置已经恢复但绑定保存失败，CLI 撤销相关凭据并进入安全断开状态。
+恢复一次 `switch` 时，凭据库只保存上一个 Model/协议及事务链，不保存已撤销的旧 secret。CLI 会先为上一个目标签发并通过控制面确认一枚新 runtime credential，再回滚配置、原子保存新绑定并撤销当前凭据。恢复最初的 `connect` 则回到连接前配置、撤销当前凭据并删除本地绑定。若新凭据签发或验证失败，文件保持不变；若配置已经恢复但绑定保存失败，CLI 撤销相关凭据并进入安全断开状态。
 
 ### `apexnova compatibility run <agent>`
 
-对一个 Deployment 运行首批能力测试套件，产出一条不可变的本地 Evidence。**会真实计费。**
+对一个 Model 运行首批能力测试套件，产出一条不可变的本地 Evidence。**会真实计费。**
 
 ```text
-apexnova compatibility run opencode --deployment <id>
-apexnova compatibility run opencode --deployment <id> --yes
-apexnova compatibility run opencode --deployment <id> --budget 0.20 --yes
+apexnova compatibility run opencode --model <id>
+apexnova compatibility run opencode --model <id> --yes
+apexnova compatibility run opencode --model <id> --budget 0.20 --yes
 ```
 
 一次运行发八个请求，其中六个进入推理面计费（另外两个是被拒的无效凭据与无效请求）。流程：
 
 1. 探测本机 Agent 版本——Evidence 必须写明它是对哪个版本采集的，取不到版本就拒绝运行；
 2. 向 Hub 取估价。估价高于本地上限（默认 `0.05`，用 `--budget` 显式抬高）时返回 `BUDGET_EXCEEDED` 并且不发任何请求；
-3. 没有 `--yes` 时返回 `APPROVAL_REQUIRED`，附估价、Deployment、协议和将测的能力清单，不签发凭据、不发请求；
-4. 签发只作用于该 Deployment 与协议的 runtime credential，跑完（无论成败）立即撤销；
+3. 没有 `--yes` 时返回 `APPROVAL_REQUIRED`，附估价、Model、协议和将测的能力清单，不签发凭据、不发请求；
+4. 签发只作用于该 Model 与协议的 runtime credential，跑完（无论成败）立即撤销；
 5. 按 requestId 向 Hub 核对真实扣费，未结算的请求以警告列出；
 6. 写入 Evidence 并给出当前 Verdict。
 
@@ -352,7 +370,7 @@ apexnova compatibility refresh --agent opencode --budget 0.20 --yes
 Evidence 是按 TTL 主动过期的（协议静态字段 90 天、流式与 Tool Call 30 天），所以必须有东西回答「哪些结论要重跑、要花多少」，否则矩阵只会静静地烂成 `unknown`。
 
 - 没有 `--yes` 时返回 `APPROVAL_REQUIRED`，并**逐条列出**待重采的 subject、到期时间与估价，总估价超过 `--budget`（默认 `0.05`）时返回 `BUDGET_EXCEEDED`。两种情况都不发任何请求；
-- 无法重采的 subject 报为 skipped 并给出原因（Agent 未安装、本构建不含该 Integration、Deployment 已下架或不再提供该协议），不会从清单里悄悄消失；
+- 无法重采的 subject 报为 skipped 并给出原因（Agent 未安装、本构建不含该 Integration、Model 已下架或不再提供该协议），不会从清单里悄悄消失；
 - 本机安装的 Agent 版本与旧证据不同时，重采会落到**新的 subject** 上，旧证据保持过期状态——这是正确的：版本变了就是另一个问题。命令会在计划里标出这一点；
 - 单个 subject 失败不终止整轮，失败逐条报出；全部失败时返回 `REFRESH_FAILED`。
 
@@ -363,7 +381,7 @@ Evidence 是按 TTL 主动过期的（协议静态字段 90 天、流式与 Tool
 ```text
 apexnova compatibility sync                       # 只列计划，不发送
 apexnova compatibility sync --yes
-apexnova compatibility sync --agent opencode --deployment <id> --yes
+apexnova compatibility sync --agent opencode --model <id> --yes
 ```
 
 需要 `compatibility:write`——该 scope 由 Hub admin 按账号授予，仅重新 `login` 不会拿到（见[需求 12D](apexnova-ai-hub-requirements.md)）。流程：
@@ -381,7 +399,7 @@ apexnova compatibility sync --agent opencode --deployment <id> --yes
 撤回一条已发布的记录。不删除：记录仍可按 ID 查到，只是不再支撑任何 Verdict。
 
 ```text
-apexnova compatibility revoke ev.sha256.<64hex> --reason "collected against the wrong deployment" --yes
+apexnova compatibility revoke ev.sha256.<64hex> --reason "collected against the wrong model" --yes
 ```
 
 `--reason` 是必填的——几个月后没人能从一条记录的消失里还原出撤回的原因。没有 `--yes` 时返回 `APPROVAL_REQUIRED`。重复撤回是幂等的，且**第一次的理由不被覆盖**；命令会在理由不同时给出警告。需要 `compatibility:revoke`。
@@ -391,13 +409,13 @@ apexnova compatibility revoke ev.sha256.<64hex> --reason "collected against the 
 对一份录制回放能力套件。不调用 Hub、不需要凭据、不产生任何费用，**也不写入 Evidence**。
 
 ```text
-apexnova compatibility run opencode --deployment <id> --yes --record run.json
+apexnova compatibility run opencode --model <id> --yes --record run.json
 apexnova compatibility replay run.json
 ```
 
 `--record` 会把该轮的真实交互写成可回放的录制：请求头一律不记录（凭据在那里），响应头只保留探针会读的白名单字段，响应体与保留的头都经过与 Evidence 相同的脱敏。
 
-回放报告的是**套件对这些响应的判定**，不是该 Deployment 当下的行为，因此它不产出 Evidence——Evidence 只来自真实运行。录制里缺少某个请求时命令直接报 `RECORDING_INCOMPLETE` 而不是把缺口记成失败：用陈旧的录制生成「结论」正是必须避免的事。录制的套件版本与当前构建不同时会给出警告。
+回放报告的是**套件对这些响应的判定**，不是该 Model 当下的行为，因此它不产出 Evidence——Evidence 只来自真实运行。录制里缺少某个请求时命令直接报 `RECORDING_INCOMPLETE` 而不是把缺口记成失败：用陈旧的录制生成「结论」正是必须避免的事。录制的套件版本与当前构建不同时会给出警告。
 
 ### `apexnova compatibility matrix`
 
@@ -405,7 +423,7 @@ apexnova compatibility replay run.json
 
 ```text
 apexnova compatibility matrix
-apexnova compatibility matrix --agent opencode --deployment <id> --protocol <id>
+apexnova compatibility matrix --agent opencode --model <id> --protocol <id>
 apexnova compatibility matrix > docs/compatibility-matrix.md
 ```
 
@@ -420,10 +438,10 @@ apexnova compatibility matrix > docs/compatibility-matrix.md
 ```text
 apexnova compatibility explain
 apexnova compatibility explain opencode
-apexnova compatibility explain opencode --deployment <id> --protocol <id>
+apexnova compatibility explain opencode --model <id> --protocol <id>
 ```
 
-结果按 subject 分组——Agent 与版本、Integration 与版本、Deployment、协议、平台，任一不同都是另一个问题——每组给出 Verdict（`compatible`、`partial`、`incompatible`、`unknown`）以及逐项能力的支持程度、级别和所依据的记录。
+结果按 subject 分组——Agent 与版本、Integration 与版本、Model、协议、平台，任一不同都是另一个问题——每组给出 Verdict（`compatible`、`partial`、`incompatible`、`unknown`）以及逐项能力的支持程度、级别和所依据的记录。
 
 - 过期的 Evidence 仍然显示并标记为 stale：它正是「为什么是 unknown」的解释；
 - 完全没有采集过时命令成功返回并说明未采集，不作为错误；
@@ -439,38 +457,38 @@ apexnova compatibility explain opencode --deployment <id> --protocol <id>
 apexnova recommend opencode
 apexnova recommend opencode --scenario coding-general --json
 apexnova recommend claude-code --max-price 2.5
-apexnova recommend opencode --deployment <id>          # 只看某一个
+apexnova recommend opencode --model <id>          # 只看某一个
 apexnova recommend opencode --model-allowlist glm-5.2,glm-5.1   # 只考虑这些（接受 id 与别名）
 apexnova recommend claude-code --exclude-publisher "Zhipu AI"   # 不推荐该发布方的模型
 ```
 
 排序由 M3 采集的 Evidence 加目录数据算出，**全部在本地完成**，因此任何拿着同一批记录的人都能复算。规则见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)：
 
-- **硬约束是过滤不是扣分**：required 能力实测失败、或没有当前平台的实时证据，该 Deployment 直接 `eligible: false` 并给出排除理由，不参与排序。总分不得掩盖必需能力的失败；
+- **硬约束是过滤不是扣分**：required 能力实测失败、或没有当前平台的实时证据，该 Model 直接 `eligible: false` 并给出排除理由，不参与排序。总分不得掩盖必需能力的失败；
 - **平台是证据 subject 的一部分**：Linux 上的结论不适用于 Windows。当前平台没有证据时，命令**如实报「无证据」并提示去采集**，而不是借用别处的结论；
 - **没有度量来源的分项照样列在 Scenario 的 `priorities` 里**，并在每次输出里逐条说明原因（`quality` 缺 Scenario Quality Pack、`latency` 缺 Operational Evidence、`privacy` 因目录只给不可逆指纹而无法区分、`availability` 是 Hub 声明因而只过滤不计分）。权重在计算前就把它们剔除，**因此列出它们不会稀释任何被计分项的权重**；把它们从列表里删掉才是问题——那等于静默给零分，读起来像「这个 Scenario 不在乎」而不是「没人测过」。**同样不给默认分**——默认分等于让「没测过」以「中等」的身份进入排序；
 - **某个分项在本轮所有候选上都没有数据时整项丢弃**并说明，而不是给所有人打零分却仍占权重。价格的「没有数据」是目录发布的 `null`；**一个发布出来的 `0` 是免费**，按最优计分（需求 12H 交付后语义恢复，此前零与未知不可分辨）；
 - 每个候选列出各分项的分数、权重、依据文字与所引用的 Evidence ID；`sponsored` 恒为 `false` 且不是打分输入；
 - **候选只来自 Apexnova 目录，并且每次运行都写在输出里**：目录之外的 Provider 不是「排得靠后」，而是根本没有参与。第二候选来源按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 属于 M5——它真正缺的不是一份候选列表，而是一条不经 Hub 签发凭据、不经 Hub 计费的证据采集路径。
 
-输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`（后者自 schema `0.2` 起必填，见 [ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)：同一 Scenario 的两个 profile 要求的能力与优先级顺序不同，缺了它两份文档无法区分）；排序确定（同分按 deploymentId 字典序），同一输入两次运行逐字节相同。
+输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`（后者自 schema `0.2` 起必填，见 [ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)：同一 Scenario 的两个 profile 要求的能力与优先级顺序不同，缺了它两份文档无法区分）；排序确定（同分按 modelId 字典序），同一输入两次运行逐字节相同。
 
 `--json` 的 `data` **就是 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 冻结的那个对象**，由 `recommendationRecord()` 产出并在返回前用 ajv 校验，校验不过就报错而不是发出去。两处后果需要知道：
 
 - schema 的两个对象都是 `additionalProperties: false`，因此**平台、候选显示名、分项的分数与权重没有各自的字段**，它们写进 `reasons` 的文本里（ADR 0007 决策 3 指定的就是这个字段）。人读的输出不受此限，仍然分列显示；
-- `candidates` 是 `minItems: 1`。什么都没纳入考虑时（例如 `--deployment` 指向目录里没有的 id）**不产出记录而是报错**——空推荐等于宣称一个没人做过的选择。
+- `candidates` 是 `minItems: 1`。什么都没纳入考虑时（例如 `--model` 指向目录里没有的 id）**不产出记录而是报错**——空推荐等于宣称一个没人做过的选择。
 
-`id` 形如 `rec.sha256.<64 hex>`，是对记录内容的哈希，与 Evidence 同一套办法：同一份排行算两次是同一份文档。`expiresAt` 取**这份排序所依赖的一切之中最早到期的那个**：所引用 Evidence 的到期时间，以及每一个**实际被读取过的价格**的 `priceValidUntil`（目录对部分 Deployment 按时段计价，价格一天内会变）。没读过的价格不参与——它没有影响过这次排序。两者都没有时取 `createdAt`，因为它没有任何可以凭借的东西；结果不会早于 `createdAt`，一份出生即过期的文档只会是目录给了过时有效期的产物。
+`id` 形如 `rec.sha256.<64 hex>`，是对记录内容的哈希，与 Evidence 同一套办法：同一份排行算两次是同一份文档。`expiresAt` 取**这份排序所依赖的一切之中最早到期的那个**：所引用 Evidence 的到期时间，以及每一个**实际被读取过的价格**的 `priceValidUntil`（目录对部分 Model 按时段计价，价格一天内会变）。没读过的价格不参与——它没有影响过这次排序。两者都没有时取 `createdAt`，因为它没有任何可以凭借的东西；结果不会早于 `createdAt`，一份出生即过期的文档只会是目录给了过时有效期的产物。
 
 M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、`--model-allowlist`、`--verified-only`，**首批都未实现**。逐项状态见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md)，四项不是同一种情况：
 
 - `--priority`：优先级由 Scenario 的 `priorities` 顺序决定，不设命令行覆盖；
 - `--region`：**不会实现**（[ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)）。用户想从区域得到的要么是低延迟（直接测量，属 Operational Evidence），要么是数据落在某个司法辖区（属需求 12J 的数据处理属性）；中间那个目录标签不增加信息，且不可校验；
-- `--provider` / 隐私约束：现网 46 个 Deployment 的 `providerId` 全是 `provider.apexnova-ai-hub`（`kind: platform`），**实际运行模型的上游运营方目录不给**，这一半仍不可实现；按模型发布方过滤的那一半**已实现**为 `--exclude-publisher`（大小写不敏感，现网覆盖 12 个发布方）。目录不给出发布方的 Deployment 在设了该约束时判为不通过——无法证明它不是被排除的那个发布方，与价格上限同一条规则；
-- `--model-allowlist`：**已实现**，接受逗号分隔的 deployment id 或别名，逐个对目录解析；名字不在可见目录里直接报 `DEPLOYMENT_NOT_FOUND` 而不是静默匹配为空。与 `--deployment` 互斥（两者都在收窄候选集，同时给会产生歧义）；
-- `--verified-only`：没有意义，因为没有实测证据的 Deployment 本来就不会被推荐。
+- `--provider` / 隐私约束：现网 46 个 Model 的 `providerId` 全是 `provider.apexnova-ai-hub`（`kind: platform`），**实际运行模型的上游运营方目录不给**，这一半仍不可实现；按模型发布方过滤的那一半**已实现**为 `--exclude-publisher`（大小写不敏感，现网覆盖 12 个发布方）。目录不给出发布方的 Model 在设了该约束时判为不通过——无法证明它不是被排除的那个发布方，与价格上限同一条规则；
+- `--model-allowlist`：**已实现**，接受逗号分隔的 model id 或别名，逐个对目录解析；名字不在可见目录里直接报 `MODEL_NOT_FOUND` 而不是静默匹配为空。与 `--model` 互斥（两者都在收窄候选集，同时给会产生歧义）；
+- `--verified-only`：没有意义，因为没有实测证据的 Model 本来就不会被推荐。
 
-**`--max-price` 对价格未知的 Deployment 判为不通过**（ADR 0010 决策 2）：约束的语义是「证明得了才通过」，与 required 能力 `unknown` 不算通过是同一条规则。目录当前对全部 Deployment 发布 `pricing: 0`（需求 12H）并被读作「没有价格」，因此**只要设了 `--max-price`，当前本轮就没有候选**——这是 12H 的实际影响，不是过滤器坏了。零候选时输出会报出最大的一组排除理由及其计数。
+**`--max-price` 对价格未知的 Model 判为不通过**（ADR 0010 决策 2）：约束的语义是「证明得了才通过」，与 required 能力 `unknown` 不算通过是同一条规则。目录当前对全部 Model 发布 `pricing: 0`（需求 12H）并被读作「没有价格」，因此**只要设了 `--max-price`，当前本轮就没有候选**——这是 12H 的实际影响，不是过滤器坏了。零候选时输出会报出最大的一组排除理由及其计数。
 
 ### 选项只在被读取的命令上被接受
 
@@ -502,7 +520,7 @@ M3 提供：
 ```text
 apexnova compatibility explain \
   --agent opencode \
-  --deployment provider/model
+  --model provider/model
 ```
 
 输出 Verdict、限制、Evidence、测试版本、新鲜度和未验证能力。
@@ -561,7 +579,7 @@ apexnova compatibility explain \
 
 - TTY 中可以显示选择器和差异；
 - 非 TTY 默认等价于 `--non-interactive`；
-- 自动化必须显式指定 Deployment/Profile，不允许依赖交互默认值；
+- 自动化必须显式指定 Model/Profile，不允许依赖交互默认值；
 - 将来允许签名 Plan 文件，但不能接受来源未知的 Plan；
 - JSON 输出字段只做向后兼容增加，破坏性变更提升 Schema Version。
 

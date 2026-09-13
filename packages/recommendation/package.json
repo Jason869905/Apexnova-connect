@@ -2,7 +2,7 @@
   "name": "@apexnova-connect/recommendation",
   "version": "0.1.0",
   "private": true,
-  "description": "Scenario profiles and explainable deployment recommendations for Apexnova-connect.",
+  "description": "Scenario profiles and explainable model recommendations for Apexnova-connect.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",

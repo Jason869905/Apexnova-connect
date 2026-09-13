@@ -38,12 +38,12 @@ contract("Apexnova AI Hub H1 cross-repository contract", () => {
     expect(me.userId).toMatch(/^usr_/);
     expect(balance.currency).toBe("USD");
     expect(catalog.providers[0]?.id).toBe("provider.apexnova-ai-hub");
-    expect(catalog.deployments[0]?.inferenceAlias).toBeTruthy();
+    expect(catalog.models[0]?.inferenceAlias).toBeTruthy();
   });
 
   it("keeps the Hub-owned one-time runtime secret inside SecretValue", async () => {
     const api = client({ "POST /v1/runtime-credentials": await fixture("runtime-credential-created") });
-    const created = await api.createRuntimeCredential({ name: "OpenCode contract test", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.test"] });
+    const created = await api.createRuntimeCredential({ name: "OpenCode contract test", protocols: ["openai-responses"], modelIds: ["model.test"] });
     expect(created.credentialId).toMatch(/^rtc_/);
     expect(created.secret.toJSON()).toBe("[REDACTED]");
     expect(JSON.stringify(created)).not.toContain("anrt_");

@@ -67,7 +67,7 @@ describe("evidence canonical hash vectors", () => {
         agentVersion: "1.18.29",
         integrationId: "opencode",
         integrationVersion: "0.1.0",
-        deploymentId: "deployment.nova",
+        deploymentId: "model.nova",
         protocol: "openai-responses",
         platform: "linux-x64",
       },

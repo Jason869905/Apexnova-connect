@@ -15,7 +15,7 @@ export type RoutingGrounds = "explicit" | "recommendation" | "existing" | "inter
 export interface RoutingAttributionShare {
   readonly apiKeyId: string;
   readonly apiKeyName?: string;
-  readonly deploymentId?: string;
+  readonly modelId?: string;
   readonly resolvedModel?: string;
   readonly requestCount: number;
 }
@@ -61,7 +61,7 @@ export interface RoutingAuditEntry {
   readonly integrationId?: string;
   readonly profile: string;
   readonly command?: string;
-  readonly deploymentId?: string;
+  readonly modelId?: string;
   readonly providerId?: string;
   readonly protocol?: string;
   readonly grounds?: RoutingGrounds;

@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 
 const MODEL = "glm-5.2";
-const DEPLOYMENT = "deployment.glm-5-2";
+const DEPLOYMENT = "model.glm-5-2";
 const ENDPOINT = "https://api.example.test/v1/responses";
 const SECRET = "anrt_live_9f2b41d7c8aa";
 
@@ -93,7 +93,7 @@ async function recordSuite(protocol: SuiteProtocol) {
     endpoint: protocol === "openai-responses" ? ENDPOINT : "https://api.example.test/v1/messages",
     protocol,
     model: MODEL,
-    deploymentId: DEPLOYMENT,
+    modelId: DEPLOYMENT,
     credential: SecretValue.from(SECRET),
     fetch: recorder.fetch,
   });
@@ -101,7 +101,7 @@ async function recordSuite(protocol: SuiteProtocol) {
     endpoint: protocol === "openai-responses" ? ENDPOINT : "https://api.example.test/v1/messages",
     protocol,
     model: MODEL,
-    deploymentId: DEPLOYMENT,
+    modelId: DEPLOYMENT,
     recordedAt: "2026-09-08T18:00:00.000Z",
     interactions: recorder.interactions(),
   });
@@ -117,7 +117,7 @@ describe("recording and replay", () => {
         endpoint: recording.endpoint,
         protocol: recording.protocol,
         model: recording.model,
-        deploymentId: recording.deploymentId,
+        modelId: recording.modelId,
         credential: SecretValue.from(REPLAY_CREDENTIAL),
         fetch: createReplayFetch(recording),
       });
@@ -158,7 +158,7 @@ describe("recording and replay", () => {
         endpoint: partial.endpoint,
         protocol: partial.protocol,
         model: partial.model,
-        deploymentId: partial.deploymentId,
+        modelId: partial.modelId,
         credential: SecretValue.from(REPLAY_CREDENTIAL),
         fetch: createReplayFetch(partial),
       }),

@@ -13,10 +13,10 @@ apexnova run hermes
 ```
 
 ```bash
-apexnova run hermes --deployment deployment.apexnova.xxx
+apexnova run hermes --model deployment.apexnova.xxx
 
 # 选协议要在 connect 上做：run 不接受 --protocol，会以 INVALID_ARGUMENT 拒绝
-apexnova connect hermes --protocol anthropic-messages --deployment deployment.apexnova.xxx --yes
+apexnova connect hermes --protocol anthropic-messages --model deployment.apexnova.xxx --yes
 apexnova run hermes
 ```
 
@@ -31,9 +31,9 @@ apexnova run hermes
 | `openai-chat-completions` | `chat_completions` |
 | `anthropic-messages` | `anthropic_messages` |
 
-**不含 `openai-responses`**：Hermes 在该协议上的适配在 M5 期间被证明不成立，已从 manifest 移除。只暴露 `openai-responses` 的 Deployment 在 Hermes 上不可用，`connect` 会返回 `PROTOCOL_NOT_SUPPORTED`。
+**不含 `openai-responses`**：Hermes 在该协议上的适配在 M5 期间被证明不成立，已从 manifest 移除。只暴露 `openai-responses` 的 Model 在 Hermes 上不可用，`connect` 会返回 `PROTOCOL_NOT_SUPPORTED`。
 
-不指定 `--protocol` 时按 deployment 暴露的顺序选第一个可用的（`--protocol` 属于 `connect` 与 `switch`，不属于 `run`）。本集成**总是显式写出 `api_mode`**，不留给 Hermes 自动探测，避免 Responses 的部署被悄悄当成 chat completions。
+不指定 `--protocol` 时按 model 暴露的顺序选第一个可用的（`--protocol` 属于 `connect` 与 `switch`，不属于 `run`）。本集成**总是显式写出 `api_mode`**，不留给 Hermes 自动探测，避免 Responses 的部署被悄悄当成 chat completions。
 
 ## 受管理的字段
 
@@ -43,7 +43,7 @@ apexnova run hermes
 
 ```yaml
 model:
-  default: <deployment inferenceAlias>
+  default: <model inferenceAlias>
   provider: custom
   base_url: <Hub protocols[].baseUrl 推导出的根>
   api_key: ${APEXNOVA_API_KEY}
@@ -55,7 +55,7 @@ model:
 先看看会改什么：
 
 ```bash
-apexnova connect hermes --deployment deployment.apexnova.xxx --dry-run
+apexnova connect hermes --model deployment.apexnova.xxx --dry-run
 ```
 
 ## 关键：`.env` 会覆盖注入的凭据

@@ -24,9 +24,9 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["deploymentId", "rank", "eligible", "reasons", "evidenceRefs", "sponsored"],
+        "required": ["modelId", "rank", "eligible", "reasons", "evidenceRefs", "sponsored"],
         "properties": {
-          "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+          "modelId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
           "rank": { "type": "integer", "minimum": 1 },
           "eligible": { "type": "boolean" },
           "score": { "type": "number", "minimum": 0, "maximum": 1 },

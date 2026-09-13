@@ -45,7 +45,7 @@
       "minLength": 1,
       "maxLength": 40
     },
-    "deploymentId": {
+    "modelId": {
       "$ref": "common-definitions.schema.json#/$defs/stableId"
     },
     "providerId": {
@@ -132,7 +132,7 @@
                 "type": "string",
                 "maxLength": 256
               },
-              "deploymentId": {
+              "modelId": {
                 "type": "string",
                 "maxLength": 256
               },

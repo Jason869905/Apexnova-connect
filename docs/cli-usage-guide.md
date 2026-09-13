@@ -149,15 +149,56 @@ apexnova run opencode           # 勾 nova + glm，默认 nova
                                 # 之后在 OpenCode 里直接切到 glm，key 不变
 ```
 
-非交互环境（`--json`、`--non-interactive`、CI）没有已绑定的 deployment 时**不会**替你挑一个，而是返回 `DEPLOYMENT_REQUIRED`（退出码 2）——先用 `apexnova models --json` 列出候选，再传 `--deployment`；`--deployment` 可以重复，第一个就是默认模型：
+非交互环境（`--json`、`--non-interactive`、CI）没有已绑定的 model 时**不会**替你挑一个，而是返回 `MODEL_REQUIRED`（退出码 2）——先用 `apexnova models --json` 列出候选，再传 `--model`；`--model` 可以重复，第一个就是默认模型：
 
 ```bash
-apexnova run opencode --deployment deployment.a --deployment deployment.b --json
+apexnova run opencode --model glm-5.2 --model deepseek-v4 --json
 ```
 
-一个 Agent 只配置一个 endpoint，所以一组模型必须在同一个协议和同一个 base URL 上。做不到时报 `PROTOCOL_NOT_SHARED` 并列出分歧的 deployment——少配一个会让你拿到一个选得中、用不了的模型。
+一个 Agent 只配置一个 endpoint，所以一组模型必须在同一个协议和同一个 base URL 上。做不到时报 `PROTOCOL_NOT_SHARED` 并列出分歧的 model——少配一个会让你拿到一个选得中、用不了的模型。
 
 启动器要求 `detect` 结果为 `installed`：只有配置文件、没有可执行文件时返回 `AGENT_NOT_FOUND`。
+
+## 第 4 步：换模型
+
+`apexnova switch <agent>`。不带参数就从列表里挑：
+
+```bash
+apexnova switch opencode        # 上下键选，回车确认，Esc 取消
+```
+
+**切换是「加上并置顶」**：选中的模型不在配置里就加进去，已经在就只把默认改成它，其余已配置的模型全部保留。**key 不变**——不新建、不撤销，所以换模型不花钱、不影响你在别处引用的那枚 key，也不需要重新授权。列表里已经配好的模型标着 `configured`，选中它就是「把默认改回这个」。
+
+直接指定目标时会先把要做的事打出来再问一遍，默认 N：
+
+```bash
+$ apexnova switch opencode --model glm-5.2
+Add GLM 5.2 (glm-5.2) as the default model for OpenCode?
+  Model:    deployment.apexnova.cmq4770nr0000edzis38w378a
+  Protocol: openai-responses
+  Models after the switch: deployment.apexnova.cmq4770nr0000edzis38w378a, deployment.apexnova.cmt0bub5d0042139w2xobpghn
+  Key key_1 is widened, not replaced.
+
+? Apply this switch? (y/N)
+```
+
+`--model` 接受目录 ID，也接受别名（`glm-5.2` 这种），歧义时报 `MODEL_AMBIGUOUS` 并列出候选。**打印出来的是目录 ID**：别名可以改名，而计费和审计认的是 ID。
+
+`--model` 本身说不出「哪些模型会留下」和「key 会不会被换掉」，所以在问之前就摆出来。回答 N 不写任何东西。
+
+从列表里挑不会再问——那一次选择本身就是确认。`--yes` 是这个问题的非交互答案：
+
+```bash
+apexnova switch opencode --model glm-5.2 --yes
+apexnova switch opencode --best --yes                 # 换到推荐第一名
+apexnova switch opencode --model glm-5.2 --dry-run    # 只看计划，不写盘
+```
+
+非交互环境（`--json`、`--non-interactive`、CI）必须给 `--model` 或 `--best`，否则返回 `MODEL_REQUIRED`（退出码 2）——先 `apexnova models --json` 列候选；没给 `--yes` 则返回 `APPROVAL_REQUIRED`（退出码 3），不会替你答。
+
+`apexnova models` 只列目录，不改任何东西。列表顺序跟 Hub 的模型广场一致，`switch` 的选择器读的是同一份顺序。
+
+> **`switch` 和 `connect` 不是一回事**：`connect` 建立绑定并签发一枚 24 小时 runtime credential，替换当前绑定，用于按次追踪；`switch` 在已有的永久 key 上换默认模型。v0.6 及之前 `switch` 是 `connect` 的别名，而选择器在 `models` 里——需要旧的 `switch` 行为，用 `connect`（[ADR 0038](decisions/0038-models-reads-switch-writes.md)）。
 
 ## 凭证存在哪（仅 Linux 可选）
 
@@ -246,14 +287,16 @@ apexnova agents                                  # 支持哪些 Agent
 apexnova whoami                                  # 当前账号与套餐
 apexnova detect [agent]                          # 装没装、版本、配置在哪
 apexnova inspect <agent>                         # 当前 Provider、协议、受管理字段
-apexnova models [--agent <id>]                   # 模型目录，交互模式上下键切换默认模型（新模型自动加入配置，key 不变）
+apexnova models [--agent <id>]                   # 模型目录，只读
 apexnova recommend <agent>                       # 按证据排名，说明为什么
 apexnova usage --granularity day                 # 用量
 apexnova balance                                 # 余额
-apexnova connect <agent> --deployment <id> --dry-run   # 预览计划，不写盘不签发凭据
-apexnova connect <agent> --deployment <id> --yes       # 应用
+apexnova connect <agent> --model <id> --dry-run   # 预览计划，不写盘不签发凭据
+apexnova connect <agent> --model <id> --yes       # 应用
 apexnova connect <agent> --best --yes            # 连到推荐第一名，并把依据写进审计
-apexnova switch <agent> --deployment <id> --yes        # 换模型
+apexnova switch <agent>                          # 换模型：上下键选，回车确认（新模型自动加入配置，key 不变）
+apexnova switch <agent> --model <id> --yes  # 换模型：直接指定
+apexnova switch <agent> --best --yes             # 换到推荐第一名，并把依据写进审计
 apexnova verify <agent>                          # 配置级验证（不产生费用）
 apexnova verify <agent> --live --yes             # 真实推理验证（产生少量费用）
 apexnova audit [agent]                           # 读路由审计：选了谁、依据是什么、谁付的账
@@ -316,7 +359,7 @@ apexnova restore <transaction-id> --yes
 
 目标文件在事务之后被改动或删除时，恢复会以 `CONFLICT` 拒绝。确实要丢弃那些改动时用 `--discard-local-changes`——它不是直接覆盖，而是先把当前内容另存到备份目录的 `discarded/` 下再恢复。
 
-**必须逆序恢复**：跳过较新的事务会返回 `RESTORE_ORDER_CONFLICT`（`--list` 里标了 `restorable` 的那条才可恢复，`--dry-run` 的判断与实际执行一致）。恢复只撤销 Connect 写入的字段，之后你自己加的配置不受影响；恢复 `switch` 时会为上一个目标重新签发凭据。文件在应用之后被改过时，恢复会以 `CONFLICT` 拒绝而不是覆盖你的改动。
+**必须逆序恢复**：跳过较新的事务会返回 `RESTORE_ORDER_CONFLICT`（`--list` 里标了 `restorable` 的那条才可恢复，`--dry-run` 的判断与实际执行一致）。恢复只撤销 Connect 写入的字段，之后你自己加的配置不受影响；恢复一次 `connect` 时会为上一个目标重新签发凭据。文件在应用之后被改过时，恢复会以 `CONFLICT` 拒绝而不是覆盖你的改动。
 
 ## 本地 Gateway（`run --gateway`，默认关闭）
 
@@ -333,7 +376,7 @@ Agent ──(本地令牌)──> 127.0.0.1:随机端口 ──(Hub 凭据)─�
 - **归属从"猜"变成"记"。** 直连时只能对比计费台账的前后差值（按小时分桶，别人的请求混在里面）；经 Gateway 时每个请求都被逐条记下：方法、路径、Hub 的 `requestId`、状态码、耗时、用的哪枚凭据。
 
 ```bash
-apexnova run opencode --gateway --deployment deployment.apexnova.xxx
+apexnova run opencode --gateway --model deployment.apexnova.xxx
 apexnova audit --limit 1      # 看逐请求归属
 ```
 
@@ -343,7 +386,7 @@ apexnova audit --limit 1      # 看逐请求归属
 
 ## 路由审计
 
-每次「连接目标的确定」都写一条不可变记录，回答三句话：**选了哪个 Deployment、依据是什么、实际由谁计费**。
+每次「连接目标的确定」都写一条不可变记录，回答三句话：**选了哪个 Model、依据是什么、实际由谁计费**。
 
 ```bash
 apexnova audit                 # 最近的记录
@@ -370,16 +413,16 @@ apexnova audit --limit 20
 采集证据（**会真实计费**）：
 
 ```bash
-apexnova compatibility run opencode --deployment glm-5.2          # 只看估价，不发请求
-apexnova compatibility run opencode --deployment glm-5.2 --yes    # 批准后真跑
+apexnova compatibility run opencode --model glm-5.2          # 只看估价，不发请求
+apexnova compatibility run opencode --model glm-5.2 --yes    # 批准后真跑
 ```
 
-一次运行发八个请求、其中六个计费，跑完按 requestId 与 Hub 用量对账。估价超过本地上限（默认 `0.05`）会直接拒绝，确实要跑更贵的模型时用 `--budget` 显式抬高。测试用的 runtime credential 只作用于被测 Deployment，跑完立即撤销。
+一次运行发八个请求、其中六个计费，跑完按 requestId 与 Hub 用量对账。估价超过本地上限（默认 `0.05`）会直接拒绝，确实要跑更贵的模型时用 `--budget` 显式抬高。测试用的 runtime credential 只作用于被测 Model，跑完立即撤销。
 
 采集时可以顺便录一份，之后离线回放：
 
 ```bash
-apexnova compatibility run opencode --deployment glm-5.2 --yes --record run.json
+apexnova compatibility run opencode --model glm-5.2 --yes --record run.json
 apexnova compatibility replay run.json      # 不花钱、不需要凭据、不写证据
 ```
 
@@ -390,10 +433,10 @@ apexnova compatibility replay run.json      # 不花钱、不需要凭据、不�
 ```bash
 apexnova compatibility explain                 # 所有 Agent
 apexnova compatibility explain opencode        # 单个 Agent
-apexnova compatibility explain opencode --deployment <id>
+apexnova compatibility explain opencode --model <id>
 ```
 
-这条命令完全离线：只读本地证据，不调用 Hub，不花钱。结果按「Agent 版本 + Integration 版本 + Deployment + 协议 + 平台」分组，任一项不同都算另一个问题——升级 Agent 之后旧证据不会顺延，命令会直接告诉你它不适用于当前安装的版本。
+这条命令完全离线：只读本地证据，不调用 Hub，不花钱。结果按「Agent 版本 + Integration 版本 + Model + 协议 + 平台」分组，任一项不同都算另一个问题——升级 Agent 之后旧证据不会顺延，命令会直接告诉你它不适用于当前安装的版本。
 
 过期的证据不会被删除，而是标记为 stale 并继续显示，因为它正是某项能力显示为 `unknown` 的原因。短时效的能力（流式、Tool Call）30 天过期，协议静态字段 90 天。
 
@@ -404,7 +447,7 @@ apexnova compatibility refresh --within 30        # 只看计划和总估价，�
 apexnova compatibility refresh --within 30 --yes  # 批准后逐个重采
 ```
 
-它会列出哪些 subject 到期、各自估价多少，以及哪些重采不了（Agent 没装、Deployment 下架了）。重采不会覆盖旧记录——新证据按时间序胜出，旧的留在库里。
+它会列出哪些 subject 到期、各自估价多少，以及哪些重采不了（Agent 没装、Model 下架了）。重采不会覆盖旧记录——新证据按时间序胜出，旧的留在库里。
 
 还没跑过 `compatibility run` 时，这条命令会直接告诉你尚未采集。
 
@@ -441,7 +484,7 @@ Hub 地址解析顺序：环境变量 > `apexnova init` 写入的配置文件 > 
 | Code | 含义 |
 | ---: | --- |
 | 0 | 成功，包括明确的 no-op |
-| 2 | 参数错误（如 `DEPLOYMENT_REQUIRED`） |
+| 2 | 参数错误（如 `MODEL_REQUIRED`） |
 | 3 | 未认证或凭据缺失 |
 | 4 | 需要确认或权限不足 |
 | 5 | Agent/Integration 未发现或不支持（含 `PROTOCOL_NOT_SUPPORTED`） |

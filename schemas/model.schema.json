@@ -1,19 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.apexnova.dev/connect/model-deployment.schema.json",
-  "title": "Model Deployment",
+  "$id": "https://schemas.apexnova.dev/connect/model.schema.json",
+  "title": "Model",
+  "description": "One callable model. Connect has no second concept behind this one: where a provider serves the same weights from two regions, the catalog publishes two models with two ids, two aliases and two prices, and Connect selects between them like any other pair. `id` is what the provider authorises, routes and bills against; `inferenceAlias` is what the Agent sends and shows in its own picker.",
   "type": "object",
-  "required": ["schemaVersion", "id", "providerId", "modelId", "deploymentVersion", "routingMode", "protocols", "availability", "capabilities", "observedAt", "expiresAt"],
+  "required": ["schemaVersion", "id", "providerId", "name", "inferenceAlias", "protocols", "availability", "capabilities", "observedAt", "expiresAt"],
   "properties": {
     "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
     "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
     "providerId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
-    "modelId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
-    "deploymentVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "routingMode": { "enum": ["direct", "managed"] },
-    "displayName": { "type": "string", "maxLength": 160 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "family": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "publisher": { "type": "string", "maxLength": 160 },
+    "inferenceAlias": { "type": "string", "minLength": 1, "maxLength": 240 },
     "aliases": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
-    "region": { "type": "string", "pattern": "^[a-z0-9-]{2,32}$" },
+    "modelVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "routingMode": { "enum": ["direct", "managed"] },
+    "releaseDate": { "type": "string", "format": "date" },
+    "modalities": {
+      "type": "object",
+      "properties": {
+        "input": { "type": "array", "uniqueItems": true, "items": { "enum": ["text", "image", "audio", "video", "file"] } },
+        "output": { "type": "array", "uniqueItems": true, "items": { "enum": ["text", "image", "audio", "video", "embedding"] } }
+      },
+      "additionalProperties": false
+    },
     "protocols": {
       "type": "array",
       "minItems": 1,
@@ -44,8 +55,10 @@
         "additionalProperties": false
       }
     },
+    "implementationFingerprint": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "deprecatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
     "retiredAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
-    "replacementDeploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "replacementModelId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
     "observedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
     "expiresAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" },
     "updatedAt": { "$ref": "common-definitions.schema.json#/$defs/timestamp" }

@@ -259,7 +259,7 @@ describe("the model set a plan writes", () => {
   const intent = {
     planId: "plan.models",
     createdAt: "2026-09-13T12:00:00.000Z",
-    deploymentId: "deployment.nova",
+    modelId: "model.nova",
     inferenceAlias: "nova",
     modelName: "Nova Coder",
     protocol: "openai-responses" as const,
@@ -285,8 +285,8 @@ describe("the model set a plan writes", () => {
       {
         ...intent,
         models: [
-          { deploymentId: "deployment.nova", inferenceAlias: "nova", modelName: "Nova Coder", limits: { context: 128000, output: 8192 } },
-          { deploymentId: "deployment.aux", inferenceAlias: "aux", modelName: "Aux Reasoner" },
+          { modelId: "model.nova", inferenceAlias: "nova", modelName: "Nova Coder", limits: { context: 128000, output: 8192 } },
+          { modelId: "model.aux", inferenceAlias: "aux", modelName: "Aux Reasoner" },
         ],
       },
     );

@@ -8,7 +8,7 @@
   "endpoint": "https://api.apexnova-consulting.com/v1/responses",
   "protocol": "openai-responses",
   "model": "qwen3.8-flash",
-  "deploymentId": "deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3",
+  "modelId": "deployment.apexnova.cmtdear4g005n5pfmdx2ge3x3",
   "interactions": [
     {
       "key": "auth:005bc125d8e4150929c9cfeacfe8e469",

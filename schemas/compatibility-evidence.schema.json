@@ -21,11 +21,11 @@
         "agentVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
         "integrationId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
         "integrationVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
-        "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+        "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId", "description": "The model id. Named `deploymentId` because this record's ID is a sha256 over its canonical JSON under a rule pinned with Hub, which recomputes it to check immutability -- renaming the key would change the ID of every record with identical content. Connect calls it the model id everywhere the value is not being hashed." },
         "protocol": { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
         "platform": { "type": "string", "minLength": 1, "maxLength": 120 },
         "implementationFingerprint": {
-          "description": "The deployment's implementation fingerprint at collection time. Optional because the catalog has not always exposed one; when present it enters the content hash, so evidence measured against a different implementation is a different record.",
+          "description": "The model's implementation fingerprint at collection time. Optional because the catalog has not always exposed one; when present it enters the content hash, so evidence measured against a different implementation is a different record.",
           "type": "string",
           "minLength": 8,
           "maxLength": 128

@@ -4,7 +4,7 @@
   "title": "Local Connection Profile",
   "description": "Contains only opaque credential references, never secret values.",
   "type": "object",
-  "required": ["schemaVersion", "id", "agentId", "integrationId", "integrationVersion", "providerId", "deploymentId", "protocol", "mode", "credentialRef", "status", "createdAt", "updatedAt"],
+  "required": ["schemaVersion", "id", "agentId", "integrationId", "integrationVersion", "providerId", "modelId", "protocol", "mode", "credentialRef", "status", "createdAt", "updatedAt"],
   "properties": {
     "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
     "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
@@ -13,7 +13,7 @@
     "integrationVersion": { "type": "string", "minLength": 1, "maxLength": 120 },
     "installationId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
     "providerId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
-    "deploymentId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+    "modelId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
     "protocol": { "$ref": "common-definitions.schema.json#/$defs/protocolId" },
     "mode": { "enum": ["direct", "gateway", "plugin", "launcher"] },
     "credentialRef": { "type": "string", "pattern": "^cred:[A-Za-z0-9._:/-]{3,240}$" },

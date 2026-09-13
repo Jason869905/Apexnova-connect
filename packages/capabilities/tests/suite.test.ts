@@ -5,7 +5,7 @@ import { SecretValue } from "@apexnova-connect/credential-store";
 import { runCapabilitySuite, type SuiteProtocol } from "../src/index.js";
 
 const MODEL = "glm-5.2";
-const DEPLOYMENT = "deployment.glm-5-2";
+const DEPLOYMENT = "model.glm-5-2";
 
 function hubHeaders(extra: Readonly<Record<string, string>> = {}): Record<string, string> {
   return {
@@ -159,7 +159,7 @@ function options(protocol: SuiteProtocol, fetchImpl: typeof globalThis.fetch) {
         : "https://api.example.test/v1/messages",
     protocol,
     model: MODEL,
-    deploymentId: DEPLOYMENT,
+    modelId: DEPLOYMENT,
     credential: SecretValue.from("runtime-secret"),
     fetch: fetchImpl,
   };
@@ -171,7 +171,7 @@ function support(result: Awaited<ReturnType<typeof runCapabilitySuite>>): Record
 
 describe("runCapabilitySuite", () => {
   for (const protocol of ["openai-responses", "anthropic-messages", "openai-chat-completions"] as const) {
-    it(`records every capability as supported against a healthy ${protocol} deployment`, async () => {
+    it(`records every capability as supported against a healthy ${protocol} model`, async () => {
       const result = await runCapabilitySuite(options(protocol, healthyHub(protocol)));
 
       expect(support(result)).toEqual({
@@ -260,20 +260,20 @@ describe("runCapabilitySuite", () => {
     expect(support(result)["agent.single-tool-call"]).toBe("supported");
   });
 
-  it("reports a mismatched deployment rather than trusting the request", async () => {
-    const wrongDeployment = () =>
+  it("reports a mismatched model rather than trusting the request", async () => {
+    const wrongModel = () =>
       json(
         messageResponse("openai-responses", "OK"),
         200,
-        hubHeaders({ "x-apexnova-deployment-id": "deployment.something-else" }),
+        hubHeaders({ "x-apexnova-deployment-id": "model.something-else" }),
       );
     const result = await runCapabilitySuite(
-      options("openai-responses", healthyHub("openai-responses", { minimal: wrongDeployment })),
+      options("openai-responses", healthyHub("openai-responses", { minimal: wrongModel })),
     );
 
     const mapping = result.outcomes.find((outcome) => outcome.capabilityId === "protocol.model-id-mapping");
     expect(mapping).toMatchObject({ support: "unsupported" });
-    expect(mapping?.detail).toContain("deployment.something-else");
+    expect(mapping?.detail).toContain("model.something-else");
   });
 
   it("turns a refused endpoint into outcomes instead of throwing", async () => {
@@ -365,7 +365,7 @@ describe("probe shape", () => {
     await runCapabilitySuite(options("openai-responses", recording));
 
     // Forcing the choice tests a stronger claim than "a tool is callable", and
-    // some deployments reject the forced form outright.
+    // some models reject the forced form outright.
     const toolRequest = bodies.find((body) => Array.isArray(body.tools) && body.text === undefined);
     expect(toolRequest).toBeDefined();
     expect(toolRequest?.tool_choice).toBeUndefined();

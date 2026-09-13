@@ -9,7 +9,6 @@ import type {
   CreatedRuntimeCredential,
   HubAccountSummary,
   HubBalance,
-  HubCatalogDeployment,
   HubCatalogModel,
   HubCatalogCapabilityStatement,
   HubCatalogPricing,
@@ -125,7 +124,13 @@ function parseProvider(value: unknown): HubCatalogProvider {
   };
 }
 
-function parseModel(value: unknown): HubCatalogModel {
+/**
+ * Hub's `models[]` entry: the half that names the publisher and model type.
+ *
+ * `deploymentIds` is the link to the other half. Connect keeps it only long
+ * enough to join the two and then forgets it; see `joinCatalog`.
+ */
+function parseWireModel(value: unknown): WireModel {
   const item = object(value, "model");
   return {
     id: string(item.id, "model.id", 256),
@@ -133,10 +138,21 @@ function parseModel(value: unknown): HubCatalogModel {
     ...(item.publisher === undefined ? {} : { publisher: string(item.publisher, "model.publisher", 256) }),
     ...(item.publisherName === undefined ? {} : { publisherName: string(item.publisherName, "model.publisherName", 256) }),
     modelType: string(item.modelType, "model.modelType", 64),
-    capabilities: strings(item.capabilities, "model.capabilities"),
     deploymentIds: strings(item.deploymentIds, "model.deploymentIds"),
   };
 }
+
+interface WireModel {
+  readonly id: string;
+  readonly name: string;
+  readonly publisher?: string;
+  readonly publisherName?: string;
+  readonly modelType: string;
+  readonly deploymentIds: readonly string[];
+}
+
+/** The callable half of a catalog entry, before it is joined to its model. */
+type WireDeployment = Omit<HubCatalogModel, "publisher" | "publisherName" | "modelType"> & { readonly modelId: string };
 
 function parseProtocol(value: unknown, allowInsecureLoopback: boolean): HubCatalogProtocol {
   const item = object(value, "deployment.protocol");
@@ -146,7 +162,7 @@ function parseProtocol(value: unknown, allowInsecureLoopback: boolean): HubCatal
   };
 }
 
-function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCatalogDeployment {
+function parseWireDeployment(value: unknown, allowInsecureLoopback: boolean): WireDeployment {
   const item = object(value, "deployment");
   const availabilityObject = object(item.availability, "deployment.availability");
   const availability = string(availabilityObject.status, "deployment.availability.status", 32);
@@ -165,7 +181,7 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
     protocols,
     // Both are null in the ordinary case -- no upstream line enabled, or no
     // implementation change ever observed -- so null has to read as absent.
-    // Refusing it would make every catalog fetch fail on a deployment nobody
+    // Refusing it would make every catalog fetch fail on a model nobody
     // has changed.
     ...(item.implementationFingerprint === undefined || item.implementationFingerprint === null
       ? {}
@@ -195,10 +211,73 @@ function parseDeployment(value: unknown, allowInsecureLoopback: boolean): HubCat
       ? []
       : array(item.capabilityStatements, "deployment.capabilityStatements", parseCatalogCapabilityStatement),
     availability: {
-      status: availability as HubCatalogDeployment["availability"]["status"],
+      status: availability as HubCatalogModel["availability"]["status"],
       ...(availabilityObject.observedAt === null || availabilityObject.observedAt === undefined ? {} : { observedAt: timestamp(availabilityObject.observedAt, "deployment.availability.observedAt") }),
       ...(availabilityObject.source === undefined ? {} : { source: string(availabilityObject.source, "deployment.availability.source", 256) }),
     },
+  };
+}
+
+/**
+ * Joins Hub's two catalog arrays into the one concept Connect has.
+ *
+ * The join is one-to-one on purpose. Hub publishes a model served from two
+ * regions as two models -- `glm-5.2-ap` and `glm-5.2-eu`, two ids, two aliases,
+ * two prices -- so a `models[]` entry pointing at two callable entries is not a
+ * shape Connect knows how to present. **It is refused rather than resolved**:
+ * picking one would put the axis back, silently, and the user would be billed on
+ * a line nobody chose.
+ *
+ * The callable entry leads, because its id is the one Hub authorises and bills.
+ * The order Hub sent its `models[]` in is kept -- that is the ordering a reader
+ * has already seen in the model plaza.
+ */
+function joinCatalog(models: readonly WireModel[], deployments: readonly WireDeployment[]): readonly HubCatalogModel[] {
+  const byModelId = new Map<string, WireDeployment[]>();
+  for (const deployment of deployments) {
+    const bucket = byModelId.get(deployment.modelId);
+    if (bucket) bucket.push(deployment);
+    else byModelId.set(deployment.modelId, [deployment]);
+  }
+  const joined: HubCatalogModel[] = [];
+  const placed = new Set<string>();
+  for (const model of models) {
+    const callable = byModelId.get(model.id) ?? [];
+    if (callable.length > 1) {
+      throw new HubClientError(
+        "INVALID_RESPONSE",
+        `Apexnova AI Hub published ${callable.length} callable entries for model ${model.id} (${callable.map((item) => item.id).join(", ")}). Connect selects models, and cannot choose between them.`,
+      );
+    }
+    const only = callable[0];
+    // A `models[]` row with nothing callable behind it cannot be selected,
+    // configured or billed, so it is not a model anyone here can offer.
+    if (!only) continue;
+    placed.add(only.id);
+    joined.push(withModel(only, model));
+  }
+  // The other direction is not symmetrical. A callable entry Hub published
+  // without its `models[]` row is a model that exists, can be called and will be
+  // billed -- dropping it would hide a usable model behind a catalog defect, the
+  // same silent disappearance ADR 0037 §5 refuses. It is carried with the fields
+  // it has, after the ones the plaza placed, rather than invented or discarded.
+  for (const only of deployments) {
+    if (placed.has(only.id)) continue;
+    joined.push(withModel(only, undefined));
+  }
+  return joined;
+}
+
+function withModel(callable: WireDeployment, model: WireModel | undefined): HubCatalogModel {
+  const { modelId: _modelId, ...rest } = callable;
+  return {
+    // `displayName` comes from the callable entry, which the parser already
+    // requires to be non-empty; `models[].name` is the same string in Hub's
+    // catalog and is not consulted.
+    ...rest,
+    ...(model?.publisher === undefined ? {} : { publisher: model.publisher }),
+    ...(model?.publisherName === undefined ? {} : { publisherName: model.publisherName }),
+    ...(model?.modelType === undefined ? {} : { modelType: model.modelType }),
   };
 }
 
@@ -298,9 +377,9 @@ function parseUsageRecord(value: unknown): HubUsageRecord {
     ...(status === undefined ? {} : { status }),
     ...(statusCode === undefined ? {} : { statusCode }),
     ...(item.requestedModel === null || item.requestedModel === undefined ? {} : { requestedModel: string(item.requestedModel, "usage record.requestedModel", 512) }),
-    ...(item.requestedDeploymentId === null || item.requestedDeploymentId === undefined ? {} : { requestedDeploymentId: string(item.requestedDeploymentId, "usage record.requestedDeploymentId", 256) }),
+    ...(item.requestedDeploymentId === null || item.requestedDeploymentId === undefined ? {} : { requestedModelId: string(item.requestedDeploymentId, "usage record.requestedDeploymentId", 256) }),
     resolvedModel: string(item.resolvedModel, "usage record.resolvedModel", 512),
-    ...(item.resolvedDeploymentId === null || item.resolvedDeploymentId === undefined ? {} : { resolvedDeploymentId: string(item.resolvedDeploymentId, "usage record.resolvedDeploymentId", 256) }),
+    ...(item.resolvedDeploymentId === null || item.resolvedDeploymentId === undefined ? {} : { resolvedModelId: string(item.resolvedDeploymentId, "usage record.resolvedDeploymentId", 256) }),
     ...(item.fallbackApplied === undefined ? {} : typeof item.fallbackApplied === "boolean" ? { fallbackApplied: item.fallbackApplied } : (() => { throw invalid("usage record.fallbackApplied"); })()),
     ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "usage record.workspaceId", 256) }),
     source: string(item.source, "usage record.source", 64),
@@ -340,7 +419,7 @@ function parseApiKeySummary(value: unknown): ApiKeySummary {
     kind,
     ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "api key.workspaceId", 256) }),
     protocols: item.protocols === undefined ? [] : strings(item.protocols, "api key.protocols"),
-    publicDeploymentIds: item.publicDeploymentIds === undefined ? [] : strings(item.publicDeploymentIds, "api key.publicDeploymentIds"),
+    modelIds: item.publicDeploymentIds === undefined ? [] : strings(item.publicDeploymentIds, "api key.publicDeploymentIds"),
     ...(item.expiresAt === null || item.expiresAt === undefined ? {} : { expiresAt: timestamp(item.expiresAt, "api key.expiresAt") }),
     createdAt: timestamp(item.createdAt, "api key.createdAt"),
     ...(item.lastUsedAt === null || item.lastUsedAt === undefined ? {} : { lastUsedAt: timestamp(item.lastUsedAt, "api key.lastUsedAt") }),
@@ -362,7 +441,7 @@ function parseUsageAggregate(value: unknown): UsageAggregateRecord {
     bucketStart: timestamp(item.bucketStart, "usage aggregate.bucketStart"),
     ...(item.apiKeyId === null || item.apiKeyId === undefined ? {} : { apiKeyId: string(item.apiKeyId, "usage aggregate.apiKeyId", 256) }),
     ...(item.apiKeyName === null || item.apiKeyName === undefined ? {} : { apiKeyName: string(item.apiKeyName, "usage aggregate.apiKeyName", 256) }),
-    ...(item.publicDeploymentId === null || item.publicDeploymentId === undefined ? {} : { publicDeploymentId: string(item.publicDeploymentId, "usage aggregate.publicDeploymentId", 256) }),
+    ...(item.publicDeploymentId === null || item.publicDeploymentId === undefined ? {} : { modelId: string(item.publicDeploymentId, "usage aggregate.publicDeploymentId", 256) }),
     ...(item.requestedModel === null || item.requestedModel === undefined ? {} : { requestedModel: string(item.requestedModel, "usage aggregate.requestedModel", 512) }),
     ...(item.resolvedModel === null || item.resolvedModel === undefined ? {} : { resolvedModel: string(item.resolvedModel, "usage aggregate.resolvedModel", 512) }),
     requestCount,
@@ -613,21 +692,21 @@ export class HubControlPlaneClient {
   }
 
   async estimatePricing(
-    deploymentId: string,
+    modelId: string,
     usage: HubPricingUsage,
     signal?: AbortSignal,
   ): Promise<HubPricingEstimate> {
-    if (!deploymentId || deploymentId.length > 256) {
-      throw new HubClientError("INVALID_CONFIG", "deploymentId is invalid.");
+    if (!modelId || modelId.length > 256) {
+      throw new HubClientError("INVALID_CONFIG", "modelId is invalid.");
     }
     const item = object(await this.#request(this.#path("/v1/pricing/estimate"), {
       method: "POST",
-      body: { deploymentId, usage },
+      body: { deploymentId: modelId, usage },
       ...(signal ? { signal } : {}),
     }), "pricing estimate");
-    if (item.estimateOnly !== true || item.deploymentId !== deploymentId) throw invalid("pricing estimate");
+    if (item.estimateOnly !== true || item.deploymentId !== modelId) throw invalid("pricing estimate");
     return {
-      deploymentId: string(item.deploymentId, "pricing estimate.deploymentId", 256),
+      modelId: string(item.deploymentId, "pricing estimate.deploymentId", 256),
       model: string(item.model, "pricing estimate.model", 512),
       currency: string(item.currency, "pricing estimate.currency", 3),
       billingMode: string(item.billingMode, "pricing estimate.billingMode", 64),
@@ -655,15 +734,24 @@ export class HubControlPlaneClient {
     return {
       schemaVersion: string(item.schemaVersion, "catalog.schemaVersion", 32), catalogVersion: string(item.catalogVersion, "catalog.catalogVersion", 256),
       generatedAt: timestamp(item.generatedAt, "catalog.generatedAt"), expiresAt: timestamp(item.expiresAt, "catalog.expiresAt"),
-      providers: array(item.providers, "catalog.providers", parseProvider), models: array(item.models, "catalog.models", parseModel), deployments: array(item.deployments, "catalog.deployments", (deployment) => parseDeployment(deployment, this.#allowInsecureLoopback)),
+      providers: array(item.providers, "catalog.providers", parseProvider),
+      models: joinCatalog(
+        array(item.models, "catalog.models", parseWireModel),
+        array(item.deployments, "catalog.deployments", (deployment) => parseWireDeployment(deployment, this.#allowInsecureLoopback)),
+      ),
     };
   }
 
   async createRuntimeCredential(input: CreateRuntimeCredentialInput, signal?: AbortSignal): Promise<CreatedRuntimeCredential> {
-    if (!input.name.trim() || input.protocols.length === 0 || input.publicDeploymentIds.length === 0 || (input.expiresIn !== undefined && (!Number.isSafeInteger(input.expiresIn) || input.expiresIn <= 0 || input.expiresIn > 86_400))) {
+    if (!input.name.trim() || input.protocols.length === 0 || input.modelIds.length === 0 || (input.expiresIn !== undefined && (!Number.isSafeInteger(input.expiresIn) || input.expiresIn <= 0 || input.expiresIn > 86_400))) {
       throw new HubClientError("INVALID_CONFIG", "Runtime credential request is invalid.");
     }
-    const item = object(await this.#request(this.#path("/v1/runtime-credentials"), { method: "POST", body: input, ...(signal ? { signal } : {}) }), "runtime credential response");
+    const { modelIds, ...rest } = input;
+    const item = object(await this.#request(this.#path("/v1/runtime-credentials"), {
+      method: "POST",
+      body: { ...rest, publicDeploymentIds: modelIds },
+      ...(signal ? { signal } : {}),
+    }), "runtime credential response");
     return {
       credentialId: string(item.credentialId, "runtime credential.credentialId", 256),
       secret: SecretValue.from(string(item.secret, "runtime credential secret", 65_536)),
@@ -684,7 +772,7 @@ export class HubControlPlaneClient {
         ...(item.deviceId === null || item.deviceId === undefined ? {} : { deviceId: string(item.deviceId, "runtime credential.deviceId", 256) }),
         ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "runtime credential.workspaceId", 256) }),
         protocols: strings(item.protocols, "runtime credential.protocols"),
-        publicDeploymentIds: strings(item.publicDeploymentIds, "runtime credential.publicDeploymentIds"),
+        modelIds: strings(item.publicDeploymentIds, "runtime credential.publicDeploymentIds"),
         ...(item.expiresAt === null || item.expiresAt === undefined ? {} : { expiresAt: timestamp(item.expiresAt, "runtime credential.expiresAt") }),
         createdAt: timestamp(item.createdAt, "runtime credential.createdAt"),
         ...(item.lastUsedAt === null || item.lastUsedAt === undefined ? {} : { lastUsedAt: timestamp(item.lastUsedAt, "runtime credential.lastUsedAt") }),
@@ -704,7 +792,7 @@ export class HubControlPlaneClient {
     const body: Record<string, unknown> = { name: input.name, scopes: input.scopes ?? ["inference"] };
     if (input.workspaceId !== undefined) body.workspaceId = input.workspaceId;
     if (input.protocols !== undefined) body.protocols = input.protocols;
-    if (input.publicDeploymentIds !== undefined) body.publicDeploymentIds = input.publicDeploymentIds;
+    if (input.modelIds !== undefined) body.publicDeploymentIds = input.modelIds;
     body.expiresIn = input.expiresIn ?? null;
     const item = object(await this.#request(this.#path("/v1/api-keys"), { method: "POST", body, ...(signal ? { signal } : {}) }), "api key response");
     const kind = string(item.kind, "api key.kind", 32);
@@ -717,7 +805,7 @@ export class HubControlPlaneClient {
       kind,
       ...(item.workspaceId === null || item.workspaceId === undefined ? {} : { workspaceId: string(item.workspaceId, "api key.workspaceId", 256) }),
       protocols: item.protocols === undefined ? [] : strings(item.protocols, "api key.protocols"),
-      publicDeploymentIds: item.publicDeploymentIds === undefined ? [] : strings(item.publicDeploymentIds, "api key.publicDeploymentIds"),
+      modelIds: item.publicDeploymentIds === undefined ? [] : strings(item.publicDeploymentIds, "api key.publicDeploymentIds"),
       ...(item.expiresAt === null || item.expiresAt === undefined ? {} : { expiresAt: timestamp(item.expiresAt, "api key.expiresAt") }),
       createdAt: timestamp(item.createdAt, "api key.createdAt"),
       ...(item.lastUsedAt === null || item.lastUsedAt === undefined ? {} : { lastUsedAt: timestamp(item.lastUsedAt, "api key.lastUsedAt") }),
@@ -736,7 +824,7 @@ export class HubControlPlaneClient {
 
   async updateApiKey(id: string, input: UpdateApiKeyInput, signal?: AbortSignal): Promise<ApiKeySummary> {
     if (!id || !/^[A-Za-z0-9._-]+$/.test(id)) throw new HubClientError("INVALID_CONFIG", "API key id is invalid.");
-    if (input.name === undefined && input.protocols === undefined && input.publicDeploymentIds === undefined && input.expiresIn === undefined) {
+    if (input.name === undefined && input.protocols === undefined && input.modelIds === undefined && input.expiresIn === undefined) {
       throw new HubClientError("INVALID_CONFIG", "API key update is empty.");
     }
     if (input.expiresIn !== undefined && input.expiresIn !== null && (!Number.isSafeInteger(input.expiresIn) || input.expiresIn <= 0)) {
@@ -745,7 +833,7 @@ export class HubControlPlaneClient {
     const body: Record<string, unknown> = {};
     if (input.name !== undefined) body.name = input.name;
     if (input.protocols !== undefined) body.protocols = input.protocols;
-    if (input.publicDeploymentIds !== undefined) body.publicDeploymentIds = input.publicDeploymentIds;
+    if (input.modelIds !== undefined) body.publicDeploymentIds = input.modelIds;
     if (input.expiresIn !== undefined) body.expiresIn = input.expiresIn;
     return parseApiKeySummary(await this.#request(this.#path(`/v1/api-keys/${encodeURIComponent(id)}`), { method: "PATCH", body, ...(signal ? { signal } : {}) }));
   }
@@ -777,6 +865,12 @@ export class HubControlPlaneClient {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
       if (value === undefined) continue;
+      // Hub filters evidence by the key its records carry, which the pinned
+      // hash rule freezes as `deploymentId`. Connect calls it the model id.
+      if (key === "modelId") {
+        params.set("deploymentId", String(value));
+        continue;
+      }
       if (key === "limit") {
         if (!Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > 200) {
           throw new HubClientError("INVALID_CONFIG", "limit must be 1..200.");

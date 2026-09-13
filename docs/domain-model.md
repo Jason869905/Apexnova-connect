@@ -10,7 +10,7 @@
 
 - Integration 描述“如何连接一个外部产品”，不描述模型质量；
 - Agent 描述使用模型完成任务的运行主体，不限定为 Coding Agent；
-- Model 描述抽象模型版本，Deployment 描述 Provider 实际提供的可调用线路；
+- Model 描述一个可调用的模型，**Connect 没有 Deployment 这个概念**（见下文「Model」）；
 - Capability Statement 描述能力，Evidence 描述为什么相信该能力；
 - Scenario 描述任务需求，Recommendation 描述一次可解释选择；
 - 所有跨进程和跨仓库对象使用稳定 ID、Schema Version 和明确时间戳。
@@ -61,40 +61,40 @@ AgentProfile 不保存用户安装路径、用户密钥或当前模型。这些�
 - 服务文档和状态页；
 - 是否为 Apexnova AI Hub 托管、BYOK 或本地服务。
 
-### ModelProfile
+### Model
 
-描述抽象模型家族中的可识别版本：
-
-- 模型所有者、家族、版本和发布日期；
-- 厂商声明的上下文、多模态和协议能力；
-- 已知版本别名和弃用关系；
-- 不包含某个 Provider 特有的价格、延迟和可用性。
-
-### ModelDeployment
-
-描述一个 Provider 在特定区域和协议入口提供的具体模型线路。Recommendation 和 ConnectionProfile 最终选择的是 Deployment，而不是抽象 Model。
+一个**可调用的模型**。Connect 只有这一个概念。
 
 核心字段：
 
-- `id`、`modelId`、`providerId`；
-- `region`；
-- `protocols` 与服务端模型 ID；
-- `availability`；
-- `pricing`；
-- `capabilityOverrides`；
-- `endpointRefs`；
+- `id`、`providerId`；
+- `name`、`family`、`publisher`；
+- `inferenceAlias` 与 `aliases`：Agent 实际发送、并在自己的选择器里显示的名字；
+- `protocols` 与各自的 `baseUrl`、服务端模型 ID；
+- `availability`、`pricing`、`capabilities`；
+- `implementationFingerprint`；
 - `observedAt` 与 `expiresAt`。
 
-同一个模型由不同 Provider、不同区域或不同协议入口提供时，必须是不同 Deployment。
+`id` 是 Provider 授权、路由和计费所依据的那个标识，**不是别名**——别名可以改名，而改名之后历史账单和历史 Evidence 会指向错的东西。
 
-#### 托管 Provider 的双平面边界
+#### 为什么没有 Deployment
 
-对于 Apexnova AI Hub 这类托管网关，Connect 看到的 ModelDeployment 是面向客户的稳定公共产品，不是 Hub 内部某一条上游供应线路。一个公共 Deployment 可以由多条内部线路、凭证、负载均衡和容灾策略承载。
+早期版本把这件事拆成两层：`ModelProfile` 描述抽象模型版本，`ModelDeployment` 描述「某个 Provider 在特定区域和协议入口提供的可调用线路」，并规定「同一个模型由不同 Provider、不同区域或不同协议入口提供时，必须是不同 Deployment」。
 
-- 公共 `providerId` 表示用户向谁购买和调用服务，例如 `provider.apexnova-ai-hub`；
-- 模型原厂使用 ModelProfile 的 `publisher` 表达，不冒充服务 Provider；
-- Hub 内部 deployment ID、上游模型名、凭证、买价和 LB 拓扑不得进入公共 Schema；
-- 托管线路切换不改变公共 Deployment 身份；跨公共模型 Fallback 则必须返回最终公共 Deployment 并按其计费。
+**这一层对用户不存在。** 用户看不到 Hub 内部的部署，他知道的只有「我在用哪个模型」。而在 Hub 这个 Provider 上，这个维度本身也是空的：公共目录里 `providerId` 恒为 `provider.apexnova-ai-hub`，`region` 从来没有出现在公共投影里，Model 与 Deployment 是一一对应的。多出来的那一层只贡献了一个词。
+
+**同一份权重在多个区域提供时，由 Provider 侧作为多个 Model 发布**——比如 `glm-5.2-ap` 和 `glm-5.2-eu`，两个 ID、两个别名、各自的价格和可用性。选哪一个和选任何两个模型之间做选择没有区别，是用户的事，不是 Connect 要替他抽象掉的事。
+
+**「一个模型背后用了哪几条上游线路」是 Provider 的事，不是 Connect 的事**：托管线路切换不改变公共 Model 身份，Hub 内部的 deployment ID、上游模型名、凭证、买价和 LB 拓扑不得进入公共 Schema。
+
+排序同理：Connect 只按模型自身的属性排（目录给出的顺序、价格、上下文窗口、能力证据），不引入部署维度。
+
+> **两处例外，都是别人的线格式，不是 Connect 的词**：
+>
+> - Hub 的目录响应是 `models[]` + `deployments[]` 两个数组，创建 key 的 body 里是 `publicDeploymentIds`。这些只出现在 `packages/hub-client` 这个适配层，并在边界上合并/翻译成 Model。Hub 若给出一个 model 挂两个可调用条目，**报错而不是替用户挑一个**。
+> - Compatibility Evidence 的 `subject.deploymentId`：这条记录的 ID 是其 canonical JSON 的 sha256，**规则与 Hub 双向钉死**（`schemas/fixtures/evidence-canonical-vectors.json`），改键名会让每条内容相同的记录换一个 ID，而 Hub 算出来的又是另一个。它装的就是 model id。
+>
+> 见 [ADR 0039](decisions/0039-connect-only-has-models.md)。
 
 ### CapabilityDefinition
 
@@ -132,7 +132,7 @@ Capability 不能全部简化为布尔值。定义需要声明值类型，例如
 
 ### CapabilityStatement
 
-由 ModelProfile、ModelDeployment 或 Evidence 派生：
+由 Model 或 Evidence 派生：
 
 - `capabilityId`；
 - `support`：`supported`、`partial`、`unsupported`、`unknown`；
@@ -167,7 +167,7 @@ Capability 不能全部简化为布尔值。定义需要声明值类型，例如
 一份不可变测试或观测记录，证明特定组合在特定时间的行为：
 
 ```text
-AgentProfile + Integration Version + ModelDeployment
+AgentProfile + Integration Version + Model
               + Platform + Test Suite Version
 ```
 
@@ -184,11 +184,11 @@ Evidence 只记录事实，不直接承担商业推荐。
 
 ### ConnectionProfile
 
-描述用户希望某个 Agent 如何连接某个 Deployment：
+描述用户希望某个 Agent 如何连接某个 Model：
 
 - 目标 Agent Installation；
 - Integration ID 和版本；
-- Provider 与 Deployment；
+- Provider 与 Model；
 - 协议和模型映射；
 - `credentialRef`，不得包含密钥值；
 - Gateway 或 direct 模式；
@@ -216,8 +216,8 @@ ConnectionProfile 是生成 Change Plan 的输入之一，不等同于第三方�
 
 - Agent、Scenario 和用户约束；
 - 被排除的候选及原因；
-- 推荐 Deployment；
-- 备选 Deployment；
+- 推荐 Model；
+- 备选 Model；
 - 硬约束判定；
 - 分项评分；
 - Evidence 引用；
@@ -235,7 +235,7 @@ IntegrationManifest ── operates on ──► Agent Installation
         │                                  │
         └── implements                     └── described by AgentProfile
 
-ProviderProfile ── offers ──► ModelDeployment ── instantiates ──► ModelProfile
+ProviderProfile ── offers ──► Model
                                       │
                                       ├── supported by CompatibilityEvidence
                                       └── selected by Recommendation
@@ -257,7 +257,7 @@ ConnectionProfile ──► ChangePlan ──► Apply / Verify / Rollback
 - Agent 必需协议不可用；
 - 必需 Capability 明确不支持；
 - 用户区域、隐私或模型白名单不允许；
-- Deployment 已停用或证据证明不兼容；
+- Model 已停用或证据证明不兼容；
 - 价格或上下文超过硬限制。
 
 证据缺失时默认 `unverified`，是否允许继续由用户政策决定。
@@ -280,8 +280,8 @@ ConnectionProfile ──► ChangePlan ──► Apply / Verify / Rollback
 
 - 所有公共 ID 使用小写稳定标识，不把展示名称作为主键；
 - Model ID 必须包含可识别版本，浮动别名只作为 alias；
-- Deployment ID 必须区分 Provider、区域和协议入口；
-- 公共 Deployment ID 不以可改名的服务模型 alias 作为永久主键；
+- Model ID 必须区分 Provider、区域和协议入口——同一份权重在两个区域提供时是两个 Model；
+- 公共 Model ID 不以可改名的服务模型 alias 作为永久主键；
 - Scenario 和 Test Suite 必须版本化；
 - Evidence 创建后不可修改，纠错通过新 Evidence 和 supersedes 关系表达；
 - Schema 破坏性变更必须提升 Schema Version。
@@ -301,7 +301,7 @@ ConnectionProfile ──► ChangePlan ──► Apply / Verify / Rollback
 ## 不变量
 
 1. `credentialRef` 永远不是密钥值。
-2. Recommendation 选择 Deployment，不直接选择模糊模型别名。
+2. Recommendation 选择 Model 的稳定 ID，不直接选择模糊模型别名。
 3. 未验证不等于不兼容，不兼容也不能被静默降级为未知。
 4. 厂商声明不能自动升级为 Apexnova Verified。
 5. ConnectionProfile 的应用必须经过 Change Plan。

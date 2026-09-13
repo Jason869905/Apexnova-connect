@@ -28,18 +28,18 @@ const subject: EvidenceSubject = {
   agentVersion: "1.18.29",
   integrationId: "opencode",
   integrationVersion: "0.1.0",
-  deploymentId: "deployment.cheap",
+  deploymentId: "model.cheap",
   protocol: "openai-responses",
   platform: "linux-x64",
 };
 
 function evidenceFor(
-  deploymentId: string,
+  modelId: string,
   overrides: Readonly<Record<string, CapabilitySupport>> = {},
 ): CompatibilityEvidence {
   return createEvidence({
     sourceType: "maintainer-test",
-    subject: { ...subject, deploymentId },
+    subject: { ...subject, deploymentId: modelId },
     observedAt: OBSERVED_AT,
     outcomes: CAPABILITY_DEFINITIONS.map((definition) => ({
       capabilityId: definition.id,
@@ -48,10 +48,10 @@ function evidenceFor(
   });
 }
 
-function candidate(deploymentId: string): RecommendationCandidate {
+function candidate(modelId: string): RecommendationCandidate {
   return {
-    deploymentId,
-    displayName: deploymentId,
+    modelId,
+    displayName: modelId,
     protocols: ["openai-responses"],
     availability: "available",
     pricing: { currency: "USD", billingMode: "token", unit: 1_000_000, input: "0.6", output: "2.2" },
@@ -69,8 +69,8 @@ function options(overrides: Partial<RecommendOptions> = {}): RecommendOptions {
     platform: "linux-x64",
     agentProtocols: ["openai-responses"],
     catalogVersion: "cat_1",
-    candidates: [candidate("deployment.cheap")],
-    evidence: [evidenceFor("deployment.cheap")],
+    candidates: [candidate("model.cheap")],
+    evidence: [evidenceFor("model.cheap")],
     now: NOW,
     ...overrides,
   };
@@ -142,18 +142,18 @@ describe("recommendationRecord", () => {
   });
 
   it("expires with the first evidence it rests on", () => {
-    const evidence = evidenceFor("deployment.cheap");
+    const evidence = evidenceFor("model.cheap");
     const record = recommendationRecord(recommend(options({ evidence: [evidence] })));
 
     expect(record.expiresAt).toBe(evidence.expiresAt);
   });
 
   it("expires when the price it ranked on stops being the price", () => {
-    // The catalog quotes some deployments by time of day. A ranking computed at
+    // The catalog quotes some models by time of day. A ranking computed at
     // 17:00 on a number that doubles at 22:00 is not good for the four weeks its
     // evidence has left, and used to claim exactly that.
     const priced = {
-      ...candidate("deployment.cheap"),
+      ...candidate("model.cheap"),
       pricing: {
         currency: "USD",
         billingMode: "token",
@@ -163,7 +163,7 @@ describe("recommendationRecord", () => {
         priceValidUntil: "2026-09-20T22:00:00.000Z",
       },
     };
-    const evidence = evidenceFor("deployment.cheap");
+    const evidence = evidenceFor("model.cheap");
     const record = recommendationRecord(recommend(options({ candidates: [priced], evidence: [evidence] })));
 
     expect(evidence.expiresAt > "2026-09-20T22:00:00.000Z").toBe(true);
@@ -173,7 +173,7 @@ describe("recommendationRecord", () => {
   it("ignores the validity of a price it never read", () => {
     // No ceiling, no evidence for it, so this candidate's price decided nothing.
     const unused = {
-      ...candidate("deployment.unreachable"),
+      ...candidate("model.unreachable"),
       protocols: ["anthropic-messages"],
       pricing: {
         currency: "USD",
@@ -184,9 +184,9 @@ describe("recommendationRecord", () => {
         priceValidUntil: "2026-09-20T22:00:00.000Z",
       },
     };
-    const evidence = evidenceFor("deployment.cheap");
+    const evidence = evidenceFor("model.cheap");
     const record = recommendationRecord(
-      recommend(options({ candidates: [candidate("deployment.cheap"), unused], evidence: [evidence] })),
+      recommend(options({ candidates: [candidate("model.cheap"), unused], evidence: [evidence] })),
     );
 
     expect(record.expiresAt).toBe(evidence.expiresAt);

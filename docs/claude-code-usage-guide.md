@@ -15,13 +15,13 @@ apexnova run claude-code
 ```
 
 ```bash
-apexnova run claude-code --deployment deployment.apexnova.xxx
+apexnova run claude-code --model deployment.apexnova.xxx
 apexnova run claude-code -- --help    # -- 之后透传给 Claude Code
 ```
 
 ## 协议
 
-Claude Code 走 `anthropic-messages`，对应 Hub 的 `/anthropic/v1/messages`。`apexnova models --agent claude-code` 只列出暴露该协议的 deployment。
+Claude Code 走 `anthropic-messages`，对应 Hub 的 `/anthropic/v1/messages`。`apexnova models --agent claude-code` 只列出暴露该协议的 model。
 
 ## 受管理的字段
 
@@ -33,7 +33,7 @@ Claude Code 走 `anthropic-messages`，对应 Hub 的 `/anthropic/v1/messages`�
 {
   "env": {
     "ANTHROPIC_BASE_URL": "<Hub protocols[].baseUrl 去掉 /v1/messages 后的根>",
-    "ANTHROPIC_MODEL": "<deployment inferenceAlias>",
+    "ANTHROPIC_MODEL": "<model inferenceAlias>",
     "APEXNOVA_CONNECT": "managed"
   }
 }
@@ -54,7 +54,7 @@ Claude Code 走 `anthropic-messages`，对应 Hub 的 `/anthropic/v1/messages`�
 ### `--api-key-helper`：让 Claude Code 自己取
 
 ```bash
-apexnova connect claude-code --deployment deployment.apexnova.xxx --api-key-helper --yes
+apexnova connect claude-code --model deployment.apexnova.xxx --api-key-helper --yes
 ```
 
 额外写一个指向本 CLI 的顶层 `apiKeyHelper`：
@@ -94,7 +94,7 @@ apexnova restore <transaction-id> --yes
 | 直接跑 `claude` 报 401 | 默认模式下凭据只在 `apexnova run` 的进程里 | 用 `apexnova run claude-code`，或改用 `--api-key-helper`，或 `restore` |
 | helper 失败 | Apexnova-connect 可执行文件被移动 | 重新 `connect --api-key-helper` 让它写入新路径 |
 | `inspect` 警告 `ANTHROPIC_AUTH_TOKEN` 已在文件里 | settings 的 env 块优先级更高，会盖掉注入的凭据 | 从 settings.json 里删掉它 |
-| `PROTOCOL_NOT_SUPPORTED` | 该 deployment 不暴露 `anthropic-messages` | 换一个，或用 `apexnova models --agent claude-code` 筛选 |
+| `PROTOCOL_NOT_SUPPORTED` | 该 model 不暴露 `anthropic-messages` | 换一个，或用 `apexnova models --agent claude-code` 筛选 |
 | `INVALID_CONFIG` | `settings.json` 不是合法 JSON | 修复语法；报错只给位置，不回显文件内容 |
 
 官方文档：<https://code.claude.com/docs/en/llm-gateway-connect>

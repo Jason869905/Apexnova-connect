@@ -31,7 +31,7 @@ export interface MatrixOptions {
 
 /**
  * The published order has to come from the subject alone. Comparing only agent,
- * deployment and protocol left the rest to the store's iteration order, so two
+ * model and protocol left the rest to the store's iteration order, so two
  * runs over the same records could publish the same rows in a different order --
  * the kind of difference that shows up as a diff nobody made.
  */
@@ -51,7 +51,7 @@ function compareSubjects(left: EvidenceSubject, right: EvidenceSubject): number 
 
 /**
  * Turns the collected records into one row per subject. Nothing is aggregated
- * across subjects: a different Agent version, Deployment or platform is a
+ * across subjects: a different Agent version, Model or platform is a
  * different question, and merging them is how a matrix ends up claiming
  * something nobody tested.
  */
@@ -98,10 +98,10 @@ export function buildCompatibilityMatrix(options: MatrixOptions): CompatibilityM
 }
 
 /**
- * Two rows can share a deployment and differ only in the implementation tested,
- * so the implementation is named wherever the deployment is.
+ * Two rows can share a model and differ only in the implementation tested,
+ * so the implementation is named wherever the model is.
  */
-function deploymentCell(subject: EvidenceSubject): string {
+function modelCell(subject: EvidenceSubject): string {
   const fingerprint = subject.implementationFingerprint;
   return fingerprint === undefined
     ? `\`${subject.deploymentId}\``
@@ -110,12 +110,12 @@ function deploymentCell(subject: EvidenceSubject): string {
 
 /**
  * The same identity in every table. A row is one subject, and the subject is
- * more than agent, deployment and protocol: the first Windows collection
+ * more than agent, model and protocol: the first Windows collection
  * produced capability rows byte-identical to the Linux ones, because those
  * three were the only columns the capability table carried. Two platforms are
  * two questions, so they have to read as two rows.
  */
-const IDENTITY_HEADER = ["Agent", "Version", "Deployment", "Protocol", "Platform"] as const;
+const IDENTITY_HEADER = ["Agent", "Version", "Model", "Protocol", "Platform"] as const;
 
 function agentCell(subject: EvidenceSubject): string {
   return subject.scenarioId === undefined
@@ -127,7 +127,7 @@ function identityCells(subject: EvidenceSubject): readonly string[] {
   return [
     agentCell(subject),
     subject.agentVersion,
-    deploymentCell(subject),
+    modelCell(subject),
     subject.protocol,
     subject.platform,
   ];
@@ -162,7 +162,7 @@ function evidenceSubjectLine(subject: EvidenceSubject): string {
   const integration = `integration ${subject.integrationId} ${subject.integrationVersion}`;
   return [
     `${agentCell(subject)} ${subject.agentVersion}`,
-    deploymentCell(subject),
+    modelCell(subject),
     subject.protocol,
     subject.platform,
     integration,

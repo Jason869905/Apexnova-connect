@@ -35,7 +35,7 @@ import {
 import { codexManifest } from "./manifest.js";
 
 /**
- * Codex dropped every wire API but Responses, so a Chat Completions deployment
+ * Codex dropped every wire API but Responses, so a Chat Completions model
  * is genuinely unusable here. Saying so is better than silently configuring an
  * endpoint Codex will not call correctly.
  */

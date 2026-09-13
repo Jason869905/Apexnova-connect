@@ -30,13 +30,13 @@ M6 能跨领域复制
 - [`cli-spec.md`](cli-spec.md)；
 - [`compatibility-evidence.md`](compatibility-evidence.md)；
 - [`apexnova-ai-hub-requirements.md`](apexnova-ai-hub-requirements.md)；
-- Agent、Model、Provider、Deployment、Scenario、Evidence、Recommendation、Connection 和 Diagnostic Schema 草案；
+- Agent、Model、Provider、Model、Scenario、Evidence、Recommendation、Connection 和 Diagnostic Schema 草案；
 - Apexnova AI Hub M1 API 契约清单；
 - 开源与收费边界。
 
 退出条件：
 
-- Integration 与 Agent、Model、Deployment 的职责没有重叠；
+- Integration 与 Agent、Model、Model 的职责没有重叠；
 - 核心模型可以表达非 Coding Agent；
 - Evidence 来源、过期和冲突处理有明确语义；
 - CLI 命令、错误和非交互行为已定义；
@@ -74,7 +74,7 @@ M6 能跨领域复制
 依赖：
 
 - Hub OAuth 和 scopes 冻结；
-- `/me`、余额、Provider、Model、Deployment 和协议 Endpoint 可用；
+- `/me`、余额、Provider、Model、Model 和协议 Endpoint 可用；
 - Hub 错误语义和请求 ID 可用。
 
 ## M2：Multi-Agent Alpha
@@ -107,9 +107,9 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.3`。
 
-当前状态：**已关闭**（2026-09-09，收口见 [ADR 0006](decisions/0006-m3-closure.md)；9 月 8 日的评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)）。五条退出条件全部满足：ADR 0005 时未满足的「Provider 变化使 Evidence 过期」由目录的 `implementationFingerprint` 补上——指纹进 `subject` 并参与 subject 身份比较，`compatibility refresh` 另按 `implementationChangedAt` 判到期；`Hub Evidence 查询接口`已交付并完成真实同步。**该条以 Hub 的指纹稳定性保证为前提**，保证失效按契约问题处理。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Deployment × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
+当前状态：**已关闭**（2026-09-09，收口见 [ADR 0006](decisions/0006-m3-closure.md)；9 月 8 日的评审见 [ADR 0005](decisions/0005-m3-milestone-review.md)）。五条退出条件全部满足：ADR 0005 时未满足的「Provider 变化使 Evidence 过期」由目录的 `implementationFingerprint` 补上——指纹进 `subject` 并参与 subject 身份比较，`compatibility refresh` 另按 `implementationChangedAt` 判到期；`Hub Evidence 查询接口`已交付并完成真实同步。**该条以 Hub 的指纹稳定性保证为前提**，保证失效按契约问题处理。首批范围与 Evidence 产出路径见 [ADR 0004](decisions/0004-m3-scope-and-evidence-path.md)：2 个 Agent（OpenCode、Claude Code）× 4 个 Model × 8 项测试，Evidence 由 CLI 本地采集并写入不可变本地存储，Hub 接口就绪后再同步，因此 M3 不被跨仓依赖阻塞。
 
-已完成：`packages/capabilities`（能力定义与版本化套件，首批 8 项、`0.3.0` 起 9 项、Evidence 的不可变本地存储与过期语义、Verdict 计算、Vendor Claimed 与 Apexnova Verified 分离）、可运行的能力测试套件（`openai-responses` 与 `anthropic-messages`，离线 fixture 测试）、`compatibility run`（估价、预算上限、按 requestId 对账）、`compatibility explain`、`compatibility matrix` 与由它生成的[兼容性矩阵](compatibility-matrix.md)；首批 4 个 Deployment 已固定并完成真实采集（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。能力套件的运行可以 `--record` 录制并 `compatibility replay` 离线回放（仓库内保留了一份对现网 `qwen3.8-flash` 的真实录制作为回归夹具），过期后的重采集由 `compatibility refresh` 承担。`compatibility sync` 与 `compatibility revoke` 把本地证据推到 Hub 并报告服务端的派生判断（是否支撑当前 Verdict、`staleReason`、指纹是否对得上）；12A 的七条服务端缺口全部关闭，其中 (b) 推理错误响应缺 Request ID 与 (d) 用量无法区分未结算/不计费两项硬前置已在现网验证。套件 `0.3.0` 增加 `agent.forced-tool-choice`，把「能否调用工具」与「能否强制指定工具」分开，首次实测即复现了 `qwen3.8-flash` 的拒绝。未交付并明确推迟的：图片、缓存、长上下文与并行 Tool Call；macOS 平台的证据行（无实机）。
+已完成：`packages/capabilities`（能力定义与版本化套件，首批 8 项、`0.3.0` 起 9 项、Evidence 的不可变本地存储与过期语义、Verdict 计算、Vendor Claimed 与 Apexnova Verified 分离）、可运行的能力测试套件（`openai-responses` 与 `anthropic-messages`，离线 fixture 测试）、`compatibility run`（估价、预算上限、按 requestId 对账）、`compatibility explain`、`compatibility matrix` 与由它生成的[兼容性矩阵](compatibility-matrix.md)；首批 4 个 Model 已固定并完成真实采集（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。能力套件的运行可以 `--record` 录制并 `compatibility replay` 离线回放（仓库内保留了一份对现网 `qwen3.8-flash` 的真实录制作为回归夹具），过期后的重采集由 `compatibility refresh` 承担。`compatibility sync` 与 `compatibility revoke` 把本地证据推到 Hub 并报告服务端的派生判断（是否支撑当前 Verdict、`staleReason`、指纹是否对得上）；12A 的七条服务端缺口全部关闭，其中 (b) 推理错误响应缺 Request ID 与 (d) 用量无法区分未结算/不计费两项硬前置已在现网验证。套件 `0.3.0` 增加 `agent.forced-tool-choice`，把「能否调用工具」与「能否强制指定工具」分开，首次实测即复现了 `qwen3.8-flash` 的拒绝。未交付并明确推迟的：图片、缓存、长上下文与并行 Tool Call；macOS 平台的证据行（无实机）。
 
 范围：
 
@@ -122,10 +122,10 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - CLI `compatibility explain`；
 - Hub Evidence 查询接口。
 
-首批控制规模（[ADR 0004](decisions/0004-m3-scope-and-evidence-path.md) 采纳 ADR 0003 的收窄建议，原定为 3 个 Agent、6～10 个 Deployment、8～12 项测试）：
+首批控制规模（[ADR 0004](decisions/0004-m3-scope-and-evidence-path.md) 采纳 ADR 0003 的收窄建议，原定为 3 个 Agent、6～10 个 Model、8～12 项测试）：
 
 - 2 个 Agent：OpenCode（`openai-responses`）与 Claude Code（`anthropic-messages`）；
-- 4 个 Model Deployment，按 ADR 0004 的标准在采集时固定；
+- 4 个 Model Model，按 ADR 0004 的标准在采集时固定；
 - 8 项基础能力测试：6 项 Protocol Conformance、2 项 Agent Interaction（套件 `0.3.0` 后为 9 项，新增 `agent.forced-tool-choice`）。
 
 ### 遗留缺陷：`restore` 的顺序判定来源（已修复）
@@ -158,9 +158,9 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v0.4`。
 
-当前状态：**已关闭**（2026-09-11，收口见 [ADR 0015](decisions/0015-m4-closure.md)；两次评审见 [ADR 0011](decisions/0011-m4-milestone-review.md) 与 [ADR 0013](decisions/0013-m4-second-review.md)）。四条退出条件全部满足——约束一条在 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md) 把隐私移到 M5 后变为「白名单与预算」，两项均已实现且可用（**Hub 已交付需求 12H**，46 个 Deployment 中 34 个给出真实价格，`cost` 首次真正参与排序）。ADR 0013 列的另两件也已完成：Recommendation 有效期现已计入分时价格；launcher 的静默错配定位到根因（WSL 上配置了一份安装、启动了另一份），并以归属对账、安装不一致拒绝、schema 指针三处修复收口。OpenCode 在 Linux 上**端到端跑通且无手工干预**（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。首批范围见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)。首批收窄为**一个 Scenario**（`coding-general` v1），候选只来自 Apexnova 目录，推荐在本地计算、Hub 托管 API 推迟。三个分项开工时没有证据来源——`latency`（需要 Operational Evidence）、`quality`（需要 Scenario Quality Pack，M4 之后引入）、`privacy`（发布方身份不能度量隐私强度，见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 的更正）——因此**不参与排序且显式标为未测量**，不给默认分；`cost` 已在 Hub 交付 12H 后转为真正参与排序。M3 的证据原本全部是 `linux-x64`；**Windows 采集已完成并发布**（8 条 subject，`recommend` 在 `windows-x64` 上引用的是 Windows 记录本身，记录见 [Hub 联调清单](hub-h1-integration-checklist.md)），ADR 0007 决策 5 的第一批任务已合上。macOS 仍无实机，`recommend` 在该平台如实返回无证据。「允许推荐非 Apexnova Provider」的挂账已在 2026-09-10 结清：按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 移到 M5，不在 M4 收口时记为未满足。
+当前状态：**已关闭**（2026-09-11，收口见 [ADR 0015](decisions/0015-m4-closure.md)；两次评审见 [ADR 0011](decisions/0011-m4-milestone-review.md) 与 [ADR 0013](decisions/0013-m4-second-review.md)）。四条退出条件全部满足——约束一条在 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md) 把隐私移到 M5 后变为「白名单与预算」，两项均已实现且可用（**Hub 已交付需求 12H**，46 个 Model 中 34 个给出真实价格，`cost` 首次真正参与排序）。ADR 0013 列的另两件也已完成：Recommendation 有效期现已计入分时价格；launcher 的静默错配定位到根因（WSL 上配置了一份安装、启动了另一份），并以归属对账、安装不一致拒绝、schema 指针三处修复收口。OpenCode 在 Linux 上**端到端跑通且无手工干预**（记录见 [Hub 联调清单](hub-h1-integration-checklist.md)）。首批范围见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)。首批收窄为**一个 Scenario**（`coding-general` v1），候选只来自 Apexnova 目录，推荐在本地计算、Hub 托管 API 推迟。三个分项开工时没有证据来源——`latency`（需要 Operational Evidence）、`quality`（需要 Scenario Quality Pack，M4 之后引入）、`privacy`（发布方身份不能度量隐私强度，见 [ADR 0010](decisions/0010-m4-constraint-exit-condition-status.md) 的更正）——因此**不参与排序且显式标为未测量**，不给默认分；`cost` 已在 Hub 交付 12H 后转为真正参与排序。M3 的证据原本全部是 `linux-x64`；**Windows 采集已完成并发布**（8 条 subject，`recommend` 在 `windows-x64` 上引用的是 Windows 记录本身，记录见 [Hub 联调清单](hub-h1-integration-checklist.md)），ADR 0007 决策 5 的第一批任务已合上。macOS 仍无实机，`recommend` 在该平台如实返回无证据。「允许推荐非 Apexnova Provider」的挂账已在 2026-09-10 结清：按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 移到 M5，不在 M4 收口时记为未满足。
 
-已完成：`packages/recommendation`（`coding-general` v1 Scenario、版本化打分规则 `coding.v1`、硬约束过滤与可解释排序）与 CLI [`recommend`](cli-spec.md)；Windows 采集的发布过程暴露并修好了两处 subject 身份缺陷——公开矩阵的能力表和 Evidence 列表不带 platform，以及 `scenarioId` 声明至今无人读写（Scenario Quality 引入后会把两个 Scenario 并成一行）。两者的根因相同：同一条身份规则曾有三份拷贝，现已收敛为 `subjectIdentity` 一处。首次消费目录价格时发现**公共目录对全部 46 个 Deployment 发布 `pricing: 0`**，与估价接口和实际计费矛盾，已作为需求 12H 提给 Hub；`recommend` 在此期间把零价判为「没有价格」，并在所有候选都无价时整项丢弃 `cost` 而不是给零分。
+已完成：`packages/recommendation`（`coding-general` v1 Scenario、版本化打分规则 `coding.v1`、硬约束过滤与可解释排序）与 CLI [`recommend`](cli-spec.md)；Windows 采集的发布过程暴露并修好了两处 subject 身份缺陷——公开矩阵的能力表和 Evidence 列表不带 platform，以及 `scenarioId` 声明至今无人读写（Scenario Quality 引入后会把两个 Scenario 并成一行）。两者的根因相同：同一条身份规则曾有三份拷贝，现已收敛为 `subjectIdentity` 一处。首次消费目录价格时发现**公共目录对全部 46 个 Model 发布 `pricing: 0`**，与估价接口和实际计费矛盾，已作为需求 12H 提给 Hub；`recommend` 在此期间把零价判为「没有价格」，并在所有候选都无价时整项丢弃 `cost` 而不是给零分。
 
 范围：
 
@@ -190,12 +190,12 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 
 预计：6～8 周。目标版本：`v1.0`。
 
-当前状态：已启动，**首批完成并评审**（2026-09-11，见 [ADR 0017](decisions/0017-m5-first-batch-review.md)；范围见 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md)）。首批三个验收目标达成：路由审计（`selected` 与 `attributed` 两类不可变记录）、切换失败的三点注入验收（含变异检查）、`connect`/`switch` 输出真实 deployment 与计费凭据。**M5 不关闭**，且首批留下三个缺口：`grounds: "recommendation"` 无人写入（与 M4 的 `scenarioId` 同型）、`restore` 不写审计、没有读取审计的命令。**首批收窄为两件：显式 Provider 切换与路由审计**，不含 Gateway、Circuit Breaker、受控选择与 Team——那几项都要求 Connect 参与请求路径，而与审计语义同时做会让出问题时分不清是路由错了还是审计错了。今天没有 Gateway，一次「路由」就是一次连接目标的确定，审计要回答三句话：选了哪个 Deployment、依据是什么、实际由谁计费。首批之后已完成：`recommend → connect` 的传递（`connect --best`，让审计的 `grounds: recommendation` 不再是死字段）、`restore` 写审计、`apexnova audit` 读取命令；Gateway 的首个切片（忠实转发与逐请求归属，默认关闭）已交付并评审（[ADR 0018](decisions/0018-gateway-first-slice.md)、[ADR 0019](decisions/0019-gateway-first-slice-review.md)），四个 Integration 的 Gateway 路径已逐个验收。**Gateway 这一批已收尾**（2026-09-12，见 [ADR 0020](decisions/0020-gateway-batch-closure.md)）：ADR 0019 列的八条缺口清完六条——失败注入与超时、忠实性的强证据（能力套件对同一份回放跑两遍并逐项比对）、`path`/`durationMs` 入审计、长会话的近似、其余开关的结构性复核（命令不读的选项一律拒绝）、并发验收（含变异检查）。**剩两条：运行期内凭据不续期与 Claude Code 的 launcher**（后者环境所限）。**前者已于同日实现**（见 [ADR 0021](decisions/0021-gateway-credential-renewal.md)）：续期在请求到来时发生、同时到期的请求共用一次、失败不中断运行、归属按凭据拆分；`--gateway` 同时改为一律签发 24 小时短期凭据，因为「换凭据要改写 Agent 配置」这个理由在进程边界之后不成立。ADR 0021 同时更正了 ADR 0019/0020 的一处事实错误：`run` 默认发的是永不过期的 key，所以当时**没有任何在用路径会撞上到期**。**实跑仍未发生，转默认的条件 1 因此仍不满足。****Gateway 仍不设为默认**，转默认的条件已写成可核对的三条（凭据可续期并有一次跨过到期的实跑、Claude Code 经 Gateway 的端到端实跑、一次真实长交互会话）。**2026-09-13 达成第 2 条**（[ADR 0029](decisions/0029-launch-must-honour-the-configured-file.md)）：它此前被记为「环境所限」，而那个理由是错的——`--config` 指到隔离路径即可。做这条时发现并修掉两个缺陷：`--config` 在启动这一步根本不起作用（Connect 写一份、Agent 读另一份，命令报成功，账记在别人头上），以及 Agent 非零退出时网关不被关闭、进程永不退出（既有缺陷）。**2026-09-13 亦达成第 1 条**（[ADR 0030](decisions/0030-configurable-credential-lifetime.md)）：把凭据寿命做成可配置的（`--credential-ttl`，续期窗口随之改为「最后一小时或寿命后一半取较短者」），该路径从「只能等满 23 小时」变为几分钟可验证；实跑 3 分 19 秒、凭据寿命 120 秒、两次续期、32 个请求分记三枚凭据。途中又抓到三个缺陷，最重的一个是**运行期续期继承了整条命令的截止时间，于是任何比 `--timeout` 更长的 `--gateway` 运行都无法续期**——正是唯一需要续期的那一类。**三条门槛只剩第 3 条（一次真实长交互会话），它需要人**，`--gateway` 因此仍不设为默认。**中期评审已完成**（2026-09-12，见 [ADR 0022](decisions/0022-m5-midpoint-review.md)）：七条退出条件中**四条满足、一条未满足（Integration 达到 stable）、两条撤销**（非 Apexnova 候选来源与隐私约束，理由见上）。范围里整项未动的四项如实点名：Circuit Breaker（全仓 `circuit` 零匹配）、新请求边界上的受控选择、Connection Profile（有 schema 无实现，CLI 不接受 `--connection-profile`）、Pro 与 Team。**M5 保持未关闭。** 建议顺序：先定义 stable 的判定标准并逐个 Integration 对照（它最便宜，且会把 Claude Code 未经 Gateway 实跑、macOS 自 M2 挂账等散落各处的问题逼到一处），再补 Gateway 转默认的三条，之后才是 Circuit Breaker 与受控选择。**基本功能可据此发布，但与 M5 闭环脱钩**，发布说明须写明不含哪些能力、且四个 Integration 均为 `experimental`。
+当前状态：已启动，**首批完成并评审**（2026-09-11，见 [ADR 0017](decisions/0017-m5-first-batch-review.md)；范围见 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md)）。首批三个验收目标达成：路由审计（`selected` 与 `attributed` 两类不可变记录）、切换失败的三点注入验收（含变异检查）、`connect`/`switch` 输出真实 model 与计费凭据。**M5 不关闭**，且首批留下三个缺口：`grounds: "recommendation"` 无人写入（与 M4 的 `scenarioId` 同型）、`restore` 不写审计、没有读取审计的命令。**首批收窄为两件：显式 Provider 切换与路由审计**，不含 Gateway、Circuit Breaker、受控选择与 Team——那几项都要求 Connect 参与请求路径，而与审计语义同时做会让出问题时分不清是路由错了还是审计错了。今天没有 Gateway，一次「路由」就是一次连接目标的确定，审计要回答三句话：选了哪个 Model、依据是什么、实际由谁计费。首批之后已完成：`recommend → connect` 的传递（`connect --best`，让审计的 `grounds: recommendation` 不再是死字段）、`restore` 写审计、`apexnova audit` 读取命令；Gateway 的首个切片（忠实转发与逐请求归属，默认关闭）已交付并评审（[ADR 0018](decisions/0018-gateway-first-slice.md)、[ADR 0019](decisions/0019-gateway-first-slice-review.md)），四个 Integration 的 Gateway 路径已逐个验收。**Gateway 这一批已收尾**（2026-09-12，见 [ADR 0020](decisions/0020-gateway-batch-closure.md)）：ADR 0019 列的八条缺口清完六条——失败注入与超时、忠实性的强证据（能力套件对同一份回放跑两遍并逐项比对）、`path`/`durationMs` 入审计、长会话的近似、其余开关的结构性复核（命令不读的选项一律拒绝）、并发验收（含变异检查）。**剩两条：运行期内凭据不续期与 Claude Code 的 launcher**（后者环境所限）。**前者已于同日实现**（见 [ADR 0021](decisions/0021-gateway-credential-renewal.md)）：续期在请求到来时发生、同时到期的请求共用一次、失败不中断运行、归属按凭据拆分；`--gateway` 同时改为一律签发 24 小时短期凭据，因为「换凭据要改写 Agent 配置」这个理由在进程边界之后不成立。ADR 0021 同时更正了 ADR 0019/0020 的一处事实错误：`run` 默认发的是永不过期的 key，所以当时**没有任何在用路径会撞上到期**。**实跑仍未发生，转默认的条件 1 因此仍不满足。****Gateway 仍不设为默认**，转默认的条件已写成可核对的三条（凭据可续期并有一次跨过到期的实跑、Claude Code 经 Gateway 的端到端实跑、一次真实长交互会话）。**2026-09-13 达成第 2 条**（[ADR 0029](decisions/0029-launch-must-honour-the-configured-file.md)）：它此前被记为「环境所限」，而那个理由是错的——`--config` 指到隔离路径即可。做这条时发现并修掉两个缺陷：`--config` 在启动这一步根本不起作用（Connect 写一份、Agent 读另一份，命令报成功，账记在别人头上），以及 Agent 非零退出时网关不被关闭、进程永不退出（既有缺陷）。**2026-09-13 亦达成第 1 条**（[ADR 0030](decisions/0030-configurable-credential-lifetime.md)）：把凭据寿命做成可配置的（`--credential-ttl`，续期窗口随之改为「最后一小时或寿命后一半取较短者」），该路径从「只能等满 23 小时」变为几分钟可验证；实跑 3 分 19 秒、凭据寿命 120 秒、两次续期、32 个请求分记三枚凭据。途中又抓到三个缺陷，最重的一个是**运行期续期继承了整条命令的截止时间，于是任何比 `--timeout` 更长的 `--gateway` 运行都无法续期**——正是唯一需要续期的那一类。**三条门槛只剩第 3 条（一次真实长交互会话），它需要人**，`--gateway` 因此仍不设为默认。**中期评审已完成**（2026-09-12，见 [ADR 0022](decisions/0022-m5-midpoint-review.md)）：七条退出条件中**四条满足、一条未满足（Integration 达到 stable）、两条撤销**（非 Apexnova 候选来源与隐私约束，理由见上）。范围里整项未动的四项如实点名：Circuit Breaker（全仓 `circuit` 零匹配）、新请求边界上的受控选择、Connection Profile（有 schema 无实现，CLI 不接受 `--connection-profile`）、Pro 与 Team。**M5 保持未关闭。** 建议顺序：先定义 stable 的判定标准并逐个 Integration 对照（它最便宜，且会把 Claude Code 未经 Gateway 实跑、macOS 自 M2 挂账等散落各处的问题逼到一处），再补 Gateway 转默认的三条，之后才是 Circuit Breaker 与受控选择。**基本功能可据此发布，但与 M5 闭环脱钩**，发布说明须写明不含哪些能力、且四个 Integration 均为 `experimental`。
 
 范围：
 
 - Connection Profile 和显式 Provider 切换；
-- Deployment 健康、余额、区域和价格约束（「区域」按 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md) 的同一理由待重新评估，M5 规划时决定）；
+- Model 健康、余额、区域和价格约束（「区域」按 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md) 的同一理由待重新评估，M5 规划时决定）；
 - 本地 Gateway 与 Hub 路由协作；
 - Circuit Breaker；
 - 新请求边界上的受控选择；
@@ -209,7 +209,7 @@ Hermes Agent（Nous Research）在 M2 期间纳入范围，因此本阶段目标
 - 每次路由可解释且可审计；
 - 切换失败不会破坏 Agent 配置；
 - 三个首批 Integration 达到 stable（**满足**，2026-09-13）：判定标准见 [ADR 0023](decisions/0023-integration-status-ladder.md)，可机检的两条由 `tests/integration-status.test.ts` 强制，另三条逐条人工判定。**四个 Integration 全部升为 `stable`**——`hermes`（[ADR 0031](decisions/0031-first-stable-integration.md)）、`claude-code`（[ADR 0033](decisions/0033-probe-what-the-launcher-starts.md)）、`opencode` 与 `codex`（[ADR 0034](decisions/0034-opencode-and-codex-stable.md)），因此「三个首批指哪三个」这个从未定义的问题**被绕过而非被回答**。**四次判定四次都揪出东西，无一由测试发现**：`hermes` 缺 `run` 闭环、README 协议写错；`claude-code` 检测与启动不是同一份安装；`opencode` 的 README 停在 M1（写着 manifest 还是 `planned`）；`codex` 的 Windows 声称没有可用路径（npm 装法下 `run codex` 直接失败）。过程见 [ADR 0032](decisions/0032-windows-verification.md)：办法是把单文件 bundle 拷到 Windows 用它自己的 Node 跑，让 CLI 本身跑在 Windows 上）；
-- 用户始终能看到实际 Deployment 和计费主体。
+- 用户始终能看到实际 Model 和计费主体。
 
 ~~允许推荐非 Apexnova Provider~~、~~用户可以强制隐私约束~~ 两条**已于 2026-09-12 撤销**，见 [ADR 0022](decisions/0022-m5-midpoint-review.md) 第 3 节。这是 [ADR 0016](decisions/0016-m5-scope-and-first-batch.md) 决策 5 要求的第三次决定，两条的理由分别是：**隐私约束指错了责任方**（Connect 侧已做完并验证，缺的是只有 Hub 能发布的事实，本仓库做任何工作都无法满足它）；**非 Apexnova 候选的措辞选错了对象**（推荐实现本就没有 Apexnova 特判，字面交付得到的是一律 `eligible: false` 的假支持，而诚实版本需要凭据签发、价格来源、计费归属三样底座）。
 

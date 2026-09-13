@@ -17,7 +17,7 @@ const subject: EvidenceSubject = {
   agentVersion: "1.18.29",
   integrationId: "opencode",
   integrationVersion: "0.1.0",
-  deploymentId: "deployment.nova",
+  deploymentId: "model.nova",
   protocol: "openai-responses",
   platform: "linux-x64",
 };
@@ -81,7 +81,7 @@ describe("buildCompatibilityMatrix", () => {
     expect(buildCompatibilityMatrix({ evidence, now: NOW }).rows).toHaveLength(2);
   });
 
-  it("splits a deployment by the implementation each record tested, and names it", () => {
+  it("splits a model by the implementation each record tested, and names it", () => {
     const before = { ...subject, implementationFingerprint: "impl-a1b2c3d4e5f6" };
     const after = { ...subject, implementationFingerprint: "impl-999999999999" };
     const evidence = [record({ subject: before }), record({ subject: after })];
@@ -89,11 +89,11 @@ describe("buildCompatibilityMatrix", () => {
     const matrix = buildCompatibilityMatrix({ evidence, now: NOW });
 
     expect(matrix.rows).toHaveLength(2);
-    // Two rows on one deployment are indistinguishable unless the render says
+    // Two rows on one model are indistinguishable unless the render says
     // which implementation each one tested.
     const rendered = renderCompatibilityMatrix(matrix);
-    expect(rendered).toContain("`deployment.nova` (impl `impl-a1b2c3d`)");
-    expect(rendered).toContain("`deployment.nova` (impl `impl-9999999`)");
+    expect(rendered).toContain("`model.nova` (impl `impl-a1b2c3d`)");
+    expect(rendered).toContain("`model.nova` (impl `impl-9999999`)");
   });
 
   it("marks a row whose evidence has expired, and still shows what it said", () => {
@@ -122,7 +122,7 @@ describe("buildCompatibilityMatrix", () => {
 
     const rendered = renderCompatibilityMatrix(buildCompatibilityMatrix({ evidence, now: NOW }));
 
-    // The capability table used to carry agent, deployment and protocol only,
+    // The capability table used to carry agent, model and protocol only,
     // so the first Windows collection rendered rows byte-identical to the Linux
     // ones. A row that cannot be told apart is a row nobody can act on.
     const capabilityRows = capabilitySection(rendered);
@@ -152,7 +152,7 @@ describe("buildCompatibilityMatrix", () => {
       { ...subject, agentVersion: "1.19.0" },
       { ...subject, integrationId: "opencode-community" },
       { ...subject, integrationVersion: "0.2.0" },
-      { ...subject, deploymentId: "deployment.other" },
+      { ...subject, deploymentId: "model.other" },
       { ...subject, protocol: "anthropic-messages" },
       { ...subject, platform: "windows-x64" },
       { ...subject, implementationFingerprint: "impl-a1b2c3d4e5f6" },

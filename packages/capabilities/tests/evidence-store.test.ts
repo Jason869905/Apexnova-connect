@@ -31,7 +31,7 @@ const subject: EvidenceSubject = {
   agentVersion: "1.18.29",
   integrationId: "opencode",
   integrationVersion: "0.2.1",
-  deploymentId: "deployment.nova",
+  deploymentId: "model.nova",
   protocol: "openai-responses",
   platform: "linux-x64",
 };
@@ -102,10 +102,10 @@ describe("FileEvidenceStore", () => {
 
     await store.append(evidence());
     await store.append(
-      evidence({ subject: { ...subject, deploymentId: "deployment.other" } }),
+      evidence({ subject: { ...subject, deploymentId: "model.other" } }),
     );
 
-    expect(await store.list({ deploymentId: "deployment.nova" })).toHaveLength(1);
+    expect(await store.list({ modelId: "model.nova" })).toHaveLength(1);
     expect(await store.list({ agentId: "claude-code" })).toEqual([]);
   });
 

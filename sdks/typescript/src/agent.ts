@@ -55,7 +55,7 @@ export interface ModelLimits {
  * connection.
  */
 export interface ConnectionModel {
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly inferenceAlias: string;
   readonly modelName?: string;
   readonly limits?: ModelLimits;
@@ -70,7 +70,7 @@ export interface ConnectionIntent {
   readonly planId: string;
   readonly createdAt: string;
   /** The default model: what the product should select until the user changes it. */
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly inferenceAlias: string;
   readonly modelName?: string;
   /**

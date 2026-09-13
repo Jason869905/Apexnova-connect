@@ -23,11 +23,11 @@ const FIXTURE = join(
  * A real run against `qwen3.8-flash` on the live Hub, re-recorded on 2026-09-09
  * for suite 0.3.0 and replayable from here on. This is what makes the suite's
  * decisions checkable without a Hub, a credential or a bill -- and it is a
- * recording of one moment, not a claim about the deployment today.
+ * recording of one moment, not a claim about the model today.
  *
  * Adding a probe invalidates the old recording rather than degrading it: the
  * replay refuses a request it does not cover instead of scoring the gap as a
- * failure, so the fixture has to be re-recorded against the deployment.
+ * failure, so the fixture has to be re-recorded against the model.
  */
 describe("replaying a recorded live run", () => {
   it("reaches the same outcomes the live run reported", async () => {
@@ -37,7 +37,7 @@ describe("replaying a recorded live run", () => {
       endpoint: recording.endpoint,
       protocol: recording.protocol,
       model: recording.model,
-      deploymentId: recording.deploymentId,
+      modelId: recording.modelId,
       credential: SecretValue.from(REPLAY_CREDENTIAL),
       fetch: createReplayFetch(recording),
     });
@@ -51,11 +51,11 @@ describe("replaying a recorded live run", () => {
         "protocol.cancellation": "supported",
         "protocol.error-semantics": "supported",
         "agent.single-tool-call": "supported",
-        // The reason the capability exists: this deployment calls tools
+        // The reason the capability exists: this model calls tools
         // perfectly well and refuses to have one forced, which until suite
         // 0.3.0 could only be found by trying it in production.
         "agent.forced-tool-choice": "unsupported",
-        // The finding that held across every deployment tested: the
+        // The finding that held across every model tested: the
         // openai-responses path did not honour text.format.json_schema.
         "agent.structured-output": "unsupported",
       });

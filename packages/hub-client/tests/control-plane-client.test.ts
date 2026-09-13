@@ -37,11 +37,74 @@ describe("HubControlPlaneClient", () => {
 
     const result = await client(fetch).catalog();
 
-    expect(result.deployments[0]?.inferenceAlias).toBe("nova");
+    expect(result.models[0]?.inferenceAlias).toBe("nova");
     expect(fetch).toHaveBeenCalledWith(
       new URL("https://hub.example.test/v1/catalog/snapshot"),
       expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer oauth-secret" }) }),
     );
+  });
+
+  it("joins Hub's two catalog arrays into one model, in the order the plaza lists them", async () => {
+    const line = (id: string, modelId: string) => ({
+      id, providerId: "provider.apexnova-ai-hub", modelId, displayName: `GLM 5.2 ${id.replace("deployment.", "").toUpperCase()}`, inferenceAlias: id.replace("deployment.", ""),
+      protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }],
+      capabilities: [], availability: { status: "available" },
+    });
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      schemaVersion: "0.1", catalogVersion: "cat_1", generatedAt: "2026-09-03T12:00:00Z", expiresAt: "2026-09-03T12:15:00Z",
+      providers: [],
+      // `models[]` is the plaza's order; `deployments[]` arrives in its own.
+      models: [
+        { id: "model.eu", name: "GLM 5.2 EU", publisher: "zhipu", modelType: "chat", capabilities: [], deploymentIds: ["deployment.eu"] },
+        { id: "model.ap", name: "GLM 5.2 AP", publisher: "zhipu", modelType: "chat", capabilities: [], deploymentIds: ["deployment.ap"] },
+      ],
+      deployments: [line("deployment.ap", "model.ap"), line("deployment.eu", "model.eu")],
+    }));
+
+    const result = await client(fetch).catalog();
+
+    // One concept, the plaza's order, and the id Hub bills -- not the model row's.
+    expect(result.models.map((model) => model.id)).toEqual(["deployment.eu", "deployment.ap"]);
+    expect(result.models[0]).toMatchObject({ displayName: "GLM 5.2 EU", publisher: "zhipu", modelType: "chat", inferenceAlias: "eu" });
+  });
+
+  it("refuses a model with two callable entries rather than choosing one", async () => {
+    const line = (id: string) => ({
+      id, providerId: "provider.apexnova-ai-hub", modelId: "model.glm", displayName: "GLM 5.2", inferenceAlias: id,
+      protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }],
+      capabilities: [], availability: { status: "available" },
+    });
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      schemaVersion: "0.1", catalogVersion: "cat_1", generatedAt: "2026-09-03T12:00:00Z", expiresAt: "2026-09-03T12:15:00Z",
+      providers: [],
+      models: [{ id: "model.glm", name: "GLM 5.2", publisher: "zhipu", modelType: "chat", capabilities: [], deploymentIds: ["a", "b"] }],
+      // A model served from two regions is two models in Hub's catalog. Two
+      // callable entries under one model is a shape Connect cannot present, and
+      // picking one would bill the user on a line nobody chose.
+      deployments: [line("a"), line("b")],
+    }));
+
+    await expect(client(fetch).catalog()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("keeps a callable entry Hub published without its model row", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
+      schemaVersion: "0.1", catalogVersion: "cat_1", generatedAt: "2026-09-03T12:00:00Z", expiresAt: "2026-09-03T12:15:00Z",
+      providers: [],
+      models: [],
+      deployments: [{
+        id: "deployment.orphan", providerId: "provider.apexnova-ai-hub", modelId: "model.missing", displayName: "Orphan",
+        inferenceAlias: "orphan", protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }],
+        capabilities: [], availability: { status: "available" },
+      }],
+    }));
+
+    const result = await client(fetch).catalog();
+
+    // It exists, it is callable and it is billed. Hiding it behind a catalog
+    // defect would take a usable model away without saying so.
+    expect(result.models.map((model) => model.id)).toEqual(["deployment.orphan"]);
+    expect(result.models[0]?.modelType).toBeUndefined();
   });
 
   it("reads a deployment that has no fingerprint and no observed change", async () => {
@@ -65,8 +128,8 @@ describe("HubControlPlaneClient", () => {
 
     const result = await client(fetch).catalog();
 
-    expect(result.deployments[0]?.implementationFingerprint).toBeUndefined();
-    expect(result.deployments[0]?.implementationChangedAt).toBeUndefined();
+    expect(result.models[0]?.implementationFingerprint).toBeUndefined();
+    expect(result.models[0]?.implementationChangedAt).toBeUndefined();
   });
 
   it("carries the fingerprint and the moment it last changed", async () => {
@@ -88,7 +151,7 @@ describe("HubControlPlaneClient", () => {
 
     const result = await client(fetch).catalog();
 
-    expect(result.deployments[0]).toMatchObject({
+    expect(result.models[0]).toMatchObject({
       implementationFingerprint: "a3f19c04b7e25d18",
       implementationChangedAt: "2026-09-15T10:00:00.000Z",
     });
@@ -153,7 +216,7 @@ describe("HubControlPlaneClient", () => {
       expiresAt: "2026-09-04T12:00:00Z",
       deviceId: "device_123",
     }));
-    const result = await client(fetch).createRuntimeCredential({ name: "OpenCode", protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"] });
+    const result = await client(fetch).createRuntimeCredential({ name: "OpenCode", protocols: ["openai-responses"], modelIds: ["deployment.nova"] });
     expect(result.secret.toJSON()).toBe("[REDACTED]");
     expect(result.credentialId).toBe("rtc_123");
     expect(JSON.stringify(result)).not.toContain("anrt_super-secret");
@@ -251,7 +314,7 @@ describe("HubControlPlaneClient", () => {
       prefix: "anrt_abcd...wxyz",
       deviceId: "device_123",
       protocols: ["openai-responses"],
-      publicDeploymentIds: ["deployment.nova"],
+      modelIds: ["deployment.nova"],
       expiresAt: "2026-09-06T10:00:00Z",
       createdAt: "2026-09-05T10:00:00Z",
     }]);

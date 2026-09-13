@@ -5,7 +5,7 @@
 M0 包含两组职责不同的契约：
 
 - `integration-manifest.schema.json`：Integration 身份、状态、交付方式、兼容性、协议、capability 和权限声明；
-- 领域契约：`agent-profile`、`provider-profile`、`model-profile`、`model-deployment`、`scenario-profile`、`compatibility-evidence`、`recommendation`、`connection-profile` 和 `diagnostic-result`。
+- 领域契约：`agent-profile`、`provider-profile`、`model-profile`、`model-model`、`scenario-profile`、`compatibility-evidence`、`recommendation`、`connection-profile` 和 `diagnostic-result`。
 
 M2 增加 Agent Discovery Contract 的两个只读契约：
 

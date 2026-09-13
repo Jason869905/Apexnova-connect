@@ -22,7 +22,7 @@ export interface RecommendationPricing {
 }
 
 export interface RecommendationCandidate {
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly displayName: string;
   readonly protocols: readonly string[];
   readonly availability: string;
@@ -46,7 +46,7 @@ export interface RecommendOptions {
   readonly integrationVersion: string;
   /** The platform the recommendation is for. Evidence from another one does not apply. */
   readonly platform: string;
-  /** Protocols this Agent speaks; a deployment offering none of them is out. */
+  /** Protocols this Agent speaks; a model offering none of them is out. */
   readonly agentProtocols: readonly string[];
   readonly catalogVersion: string;
   readonly candidates: readonly RecommendationCandidate[];
@@ -56,8 +56,8 @@ export interface RecommendOptions {
 }
 
 export interface RecommendationConstraints {
-  /** Only these deployments are considered, if given. */
-  readonly deploymentIds?: readonly string[];
+  /** Only these models are considered, if given. */
+  readonly modelIds?: readonly string[];
   /** Blended price ceiling per million tokens, as a decimal string. */
   readonly maxBlendedPricePerMillion?: string;
   /** Publishers whose models must not be recommended, matched case-insensitively. */
@@ -72,7 +72,7 @@ export interface ScoredDimension {
 }
 
 export interface RecommendationCandidateResult {
-  readonly deploymentId: string;
+  readonly modelId: string;
   readonly displayName: string;
   readonly rank: number;
   readonly eligible: boolean;
@@ -121,18 +121,18 @@ function clamp01(value: number): number {
  * undefined when the catalog does not actually publish one.
  *
  * A published zero is treated as absent, not as free. The public catalog
- * currently reports `0` for every deployment while the estimate endpoint quotes
+ * currently reports `0` for every model while the estimate endpoint quotes
  * real amounts for the same models and usage bills real money -- so a zero here
  * means the price is not in this projection, and scoring it as the cheapest
  * possible option would rank on a number that contradicts the bill.
  */
 /**
  * Zero is a price now. It was not always: requirement 12H was raised because the
- * catalog published `0` for every deployment, where it was indistinguishable
+ * catalog published `0` for every model, where it was indistinguishable
  * from "we do not publish one" and would have ranked the dearest model first.
  * Hub has since shipped both halves -- real prices, and an explicit `null` for
  * the projections that carry none -- so `null` holds the absence and a published
- * `0` gets its meaning back. One of the deployments priced at zero is named
+ * `0` gets its meaning back. One of the models priced at zero is named
  * "North Mini Code (free)".
  *
  * A negative or unparseable price is still no price: neither is a statement
@@ -157,7 +157,9 @@ function subjectFor(options: RecommendOptions, candidate: RecommendationCandidat
     agentVersion: options.agentVersion,
     integrationId: options.integrationId,
     integrationVersion: options.integrationVersion,
-    deploymentId: candidate.deploymentId,
+    // The evidence subject keeps Hub's spelling because its ID is a hash of
+    // this object; the value is the model id either way.
+    deploymentId: candidate.modelId,
     protocol,
     platform: options.platform,
     ...(candidate.implementationFingerprint === undefined
@@ -243,7 +245,7 @@ function weightsFor(
 }
 
 /**
- * Ranks deployments for one Scenario, on one platform, from the evidence on
+ * Ranks models for one Scenario, on one platform, from the evidence on
  * hand.
  *
  * Hard requirements filter rather than deduct: a required capability that
@@ -257,8 +259,8 @@ function weightsFor(
  * evidence every candidate is ineligible and says so.
  */
 export function recommend(options: RecommendOptions): RecommendationResult {
-  const considered = options.constraints?.deploymentIds
-    ? options.candidates.filter((candidate) => options.constraints!.deploymentIds!.includes(candidate.deploymentId))
+  const considered = options.constraints?.modelIds
+    ? options.candidates.filter((candidate) => options.constraints!.modelIds!.includes(candidate.modelId))
     : options.candidates;
 
   const ceiling = options.constraints?.maxBlendedPricePerMillion === undefined
@@ -278,7 +280,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       return {
         candidate,
         eligible: false,
-        reasons: [`The deployment offers ${candidate.protocols.join(", ") || "no protocol"}, and this Agent speaks ${options.agentProtocols.join(", ")}.`],
+        reasons: [`The model offers ${candidate.protocols.join(", ") || "no protocol"}, and this Agent speaks ${options.agentProtocols.join(", ")}.`],
         evidenceRefs: [] as readonly string[],
       };
     }
@@ -286,7 +288,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       return {
         candidate,
         eligible: false,
-        reasons: [`The catalog reports the deployment as ${candidate.availability}.`],
+        reasons: [`The catalog reports the model as ${candidate.availability}.`],
         evidenceRefs: [] as readonly string[],
       };
     }
@@ -294,14 +296,14 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       const publisher = candidate.publisher?.toLowerCase();
       if (publisher === undefined) {
         // Same rule as the price ceiling and as a required capability: a
-        // deployment whose publisher the catalog does not name cannot be shown
+        // model whose publisher the catalog does not name cannot be shown
         // not to be one of the excluded ones, and a constraint that lets the
         // unprovable through is not a constraint.
         return {
           candidate,
           eligible: false,
           reasons: [
-            `The catalog does not name a publisher, so this deployment cannot be shown not to be published by ${[...excluded].sort().join(", ")}.`,
+            `The catalog does not name a publisher, so this model cannot be shown not to be published by ${[...excluded].sort().join(", ")}.`,
           ],
           evidenceRefs: [] as readonly string[],
         };
@@ -320,7 +322,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       pricesUsed.push(candidate.pricing.priceValidUntil);
     }
     if (ceiling !== undefined && blended === undefined) {
-      // A ceiling asks to be shown the deployment fits in it, and a deployment
+      // A ceiling asks to be shown the model fits in it, and a model
       // the catalog prices at nothing shows no such thing. Letting it through
       // made `--max-price` silently match everything while reading as "filtered
       // to your budget" -- the same rule required capabilities already follow:
@@ -329,7 +331,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
         candidate,
         eligible: false,
         reasons: [
-          `The catalog publishes no usable price, so this deployment cannot be shown to be within the ${ceiling} ceiling. Unknown is not within budget.`,
+          `The catalog publishes no usable price, so this model cannot be shown to be within the ${ceiling} ceiling. Unknown is not within budget.`,
         ],
         evidenceRefs: [] as readonly string[],
       };
@@ -361,7 +363,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
         eligible: false,
         protocol: best.protocol,
         reasons: [
-          `No compatibility evidence has been collected for ${options.agentId} ${options.agentVersion} on ${options.platform} against this deployment. Evidence from another platform does not carry over.`,
+          `No compatibility evidence has been collected for ${options.agentId} ${options.agentVersion} on ${options.platform} against this model. Evidence from another platform does not carry over.`,
         ],
         evidenceRefs: [] as readonly string[],
       };
@@ -397,7 +399,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
   // them all one would rank on a number the bill contradicts.
   const eligibleEntries = assessed.filter((entry) => entry.eligible);
   // With nothing eligible there is no set to look in, and "no eligible
-  // deployment has a price" would report every dimension as unmeasured on the
+  // model has a price" would report every dimension as unmeasured on the
   // strength of an empty set. Nothing was measured because nothing got that
   // far, which is a different statement and belongs to the exclusion reasons.
   const anyEligible = eligibleEntries.length > 0;
@@ -407,14 +409,14 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     unavailable.add("cost");
     runtimeUnmeasured.push({
       priority: "cost",
-      why: "the catalog publishes no usable price for any eligible deployment; ranking on a published zero would contradict what the estimate and the bill say",
+      why: "the catalog publishes no usable price for any eligible model; ranking on a published zero would contradict what the estimate and the bill say",
     });
   }
   if (anyEligible && !eligibleEntries.some((entry) => entry.candidate.contextWindow !== undefined)) {
     unavailable.add("context");
     runtimeUnmeasured.push({
       priority: "context",
-      why: "the catalog publishes no context window for any eligible deployment",
+      why: "the catalog publishes no context window for any eligible model",
     });
   }
 
@@ -444,7 +446,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
         score: blended === undefined ? 0 : clamp01(1 - blended / SCORING_RULE.priceCeilingPerMillion),
         weight: weights.get("cost")!,
         detail: blended === undefined
-          ? "the catalog publishes no usable price for this deployment, so it scores zero rather than being assumed cheap"
+          ? "the catalog publishes no usable price for this model, so it scores zero rather than being assumed cheap"
           : `${blended.toFixed(4)} ${entry.candidate.pricing!.currency} per million blended at ${SCORING_RULE.inputShare}/${SCORING_RULE.outputShare} input/output, against a ${SCORING_RULE.priceCeilingPerMillion} ceiling`,
       });
     }
@@ -455,7 +457,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
         score: window === undefined ? 0 : clamp01(window / SCORING_RULE.targetContextWindow),
         weight: weights.get("context")!,
         detail: window === undefined
-          ? "the catalog publishes no context window for this deployment, so it scores zero rather than being assumed large"
+          ? "the catalog publishes no context window for this model, so it scores zero rather than being assumed large"
           : `${window} tokens against a ${SCORING_RULE.targetContextWindow} target`,
       });
     }
@@ -466,18 +468,18 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     };
   });
 
-  // Deterministic order: eligible first, then score, then deployment ID. Two
+  // Deterministic order: eligible first, then score, then model ID. Two
   // runs over the same input have to produce the same bytes, which is what the
   // repeatability exit condition means in practice.
   const ordered = [...scored].sort(
     (left, right) =>
       Number(right.eligible) - Number(left.eligible) ||
       (right.score ?? 0) - (left.score ?? 0) ||
-      left.candidate.deploymentId.localeCompare(right.candidate.deploymentId),
+      left.candidate.modelId.localeCompare(right.candidate.modelId),
   );
 
   const candidates: RecommendationCandidateResult[] = ordered.map((entry, index) => ({
-    deploymentId: entry.candidate.deploymentId,
+    modelId: entry.candidate.modelId,
     displayName: entry.candidate.displayName,
     rank: index + 1,
     eligible: entry.eligible,
@@ -494,7 +496,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
 
   const eligible = candidates.filter((candidate) => candidate.eligible);
   const summary = eligible.length === 0
-    ? `No deployment can be recommended for ${options.scenario.id} on ${options.platform}: ${candidates.length} considered, none eligible.${commonestExclusion(candidates)}`
+    ? `No model can be recommended for ${options.scenario.id} on ${options.platform}: ${candidates.length} considered, none eligible.${commonestExclusion(candidates)}`
     : `${eligible[0]!.displayName} ranks first for ${options.scenario.id} on ${options.platform}, from ${eligible.length} eligible of ${candidates.length} considered.`;
 
   return {
@@ -538,7 +540,7 @@ function commonestExclusion(candidates: readonly RecommendationCandidateResult[]
 
 /**
  * The ranking stops standing when the first thing under it does. That is not
- * only the evidence: the catalog prices some deployments by time of day, so a
+ * only the evidence: the catalog prices some models by time of day, so a
  * ranking computed at 17:00 can rest on a number that doubles at 22:00. Reading
  * the price without its expiry produced documents claiming four weeks of
  * validity from an input with six hours left.

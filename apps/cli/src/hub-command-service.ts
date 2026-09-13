@@ -53,7 +53,7 @@ export interface HubCommandService {
   whoami(profileId: string, signal?: AbortSignal): Promise<HubAccountSummary>;
   balance(profileId: string, signal?: AbortSignal): Promise<HubBalance>;
   catalog(profileId: string, signal?: AbortSignal): Promise<HubCatalogSnapshot>;
-  estimatePricing(profileId: string, deploymentId: string, usage: HubPricingUsage, signal?: AbortSignal): Promise<HubPricingEstimate>;
+  estimatePricing(profileId: string, modelId: string, usage: HubPricingUsage, signal?: AbortSignal): Promise<HubPricingEstimate>;
   usage(profileId: string, requestId: string, signal?: AbortSignal): Promise<HubUsageRecord | undefined>;
   usageQuery(profileId: string, query: UsageQuery, signal?: AbortSignal): Promise<UsageAggregateResult | UsageListResult>;
   createRuntimeCredential(profileId: string, input: CreateRuntimeCredentialInput, signal?: AbortSignal): Promise<CreatedRuntimeCredential>;
@@ -135,7 +135,7 @@ export function createDefaultHubCommandService(options: DefaultHubCommandService
     whoami: (profileId, signal) => control(profileId).me(signal),
     balance: (profileId, signal) => control(profileId).balance(signal),
     catalog: (profileId, signal) => control(profileId).catalog(signal),
-    estimatePricing: (profileId, deploymentId, usage, signal) => control(profileId).estimatePricing(deploymentId, usage, signal),
+    estimatePricing: (profileId, modelId, usage, signal) => control(profileId).estimatePricing(modelId, usage, signal),
     usage: (profileId, requestId, signal) => control(profileId).usage(requestId, signal),
     usageQuery: (profileId, query, signal) => control(profileId).usageQuery(query, signal),
     createRuntimeCredential: (profileId, input, signal) => control(profileId).createRuntimeCredential(input, signal),

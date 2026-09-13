@@ -34,7 +34,7 @@ function selection() {
     integrationId: "opencode",
     profile: "default",
     command: "connect",
-    deploymentId: "deployment.nova",
+    modelId: "model.nova",
     providerId: "provider.apexnova-ai-hub",
     protocol: "openai-responses",
     grounds: "recommendation",
@@ -60,7 +60,7 @@ describe("routing audit entries", () => {
     expect(Object.keys(entry).filter((key) => !allowed.has(key))).toEqual([]);
   });
 
-  it("records why the deployment was chosen, not only that it was", () => {
+  it("records why the model was chosen, not only that it was", () => {
     const entry = selection();
 
     // "Switched to X" is an outcome. An auditable route has to answer why, and
@@ -99,7 +99,7 @@ describe("routing audit entries", () => {
           status: "confirmed",
           method: "gateway",
           requestCount: 2,
-          billedTo: [{ apiKeyId: "rtc_1", deploymentId: "deployment.nova", requestCount: 2 }],
+          billedTo: [{ apiKeyId: "rtc_1", modelId: "model.nova", requestCount: 2 }],
         },
         recordedAt: "2026-09-11T20:05:00.000Z",
       }),
@@ -127,7 +127,7 @@ describe("routing audit entries", () => {
         agentId: "opencode",
         profile: "default",
         command: "switch",
-        deploymentId: "deployment.other",
+        modelId: "model.other",
         grounds: "explicit",
         recordedAt: "2026-09-11T20:10:00.000Z",
       }),
@@ -153,7 +153,7 @@ describe("routing audit entries", () => {
         event: "selected",
         agentId: "opencode",
         profile: "default",
-        deploymentId: "deployment.other",
+        modelId: "model.other",
         grounds: "explicit",
         recordedAt: "2026-09-11T20:10:00.000Z",
       }),

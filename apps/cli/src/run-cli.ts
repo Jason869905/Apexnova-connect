@@ -19,7 +19,7 @@ import {
   HubClientError,
   deviceVerificationUrl,
   verifyHubInference,
-  type HubCatalogDeployment,
+  type HubCatalogModel,
   type HubCatalogSnapshot,
   type HubCatalogProtocol,
   type HubUsageRecord,
@@ -76,6 +76,7 @@ import {
   localStateRoot,
   noOperands,
   operationSignal,
+  resolveConfirm,
   resolveIntegration,
   resolvePicker,
   withRetry,
@@ -90,17 +91,21 @@ import {
   inFlightSignal,
 } from "./cli-core.js";
 import {
+  bindingThatSurvives,
+  compatibleModels,
   configureAgent,
   connectionIntent,
+  modelsAfterSwitch,
   detectForCommand,
+  requireReferencedModel,
   routingAuditLog,
   selectionInForce,
-  selectDeploymentByReference,
+  selectModelByReference,
   hubProtocolsFor,
   launchAgent,
   requireAvailable,
-  resolveDeployment,
-  resolveDeployments,
+  resolveModel,
+  resolveModels,
   runtimeCredentialForLaunch,
   runtimeCredentialIsDue,
   selectProtocol,
@@ -109,7 +114,7 @@ import {
 } from "./agent-workflow.js";
 import {
   RuntimeBindingStore,
-  bindingDeploymentIds,
+  bindingModelIds,
   type RuntimeCredentialBinding,
 } from "./runtime-binding-store.js";
 import {
@@ -141,7 +146,7 @@ const CAPABILITY_SUITE_BUDGET = 0.05;
 const HELP = `Apexnova-connect CLI
 
 Usage:
-  apexnova run <agent> [--deployment <id>] [--gateway] [--key <id>] [--rotating] [-- <agent args>]
+  apexnova run <agent> [--model <id>] [--gateway] [--key <id>] [--rotating] [-- <agent args>]
   apexnova init [--hub-url <url>] [--client-id <id>] [--path-prefix <p>]
                 [--credential-store system|file]
   apexnova login | logout | whoami | balance
@@ -149,18 +154,18 @@ Usage:
   apexnova audit [agent] [--limit <n>]   Read the routing audit log
   apexnova models [--agent <id>] [--protocol <id>] [--compatible-only]
   apexnova usage [--request-id <id>] [--key <id>] [--from <iso>] [--to <iso>] [--granularity hour|day|month]
-  apexnova connect <agent> (--deployment <id> | --best) (--dry-run | --yes)
-  apexnova switch <agent> --deployment <id> (--dry-run | --yes)
+  apexnova connect <agent> (--model <id> | --best) (--dry-run | --yes)
+  apexnova switch <agent> [--model <id> | --best] [--dry-run | --yes]
   apexnova verify <agent> [--live] [--yes] | doctor [agent]
   apexnova restore [transaction-id] [--list] [--dry-run] [--yes] [--discard-local-changes]
-  apexnova compatibility run <agent> --deployment <id> [--budget <amount>] [--yes]
+  apexnova compatibility run <agent> --model <id> [--budget <amount>] [--yes]
   apexnova compatibility refresh [--within <days>] [--budget <amount>] [--yes]
-  apexnova compatibility sync [--agent <id>] [--deployment <id>] [--yes]
+  apexnova compatibility sync [--agent <id>] [--model <id>] [--yes]
   apexnova compatibility revoke <evidence-id> --reason <why> [--yes]
   apexnova compatibility replay <recording.json>
-  apexnova compatibility explain [agent] [--deployment <id>] [--protocol <id>]
-  apexnova compatibility matrix [--agent <id>] [--deployment <id>] [--protocol <id>]
-  apexnova recommend <agent> [--scenario <id>] [--deployment <id>] [--max-price <per-1M>]
+  apexnova compatibility explain [agent] [--model <id>] [--protocol <id>]
+  apexnova compatibility matrix [--agent <id>] [--model <id>] [--protocol <id>]
+  apexnova recommend <agent> [--scenario <id>] [--model <id>] [--max-price <per-1M>]
                              [--model-allowlist <ref,...>] [--exclude-publisher <name,...>]
   apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
@@ -176,9 +181,9 @@ Global options:
   --verbose              Emit sanitized diagnostics
   --agent <id>           Filter a catalog for an Agent
   --protocol <id>        Select or filter a protocol
-  --compatible-only      Hide unavailable or unsupported deployments
-  --deployment <id>      Select a public model deployment; repeat it to configure
-                         several models at once, the first being the default
+  --compatible-only      Hide unavailable or unsupported models
+  --model <ref>          Select a model by its catalog id or alias; repeat it to
+                         configure several at once, the first being the default
   --best                 Connect to the top of the ranking, and record why
   --gateway              Route this run through a local gateway (default off)
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
@@ -190,7 +195,7 @@ Global options:
   --reason <why>         Why an evidence record is being revoked (required)
   --scenario <id>        Scenario to rank for (default coding-general)
   --max-price <amount>   Blended price ceiling per million tokens for recommend
-  --model-allowlist <refs>  Consider only these deployments (id, alias; comma-separated)
+  --model-allowlist <refs>  Consider only these models (id, alias; comma-separated)
   --exclude-publisher <names>  Never recommend models from these publishers
   --request-id <id>      Reconcile one request by its Hub request ID
   --key <id>             Use an existing API key instead of creating one
@@ -222,6 +227,14 @@ protected by its permissions alone; --credential-store system moves them into
 the Secret Service instead, where the OS protects them and a keyring has to be
 installed and running. Windows always uses Credential Manager unless told
 otherwise. APEXNOVA_CREDENTIAL_STORE overrides the stored value for one shell.
+
+apexnova models lists the catalog and changes nothing. apexnova switch <agent>
+changes which model the Agent opens on: run it with no target to pick from a
+list, or pass --model <id> (or --best) with --yes. Switching adds the model
+to the set the Agent's own picker offers and makes it the default; the models
+already configured stay, and the permanent key is widened rather than replaced.
+apexnova connect <agent> is the heavier one: it binds the Agent and issues a
+short-lived runtime credential for that single Model.
 
 apexnova run <agent> is the one-command path: it auto-configures a permanent key,
 writes that Agent's provider configuration, and launches it. Use --rotating for
@@ -259,16 +272,18 @@ const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   detect: ["--config"],
   inspect: ["--config"],
   doctor: ["--config"],
-  connect: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--credential-ttl", "--api-key-helper", "--dry-run", "--yes"],
-  switch: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--credential-ttl", "--api-key-helper", "--dry-run", "--yes"],
+  connect: ["--model", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--credential-ttl", "--api-key-helper", "--dry-run", "--yes"],
+  // No `--credential-ttl` and no `--rotating`: both mean "issue a new credential",
+  // which is the one thing a switch promises not to do. `connect` owns those.
+  switch: ["--model", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--api-key-helper", "--dry-run", "--yes"],
   verify: ["--live", "--config", "--yes"],
   restore: ["--list", "--dry-run", "--yes", "--discard-local-changes", "--config"],
-  run: ["--deployment", "--gateway", "--key", "--rotating", "--credential-ttl", "--api-key-helper", "--config"],
-  opencode: ["--deployment", "--gateway", "--key", "--rotating", "--credential-ttl", "--api-key-helper", "--config"],
+  run: ["--model", "--gateway", "--key", "--rotating", "--credential-ttl", "--api-key-helper", "--config"],
+  opencode: ["--model", "--gateway", "--key", "--rotating", "--credential-ttl", "--api-key-helper", "--config"],
   credential: ["--key", "--rotating", "--api-key-helper"],
-  recommend: ["--scenario", "--deployment", "--max-price", "--model-allowlist", "--exclude-publisher"],
+  recommend: ["--scenario", "--model", "--max-price", "--model-allowlist", "--exclude-publisher"],
   compatibility: [
-    "--agent", "--deployment", "--protocol", "--budget", "--record", "--within",
+    "--agent", "--model", "--protocol", "--budget", "--record", "--within",
     "--reason", "--yes", "--force", "--config",
   ],
 };
@@ -317,8 +332,8 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let agent: string | undefined;
   let protocol: string | undefined;
   let compatibleOnly = false;
-  let deployment: string | undefined;
-  const deployments: string[] = [];
+  let model: string | undefined;
+  const models: string[] = [];
   let budget: string | undefined;
   let recordPath: string | undefined;
   let withinDays: number | undefined;
@@ -440,13 +455,13 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         index += 1;
         break;
       }
-      case "--deployment":
+      case "--model":
         // Repeatable: `run` writes every model named here into the Agent's
         // configuration on one credential, and the first is the one it starts
-        // on. Commands that act on a single deployment read `deployment`, which
+        // on. Commands that act on a single model read `model`, which
         // stays that first one.
-        deployments.push(valueAfter(args, index, arg));
-        deployment = deployments[0];
+        models.push(valueAfter(args, index, arg));
+        model = models[0];
         index += 1;
         break;
       case "--within": {
@@ -600,8 +615,8 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(agent ? { agent } : {}),
     ...(protocol ? { protocol } : {}),
     compatibleOnly,
-    ...(deployment ? { deployment } : {}),
-    ...(deployments.length > 0 ? { deployments } : {}),
+    ...(model ? { model } : {}),
+    ...(models.length > 0 ? { models } : {}),
     ...(budget ? { budget } : {}),
     ...(recordPath ? { recordPath } : {}),
     ...(withinDays === undefined ? {} : { withinDays }),
@@ -897,6 +912,13 @@ async function executeBalance(parsed: ParsedArguments, dependencies: CliDependen
   return { data: balance, warnings: balance.promoCredits.length > 0 ? ["Promotional credits may be restricted to specific models."] : [], human: [`Available: ${balance.normalAvailable} ${balance.currency}`, `Held: ${balance.held} ${balance.currency}`, `Promotions: ${balance.promoCredits.length}`, `As of: ${balance.asOf}`].join("\n") };
 }
 
+/**
+ * Lists the Model and Model catalog. Reads only.
+ *
+ * Until v0.7 an interactive `models` opened a picker and wrote the selection --
+ * a read-shaped name whose default path changed the configuration. Choosing is
+ * `switch`, which is where the picker went.
+ */
 async function executeModels(parsed: ParsedArguments, dependencies: CliDependencies) {
   noOperands(parsed);
   const registry = integrationRegistry(dependencies);
@@ -905,25 +927,25 @@ async function executeModels(parsed: ParsedArguments, dependencies: CliDependenc
   const usable = filterIntegration
     ? hubProtocolsFor(filterIntegration)
     : new Set(registry.list().flatMap((integration) => [...hubProtocolsFor(integration)]));
-  const modelsById = new Map(catalog.models.map((model) => [model.id, model]));
-  const deployments = catalog.deployments
-    .filter((deployment) => !parsed.protocol || deployment.protocols.some((protocol) => protocol.protocol === parsed.protocol))
-    .filter((deployment) => !filterIntegration || deployment.protocols.some((protocol) => usable.has(protocol.protocol)))
-    .filter((deployment) => !parsed.compatibleOnly || (deployment.availability.status === "available" && deployment.protocols.some((protocol) => usable.has(protocol.protocol))))
-    .map((deployment) => ({
-      ...deployment,
-      model: modelsById.get(deployment.modelId),
+  // No sort: the catalog arrives in the order Hub lists its models, which is the
+  // order the model plaza shows. A reader comparing the two should not have to
+  // work out why they disagree.
+  const models = catalog.models
+    .filter((model) => !parsed.protocol || model.protocols.some((protocol) => protocol.protocol === parsed.protocol))
+    .filter((model) => !filterIntegration || model.protocols.some((protocol) => usable.has(protocol.protocol)))
+    .filter((model) => !parsed.compatibleOnly || (model.availability.status === "available" && model.protocols.some((protocol) => usable.has(protocol.protocol))))
+    .map((model) => ({
+      ...model,
       compatibility: filterIntegration
-        ? (deployment.protocols.some((protocol) => usable.has(protocol.protocol)) ? "adapter-supported-unverified" : "unsupported")
+        ? (model.protocols.some((protocol) => usable.has(protocol.protocol)) ? "adapter-supported-unverified" : "unsupported")
         : "not-evaluated",
     }));
   const warnings = filterIntegration
-    ? ["Adapter protocol support is not Agent compatibility evidence; H1 deployments remain unverified until compatibility testing is available."]
+    ? ["Adapter protocol support is not Agent compatibility evidence; H1 models remain unverified until compatibility testing is available."]
     : [];
-  const human = deployments.length === 0
-    ? "No matching deployments."
-    : deployments.map((deployment) => `${deployment.id}  ${deployment.model?.name ?? deployment.modelId}  ${deployment.availability.status}  ${deployment.protocols.map((protocol) => protocol.protocol).join(",")}`).join("\n");
-  const io = dependencies.io ?? defaultIo();
+  const human = models.length === 0
+    ? "No matching models."
+    : models.map((model) => `${model.inferenceAlias}  ${model.displayName}  ${model.availability.status}  ${model.protocols.map((protocol) => protocol.protocol).join(",")}  ${model.id}`).join("\n");
   const catalogEnvelope = {
     schemaVersion: catalog.schemaVersion,
     catalogVersion: catalog.catalogVersion,
@@ -933,61 +955,8 @@ async function executeModels(parsed: ParsedArguments, dependencies: CliDependenc
     // output as if it were the snapshot is what produced a wrong finding about
     // the catalog. Emit what was actually returned.
     providers: catalog.providers,
-    deployments,
+    models,
   };
-  if (io.isInteractive && !parsed.nonInteractive && !parsed.json && deployments.length > 0) {
-    // Switching needs one unambiguous target, so a multi-agent install has to
-    // say which Agent the selected model is for.
-    const registered = registry.list();
-    const target = filterIntegration ?? (registered.length === 1 ? registered[0] : undefined);
-    if (!target) {
-      throw new CliError({
-        code: "INVALID_ARGUMENT",
-        message: "Pass --agent <id> to switch a model interactively when more than one Agent is registered.",
-        exitCode: EXIT_CODES.usage,
-        details: { supportedAgents: registry.agentIds },
-      });
-    }
-    const picker = resolvePicker(dependencies);
-    const previousBinding = await new RuntimeBindingStore(credentialStore(dependencies))
-      .load(target.manifest.id, parsed.profile)
-      .catch(() => null);
-    const alreadyConfigured = new Set(previousBinding ? bindingDeploymentIds(previousBinding) : []);
-    const items: CliPickerItem<HubCatalogDeployment>[] = deployments.map((deployment) => ({
-      label: `${deployment.displayName} (${deployment.inferenceAlias})`,
-      description: `${deployment.model?.name ?? deployment.modelId} · ${deployment.availability.status}${alreadyConfigured.has(deployment.id) ? " · configured" : ""}`,
-      value: deployment,
-    }));
-    const selected = await picker("Select a model to switch to (Esc to cancel):", items);
-    // A switch re-points the default; it does not narrow what the profile can
-    // reach. `configureAgent` keeps the models already configured wherever the
-    // credential survives, so a model picked here is added to the set if it is
-    // new and simply becomes the default if it was already there -- on the same
-    // key, which is what makes the switch free.
-    const protocol = selectProtocol(selected, target);
-    const result = await configureAgent(parsed, dependencies, target, [selected], protocol, catalog);
-    const configured = bindingDeploymentIds(result.binding);
-    const added = !bindingDeploymentIds(previousBinding ?? result.binding).includes(selected.id);
-    return {
-      data: {
-        ...catalogEnvelope,
-        switchedTo: selected.id,
-        deploymentIds: configured,
-        addedToConfiguration: added,
-        agentId: target.manifest.id,
-        credentialId: result.binding.credentialId,
-        credentialKind: result.binding.kind ?? "runtime",
-      },
-      warnings: [...warnings, ...result.warnings],
-      human: [
-        `${added ? "Added" : "Switched to"} ${selected.displayName} (${selected.inferenceAlias}); it is now the default model.`,
-        ...(configured.length > 1
-          ? [`${configured.length} models stay configured on key ${result.binding.credentialId}: ${configured.join(", ")}.`]
-          : []),
-        `Run "apexnova run ${target.manifest.id}" to use it.`,
-      ].join("\n"),
-    };
-  }
   return { data: catalogEnvelope, warnings, human };
 }
 
@@ -1111,23 +1080,23 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
     const service = hubService(parsed, dependencies);
     const target = binding.restoreTarget;
     const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
-    const deployment = catalog.deployments.find((item) => item.id === target.deploymentId);
-    const protocol = deployment?.protocols.find((item) => item.protocol === target.protocol);
-    if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
+    const model = catalog.models.find((item) => item.id === target.modelId);
+    const protocol = model?.protocols.find((item) => item.protocol === target.protocol);
+    if (!model || !protocol || (model.availability.status !== "available" && model.availability.status !== "degraded")) {
       throw new CliError({ code: "BINDING_MISMATCH", message: "The previous runtime target is no longer available; configuration was not restored.", exitCode: EXIT_CODES.verification });
     }
     // The rolled-back configuration offers the model set it was written with, so
     // the credential that goes back with it covers the same set.
-    const targetDeploymentIds = bindingDeploymentIds(target);
+    const targetModelIds = bindingModelIds(target);
     const created = await service.createRuntimeCredential(parsed.profile, {
       name: `${integration.manifest.displayName} (${parsed.profile})`,
       protocols: [target.protocol],
-      publicDeploymentIds: targetDeploymentIds,
+      modelIds: targetModelIds,
       expiresIn: 86_400,
     }, operationSignal(parsed));
     try {
       const active = (await service.runtimeCredentials(parsed.profile, operationSignal(parsed))).find((item) => item.credentialId === created.credentialId);
-      if (!active || !active.protocols.includes(target.protocol) || !targetDeploymentIds.every((id) => active.publicDeploymentIds.includes(id))) {
+      if (!active || !active.protocols.includes(target.protocol) || !targetModelIds.every((id) => active.modelIds.includes(id))) {
         throw new CliError({ code: "VERIFICATION_FAILED", message: "The restored runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
       }
       replacement = {
@@ -1135,8 +1104,8 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
         secret: created.secret,
         expiresAt: created.expiresAt,
         protocol: target.protocol,
-        deploymentId: target.deploymentId,
-        deploymentIds: targetDeploymentIds,
+        modelId: target.modelId,
+        modelIds: targetModelIds,
         ...(target.transactionId ? { transactionId: target.transactionId } : {}),
         ...(target.restoreTarget ? { restoreTarget: target.restoreTarget } : {}),
       };
@@ -1197,7 +1166,7 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
                 ...(integration ? { integrationId: integration.manifest.id } : {}),
                 profile: parsed.profile,
                 command: "restore",
-                deploymentId: restoredTarget.deploymentId,
+                modelId: restoredTarget.modelId,
                 protocol: restoredTarget.protocol,
                 grounds: "restore",
                 credentialId: restoredTarget.credentialId,
@@ -1323,7 +1292,7 @@ function suiteProtocol(hubProtocol: string): SuiteProtocol | undefined {
 interface CollectionTarget {
   readonly integration: AgentIntegration;
   readonly agentVersion: string;
-  readonly deployment: HubCatalogDeployment;
+  readonly model: HubCatalogModel;
   readonly hubProtocol: HubCatalogProtocol;
   readonly protocol: SuiteProtocol;
   readonly protocolId: string;
@@ -1359,7 +1328,7 @@ interface CollectionResult {
 }
 
 /**
- * Mints a credential scoped to the one deployment under test, runs the suite,
+ * Mints a credential scoped to the one model under test, runs the suite,
  * revokes the credential whatever happened, reconciles what Hub billed and
  * stores the record. Shared by `run` and `refresh` so a re-collection is the
  * same measurement as the first one, not a second implementation of it.
@@ -1369,14 +1338,14 @@ async function collectEvidence(
   dependencies: CliDependencies,
   target: CollectionTarget,
 ): Promise<CollectionResult> {
-  const { integration, agentVersion, deployment, hubProtocol, protocol, protocolId } = target;
+  const { integration, agentVersion, model, hubProtocol, protocol, protocolId } = target;
   const service = hubService(parsed, dependencies);
   const signal = operationSignal(parsed);
   const environment = dependencies.environment ?? process.env;
   const created = await service.createRuntimeCredential(parsed.profile, {
     name: `${integration.manifest.displayName} capability suite (${parsed.profile})`,
     protocols: [hubProtocol.protocol],
-    publicDeploymentIds: [deployment.id],
+    modelIds: [model.id],
     expiresIn: 86_400,
   }, signal);
 
@@ -1389,8 +1358,8 @@ async function collectEvidence(
     suiteResult = await (dependencies.runCapabilitySuite ?? runCapabilitySuite)({
       endpoint: hubProtocol.baseUrl,
       protocol,
-      model: deployment.inferenceAlias,
-      deploymentId: deployment.id,
+      model: model.inferenceAlias,
+      modelId: model.id,
       credential: created.secret,
       requestTimeoutMs: parsed.timeoutSeconds * 1_000,
       allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
@@ -1481,8 +1450,8 @@ async function collectEvidence(
     const recording = buildRecording({
       endpoint: hubProtocol.baseUrl,
       protocol,
-      model: deployment.inferenceAlias,
-      deploymentId: deployment.id,
+      model: model.inferenceAlias,
+      modelId: model.id,
       recordedAt: new Date(currentTime(dependencies)).toISOString(),
       interactions: recorder.interactions(),
     });
@@ -1499,14 +1468,16 @@ async function collectEvidence(
     agentVersion,
     integrationId: integration.manifest.id,
     integrationVersion: integration.manifest.version,
-    deploymentId: deployment.id,
+    // The evidence subject keeps Hub's spelling: the record's ID is a hash of
+    // this object under a rule pinned with Hub. The value is the model id.
+    deploymentId: model.id,
     // The catalog's own value, verbatim: one protocol under two spellings would
     // split a subject in two and the evidence would never accumulate.
     protocol: protocolId,
     platform: platformTag(dependencies),
-    ...(deployment.implementationFingerprint === undefined
+    ...(model.implementationFingerprint === undefined
       ? {}
-      : { implementationFingerprint: deployment.implementationFingerprint }),
+      : { implementationFingerprint: model.implementationFingerprint }),
   };
   const evidence = createEvidence({
     sourceType: "maintainer-test",
@@ -1563,10 +1534,10 @@ async function collectEvidence(
 }
 
 /**
- * Runs the capability suite against one deployment and writes what it found.
+ * Runs the capability suite against one model and writes what it found.
  *
  * This is the billable half of M3: it mints a runtime credential scoped to the
- * one deployment under test, sends the probes, revokes the credential, and
+ * one model under test, sends the probes, revokes the credential, and
  * reconciles every request it made against Hub usage. Nothing is sent before
  * the estimate has been shown and approved, and a local ceiling refuses a run
  * that would cost more than expected -- Hub has no per-request cap yet.
@@ -1601,8 +1572,8 @@ async function executeCompatibilityRun(
   const service = hubService(parsed, dependencies);
   const signal = operationSignal(parsed);
   const catalog = await service.catalog(parsed.profile, signal);
-  const deployment = await resolveDeployment(parsed, dependencies, integration, catalog);
-  const hubProtocol = selectProtocol(deployment, integration, parsed.protocol);
+  const model = await resolveModel(parsed, dependencies, integration, catalog);
+  const hubProtocol = selectProtocol(model, integration, parsed.protocol);
   const protocol = suiteProtocol(hubProtocol.protocol);
   // toProtocolId only checks that this is a protocol the contracts know; the
   // value recorded is the catalog's own, so a subject cannot split in two.
@@ -1617,7 +1588,7 @@ async function executeCompatibilityRun(
 
   const estimate = await service.estimatePricing(
     parsed.profile,
-    deployment.id,
+    model.id,
     CAPABILITY_SUITE_ESTIMATE_USAGE,
     signal,
   );
@@ -1633,12 +1604,12 @@ async function executeCompatibilityRun(
   if (!parsed.yes) {
     throw new CliError({
       code: "APPROVAL_REQUIRED",
-      message: `The suite sends eight requests to ${deployment.id} over ${hubProtocol.protocol}, six of them billable. Hub estimates ${estimate.amount} ${estimate.currency}, which is not a spending cap. Re-run with --yes to approve.`,
+      message: `The suite sends eight requests to ${model.id} over ${hubProtocol.protocol}, six of them billable. Hub estimates ${estimate.amount} ${estimate.currency}, which is not a spending cap. Re-run with --yes to approve.`,
       exitCode: EXIT_CODES.permission,
       details: {
         estimate,
         estimateAssumptions: CAPABILITY_SUITE_ESTIMATE_USAGE,
-        deploymentId: deployment.id,
+        modelId: model.id,
         protocol: hubProtocol.protocol,
         capabilities: CAPABILITY_DEFINITIONS.map((definition) => definition.id),
       },
@@ -1648,7 +1619,7 @@ async function executeCompatibilityRun(
   const collected = await collectEvidence(parsed, dependencies, {
     integration,
     agentVersion,
-    deployment,
+    model,
     hubProtocol,
     protocol,
     protocolId,
@@ -1682,7 +1653,7 @@ async function executeCompatibilityRun(
     },
     warnings,
     human: [
-      `${integration.manifest.displayName} ${agentVersion} · ${deployment.id} · ${hubProtocol.protocol}: ${collected.verdict}`,
+      `${integration.manifest.displayName} ${agentVersion} · ${model.id} · ${hubProtocol.protocol}: ${collected.verdict}`,
       ...collected.outcomes.map(
         (outcome) =>
           `  ${outcome.capabilityId.padEnd(26)} ${outcome.support.padEnd(11)} ${outcome.detail}`,
@@ -1717,7 +1688,7 @@ interface RefreshCandidate {
 }
 
 /**
- * Says whether the deployment is no longer the one that was tested. Two things
+ * Says whether the model is no longer the one that was tested. Two things
  * can say so, and Hub warned about both: the fingerprint differs, or the
  * catalog reports a change after the observation -- an implementation that
  * reverts to an earlier one carries the earlier fingerprint again but a newer
@@ -1727,16 +1698,16 @@ interface RefreshCandidate {
  */
 function implementationChange(
   candidate: RefreshCandidate,
-  deployment: HubCatalogDeployment,
+  model: HubCatalogModel,
 ): string | undefined {
   const collected = candidate.subject.implementationFingerprint;
-  const current = deployment.implementationFingerprint;
+  const current = model.implementationFingerprint;
   if (collected !== undefined && current !== undefined && collected !== current) {
     return `the implementation changed from ${collected.slice(0, 12)} to ${current.slice(0, 12)}`;
   }
-  const changedAt = deployment.implementationChangedAt;
+  const changedAt = model.implementationChangedAt;
   if (changedAt !== undefined && candidate.observedAt !== undefined && Date.parse(changedAt) > Date.parse(candidate.observedAt)) {
-    return `the deployment changed its implementation on ${changedAt}, after this was collected`;
+    return `the model changed its implementation on ${changedAt}, after this was collected`;
   }
   return undefined;
 }
@@ -1768,7 +1739,7 @@ const DEFAULT_REFRESH_WINDOW_DAYS = 7;
  * leaving a matrix to quietly decay into `unknown`.
  *
  * Nothing is sent before the plan and its estimate are approved, and a subject
- * that cannot be re-collected (Agent gone, deployment withdrawn, protocol no
+ * that cannot be re-collected (Agent gone, model withdrawn, protocol no
  * longer offered) is reported as skipped with the reason instead of silently
  * dropping off the list.
  */
@@ -1780,7 +1751,7 @@ async function executeCompatibilityRefresh(
   if (operands.length > 0) {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility refresh takes no operands; filter with --agent, --deployment or --protocol.",
+      message: "compatibility refresh takes no operands; filter with --agent, --model or --protocol.",
       exitCode: EXIT_CODES.usage,
     });
   }
@@ -1791,7 +1762,7 @@ async function executeCompatibilityRefresh(
   const store = evidenceStore(dependencies);
   const evidence = await store.list({
     ...(parsed.agent === undefined ? {} : { agentId: parsed.agent }),
-    ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+    ...(parsed.model === undefined ? {} : { modelId: parsed.model }),
     ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
   });
 
@@ -1827,11 +1798,11 @@ async function executeCompatibilityRefresh(
   const plan: RefreshPlanEntry[] = [];
 
   for (const candidate of tracked) {
-    const deployment = catalog.deployments.find((item) => item.id === candidate.subject.deploymentId);
+    const model = catalog.models.find((item) => item.id === candidate.subject.deploymentId);
     // Evidence also stops standing when the thing it tested changed underneath
     // it -- 12A.3, and the reason the fingerprint was worth putting in the
     // subject at all. TTL is only the other half.
-    const changed = deployment === undefined ? undefined : implementationChange(candidate, deployment);
+    const changed = model === undefined ? undefined : implementationChange(candidate, model);
     if (!candidate.ttlDue && changed === undefined) continue;
     const base = {
       subject: candidate.subject,
@@ -1852,38 +1823,38 @@ async function executeCompatibilityRefresh(
       plan.push({ ...base, skipped: versionUnavailableReason(lookup, integration.manifest.displayName) });
       continue;
     }
-    if (!deployment) {
-      plan.push({ ...base, skipped: "the deployment is no longer in the visible catalog" });
+    if (!model) {
+      plan.push({ ...base, skipped: "the model is no longer in the visible catalog" });
       continue;
     }
-    if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") {
-      plan.push({ ...base, skipped: `the deployment is ${deployment.availability.status}` });
+    if (model.availability.status !== "available" && model.availability.status !== "degraded") {
+      plan.push({ ...base, skipped: `the model is ${model.availability.status}` });
       continue;
     }
     // Match the catalog value first; records collected before that was pinned
     // may carry the normalized spelling instead.
     const hubProtocol =
-      deployment.protocols.find((item) => item.protocol === candidate.subject.protocol) ??
-      deployment.protocols.find((item) => toProtocolId(item.protocol) === candidate.subject.protocol);
+      model.protocols.find((item) => item.protocol === candidate.subject.protocol) ??
+      model.protocols.find((item) => toProtocolId(item.protocol) === candidate.subject.protocol);
     const protocol = hubProtocol ? suiteProtocol(hubProtocol.protocol) : undefined;
     const protocolId = hubProtocol && toProtocolId(hubProtocol.protocol) !== undefined
       ? hubProtocol.protocol
       : undefined;
     if (!hubProtocol || protocol === undefined || protocolId === undefined) {
-      plan.push({ ...base, skipped: `the deployment no longer offers ${candidate.subject.protocol}` });
+      plan.push({ ...base, skipped: `the model no longer offers ${candidate.subject.protocol}` });
       continue;
     }
 
-    let estimate = estimates.get(deployment.id);
+    let estimate = estimates.get(model.id);
     if (estimate === undefined) {
       const priced = await service.estimatePricing(
         parsed.profile,
-        deployment.id,
+        model.id,
         CAPABILITY_SUITE_ESTIMATE_USAGE,
         signal,
       );
       estimate = { amount: priced.amount, currency: priced.currency };
-      estimates.set(deployment.id, estimate);
+      estimates.set(model.id, estimate);
     }
 
     plan.push({
@@ -1892,7 +1863,7 @@ async function executeCompatibilityRefresh(
       target: {
         integration,
         agentVersion,
-        deployment,
+        model,
         hubProtocol,
         protocol,
         protocolId,
@@ -1924,7 +1895,7 @@ async function executeCompatibilityRefresh(
     return {
       data: { generatedAt: now.toISOString(), withinDays, due: [], refreshed: [] },
       warnings: [] as readonly string[],
-      human: `No evidence expires within ${withinDays} days. No deployment has changed its implementation either.`,
+      human: `No evidence expires within ${withinDays} days. No model has changed its implementation either.`,
     };
   }
 
@@ -1940,7 +1911,7 @@ async function executeCompatibilityRefresh(
     throw new CliError({
       code: "BUDGET_EXCEEDED",
       message: [
-        `Refreshing ${ready.length} subjects is estimated at ${totalAmount} ${estimateCurrency}, above the ${ceiling} ceiling. Raise it with --budget or narrow the run with --agent, --deployment or --within.`,
+        `Refreshing ${ready.length} subjects is estimated at ${totalAmount} ${estimateCurrency}, above the ${ceiling} ceiling. Raise it with --budget or narrow the run with --agent, --model or --within.`,
         ...planLines,
       ].join("\n"),
       exitCode: EXIT_CODES.billing,
@@ -2036,7 +2007,7 @@ async function executeCompatibilityRefresh(
  * decided the order is in the output -- the dimensions with their numbers, the
  * evidence behind each one, and the priorities nothing measures yet.
  */
-interface RankedDeployments {
+interface RankedModels {
   readonly result: ReturnType<typeof recommend>;
   readonly profile: typeof CODING_GENERAL;
   readonly agentVersion: string;
@@ -2050,12 +2021,17 @@ interface RankedDeployments {
  * would come to record a reason that was computed differently from the one the
  * operator was shown.
  */
-async function rankDeployments(
+/** What the catalog says published a model, preferring the human name. */
+function publisherName(model: HubCatalogModel): string | undefined {
+  return model.publisherName ?? model.publisher;
+}
+
+async function rankModels(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   integration: AgentIntegration,
   existingCatalog?: HubCatalogSnapshot,
-): Promise<RankedDeployments> {
+): Promise<RankedModels> {
   const profile = parsed.scenarioId === undefined ? CODING_GENERAL : scenarioProfile(parsed.scenarioId);
   if (profile === undefined) {
     throw new CliError({
@@ -2086,42 +2062,38 @@ async function rankDeployments(
 
   const catalog = existingCatalog ?? await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
   const protocols = [...hubProtocolsFor(integration)];
-  const publisherOf = new Map(
-    catalog.models.map((model) => [model.id, model.publisherName ?? model.publisher]),
-  );
-  const candidates: RecommendationCandidate[] = catalog.deployments.map((deployment) => ({
-    deploymentId: deployment.id,
-    displayName: deployment.displayName,
-    ...(publisherOf.get(deployment.modelId) === undefined
-      ? {}
-      : { publisher: publisherOf.get(deployment.modelId)! }),
-    protocols: deployment.protocols.map((entry) => entry.protocol),
-    availability: deployment.availability.status,
-    ...(deployment.pricing === undefined
+  const candidates: RecommendationCandidate[] = catalog.models.map((model) => ({
+    modelId: model.id,
+    displayName: model.displayName,
+    ...(publisherName(model) === undefined ? {} : { publisher: publisherName(model)! }),
+
+    protocols: model.protocols.map((entry) => entry.protocol),
+    availability: model.availability.status,
+    ...(model.pricing === undefined
       ? {}
       : {
           pricing: {
-            currency: deployment.pricing.currency,
-            billingMode: deployment.pricing.billingMode,
-            unit: deployment.pricing.unit,
-            input: deployment.pricing.input,
-            output: deployment.pricing.output,
-            ...(deployment.pricing.priceValidUntil === undefined
+            currency: model.pricing.currency,
+            billingMode: model.pricing.billingMode,
+            unit: model.pricing.unit,
+            input: model.pricing.input,
+            output: model.pricing.output,
+            ...(model.pricing.priceValidUntil === undefined
               ? {}
-              : { priceValidUntil: deployment.pricing.priceValidUntil }),
+              : { priceValidUntil: model.pricing.priceValidUntil }),
           },
         }),
-    ...(deployment.limits?.contextWindow === undefined ? {} : { contextWindow: deployment.limits.contextWindow }),
-    ...(deployment.implementationFingerprint === undefined
+    ...(model.limits?.contextWindow === undefined ? {} : { contextWindow: model.limits.contextWindow }),
+    ...(model.implementationFingerprint === undefined
       ? {}
-      : { implementationFingerprint: deployment.implementationFingerprint }),
+      : { implementationFingerprint: model.implementationFingerprint }),
   }));
 
   const store = evidenceStore(dependencies);
-  if (parsed.deployment !== undefined && parsed.modelAllowlist !== undefined) {
+  if (parsed.model !== undefined && parsed.modelAllowlist !== undefined) {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "--deployment and --model-allowlist both narrow the candidate set; pass one of them.",
+      message: "--model and --model-allowlist both narrow the candidate set; pass one of them.",
       exitCode: EXIT_CODES.usage,
     });
   }
@@ -2129,20 +2101,20 @@ async function rankDeployments(
   // strings in the engine: `glm-5.2` is an alias, and an allowlist that silently
   // matches nothing is the same failure as a price ceiling that excludes nobody.
   const allowlist = parsed.modelAllowlist?.map((reference) => {
-    const deployment = selectDeploymentByReference(catalog, reference);
-    if (deployment === undefined) {
+    const model = selectModelByReference(catalog, reference);
+    if (model === undefined) {
       throw new CliError({
-        code: "DEPLOYMENT_NOT_FOUND",
+        code: "MODEL_NOT_FOUND",
         message: `The allowlist names ${reference}, which is not in the visible Hub catalog.`,
         exitCode: EXIT_CODES.unavailable,
         details: { reference },
       });
     }
-    return deployment.id;
+    return model.id;
   });
   const constraints = {
-    ...(parsed.deployment === undefined ? {} : { deploymentIds: [parsed.deployment] }),
-    ...(allowlist === undefined ? {} : { deploymentIds: allowlist }),
+    ...(parsed.model === undefined ? {} : { modelIds: [parsed.model] }),
+    ...(allowlist === undefined ? {} : { modelIds: allowlist }),
     ...(parsed.maxPrice === undefined ? {} : { maxBlendedPricePerMillion: parsed.maxPrice }),
     ...(parsed.excludePublishers === undefined ? {} : { excludePublishers: parsed.excludePublishers }),
   };
@@ -2168,7 +2140,7 @@ async function rankDeployments(
 async function executeRecommend(parsed: ParsedArguments, dependencies: CliDependencies) {
   const requested = agentOperand(parsed, dependencies, { optional: false, command: "recommend" });
   const integration = resolveIntegration(requested!, dependencies);
-  const { result, profile, agentVersion, constraints } = await rankDeployments(parsed, dependencies, integration);
+  const { result, profile, agentVersion, constraints } = await rankModels(parsed, dependencies, integration);
 
   const eligible = result.candidates.filter((candidate) => candidate.eligible);
   const excluded = result.candidates.filter((candidate) => !candidate.eligible);
@@ -2180,14 +2152,14 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
   }
   if (eligible.length === 0) {
     warnings.push(
-      `Nothing is recommendable for ${integration.manifest.displayName} ${agentVersion} on ${result.platform}. Collect evidence with "apexnova compatibility run ${integration.manifest.id} --deployment <id>".`,
+      `Nothing is recommendable for ${integration.manifest.displayName} ${agentVersion} on ${result.platform}. Collect evidence with "apexnova compatibility run ${integration.manifest.id} --model <id>".`,
     );
   }
 
   const human = [
     `${integration.manifest.displayName} ${agentVersion} · ${profile.id} ${profile.profileVersion} · ${result.platform} · rule ${result.ruleVersion}`,
     `Catalog ${result.catalogVersion}; ${eligible.length} eligible of ${result.candidates.length} considered.`,
-    // A ranking of four Apexnova deployments reads as "the best four there are"
+    // A ranking of four Apexnova models reads as "the best four there are"
     // unless the boundary is on the page. ADR 0008 moved the second candidate
     // source to M5; until it lands, the scope is stated on every run rather
     // than left in a document.
@@ -2199,7 +2171,7 @@ async function executeRecommend(parsed: ParsedArguments, dependencies: CliDepend
     ...(eligible.length === 0 ? [result.summary] : []),
     ...eligible.flatMap((candidate) => [
       `${candidate.rank}. ${candidate.displayName}  score ${candidate.score?.toFixed(3)}  confidence ${candidate.confidence?.toFixed(2)}  ${candidate.protocol}`,
-      `     ${candidate.deploymentId}`,
+      `     ${candidate.modelId}`,
       ...(candidate.dimensions ?? []).map(
         (dimension) =>
           `     ${dimension.priority.padEnd(14)} ${dimension.score.toFixed(2)} ×${dimension.weight.toFixed(2)}  ${dimension.detail}`,
@@ -2239,7 +2211,7 @@ async function executeCompatibilitySync(
   if (operands.length > 0) {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility sync takes no operands; filter with --agent, --deployment or --protocol.",
+      message: "compatibility sync takes no operands; filter with --agent, --model or --protocol.",
       exitCode: EXIT_CODES.usage,
     });
   }
@@ -2247,7 +2219,7 @@ async function executeCompatibilitySync(
   const store = evidenceStore(dependencies);
   const records = await store.list({
     ...(parsed.agent === undefined ? {} : { agentId: parsed.agent }),
-    ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+    ...(parsed.model === undefined ? {} : { modelId: parsed.model }),
     ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
   });
   // Records written before the id form was agreed cannot be submitted: Hub
@@ -2477,7 +2449,7 @@ function planEntryDocument(entry: RefreshPlanEntry) {
 /**
  * Runs the suite against a recorded run. It costs nothing, needs no Hub and no
  * credential, and it writes no evidence: replaying a recording says what the
- * suite decides about those responses, not what a deployment does now. Evidence
+ * suite decides about those responses, not what a model does now. Evidence
  * only ever comes from a real run.
  */
 async function executeCompatibilityReplay(
@@ -2511,7 +2483,7 @@ async function executeCompatibilityReplay(
     endpoint: recording.endpoint,
     protocol: recording.protocol,
     model: recording.model,
-    deploymentId: recording.deploymentId,
+    modelId: recording.modelId,
     credential: SecretValue.from(REPLAY_CREDENTIAL),
     fetch: createReplayFetch(recording),
   });
@@ -2523,18 +2495,18 @@ async function executeCompatibilityReplay(
       recordedAt: recording.recordedAt,
       recordingSuite: recording.suite,
       suite: result.suite,
-      deploymentId: recording.deploymentId,
+      modelId: recording.modelId,
       protocol: recording.protocol,
       outcomes: result.outcomes,
     },
     warnings: [
-      "A replay is not evidence: it reports what the suite decides about recorded responses, not what the deployment does now.",
+      "A replay is not evidence: it reports what the suite decides about recorded responses, not what the model does now.",
       ...(recording.suite.version === result.suite.version
         ? []
         : [`The recording came from suite ${recording.suite.version}; this build runs ${result.suite.version}.`]),
     ],
     human: [
-      `Replay of ${recording.deploymentId} · ${recording.protocol} recorded ${recording.recordedAt}: ${supported}/${result.outcomes.length} supported`,
+      `Replay of ${recording.modelId} · ${recording.protocol} recorded ${recording.recordedAt}: ${supported}/${result.outcomes.length} supported`,
       ...result.outcomes.map(
         (outcome) => `  ${outcome.capabilityId.padEnd(26)} ${outcome.support.padEnd(11)} ${outcome.detail}`,
       ),
@@ -2549,7 +2521,7 @@ async function executeCompatibilityReplay(
  * command existed the explanation lived only in JSON lines.
  *
  * Attributions are shown under the selection they belong to, because the three
- * questions a route has to answer -- which Deployment, on what grounds, and who
+ * questions a route has to answer -- which Model, on what grounds, and who
  * actually paid -- are answered by the pair and not by either alone.
  */
 async function executeAudit(parsed: ParsedArguments, dependencies: CliDependencies) {
@@ -2590,7 +2562,7 @@ async function executeAudit(parsed: ParsedArguments, dependencies: CliDependenci
           return [
             entry.event === "released"
               ? `${entry.recordedAt}  ${entry.agentId}  released${entry.command ? ` by ${entry.command}` : ""}`
-              : `${entry.recordedAt}  ${entry.agentId}  ${entry.deploymentId}`,
+              : `${entry.recordedAt}  ${entry.agentId}  ${entry.modelId}`,
             ...(entry.event === "released"
               ? []
               : [
@@ -2658,13 +2630,13 @@ async function executeCompatibilityMatrix(
   if (operands.length > 0) {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "compatibility matrix takes no operands; filter with --agent, --deployment or --protocol.",
+      message: "compatibility matrix takes no operands; filter with --agent, --model or --protocol.",
       exitCode: EXIT_CODES.usage,
     });
   }
   const evidence = await evidenceStore(dependencies).list({
     ...(parsed.agent === undefined ? {} : { agentId: parsed.agent }),
-    ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+    ...(parsed.model === undefined ? {} : { modelId: parsed.model }),
     ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
   });
   const matrix = buildCompatibilityMatrix({ evidence, now: new Date(currentTime(dependencies)) });
@@ -2730,7 +2702,7 @@ async function executeCompatibility(parsed: ParsedArguments, dependencies: CliDe
   for (const integration of targets) {
     const records = await store.list({
       agentId: integration.manifest.id,
-      ...(parsed.deployment === undefined ? {} : { deploymentId: parsed.deployment }),
+      ...(parsed.model === undefined ? {} : { modelId: parsed.model }),
       ...(parsed.protocol === undefined ? {} : { protocol: parsed.protocol }),
     });
     const lookup = await installedVersionOf(parsed, dependencies, integration);
@@ -2970,12 +2942,61 @@ async function executeInspect(
 interface AgentPlanResult {
   readonly integration: AgentIntegration;
   readonly plan: ChangePlan;
-  readonly deployment: HubCatalogDeployment;
+  readonly model: HubCatalogModel;
   readonly protocol: string;
   readonly catalogVersion: string;
-  /** The ranking that chose this Deployment, when `--best` did the choosing. */
+  /** The ranking that chose this Model, when `--best` did the choosing. */
   readonly recommendationId?: string;
   readonly recommendationReasons?: readonly string[];
+}
+
+interface BestModel {
+  readonly model: HubCatalogModel;
+  readonly recommendationId: string;
+  readonly reasons: readonly string[];
+}
+
+/**
+ * Runs the ranking for `--best` and reports what it chose and why.
+ *
+ * The ranking runs here rather than accepting a Recommendation id from the
+ * command line. A cited id would be a claim this command cannot check --
+ * rankings are not stored, so nothing could confirm that the id really ranked
+ * this Model -- and an audit entry whose grounds nobody verified is worse
+ * than none. Running it makes the link by construction.
+ *
+ * `connect` and `switch` both take `--best`, and a ranking that explained itself
+ * differently depending on which one asked would not be one explanation.
+ */
+async function chooseBestModel(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  integration: AgentIntegration,
+  catalog: HubCatalogSnapshot,
+): Promise<BestModel> {
+  const ranked = await rankModels(parsed, dependencies, integration, catalog);
+  const chosen = ranked.result.candidates.find((candidate) => candidate.eligible);
+  if (chosen === undefined) {
+    throw new CliError({
+      code: "NO_ELIGIBLE_DEPLOYMENT",
+      message: `Nothing is recommendable for ${integration.manifest.displayName} on ${ranked.result.platform}: ${ranked.result.summary}`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+  return {
+    model: catalog.models.find((item) => item.id === chosen.modelId)!,
+    recommendationId: recommendationRecord(ranked.result, ranked.constraints).id,
+    // The dimensions and their weights, not the candidate's caveats: the
+    // question this answers is why this Model ranked first, and a note
+    // about a preferred capability falling short does not answer it.
+    reasons: [
+      `Chosen by ${ranked.profile.id} ${ranked.profile.profileVersion} (rule ${ranked.result.ruleVersion}), score ${chosen.score?.toFixed(3)} of ${ranked.result.candidates.filter((candidate) => candidate.eligible).length} eligible`,
+      ...(chosen.dimensions ?? []).map(
+        (dimension) => `  ${dimension.priority.padEnd(14)} ${dimension.score.toFixed(2)} ×${dimension.weight.toFixed(2)}  ${dimension.detail}`,
+      ),
+      ...ranked.result.unmeasured.map((entry) => `  not measured — ${entry.priority}`),
+    ],
+  };
 }
 
 async function createAgentPlan(
@@ -2983,17 +3004,17 @@ async function createAgentPlan(
   dependencies: CliDependencies,
 ): Promise<AgentPlanResult> {
   const integration = requireIntegration(parsed, dependencies, parsed.command ?? "connect");
-  if (parsed.best && parsed.deployment) {
+  if (parsed.best && parsed.model) {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: "--best and --deployment both choose the Deployment; pass one of them.",
+      message: "--best and --model both choose the Model; pass one of them.",
       exitCode: EXIT_CODES.usage,
     });
   }
-  if (!parsed.deployment && !parsed.best) {
+  if (!parsed.model && !parsed.best) {
     throw new CliError({
       code: "INVALID_ARGUMENT",
-      message: `${parsed.command ?? "connect"} requires --deployment <id>, or --best to take the top of the ranking.`,
+      message: `${parsed.command ?? "connect"} requires --model <id>, or --best to take the top of the ranking.`,
       exitCode: EXIT_CODES.usage,
     });
   }
@@ -3006,49 +3027,19 @@ async function createAgentPlan(
   rejectUnusableConfig(inspection, integration);
 
   const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
-  // `--best` runs the ranking here rather than accepting a Recommendation id
-  // from the command line. A cited id would be a claim this command cannot
-  // check -- rankings are not stored, so nothing could confirm that the id
-  // really ranked this Deployment -- and an audit entry whose grounds nobody
-  // verified is worse than none. Running it makes the link by construction.
-  const ranked = parsed.best ? await rankDeployments(parsed, dependencies, integration, catalog) : undefined;
-  const chosen = ranked?.result.candidates.find((candidate) => candidate.eligible);
-  if (ranked && chosen === undefined) {
-    throw new CliError({
-      code: "NO_ELIGIBLE_DEPLOYMENT",
-      message: `Nothing is recommendable for ${integration.manifest.displayName} on ${ranked.result.platform}: ${ranked.result.summary}`,
-      exitCode: EXIT_CODES.unavailable,
-    });
-  }
-  const record = ranked ? recommendationRecord(ranked.result, ranked.constraints) : undefined;
-  // --deployment is required above, so this takes the explicit branch and the
+  const best = parsed.best ? await chooseBestModel(parsed, dependencies, integration, catalog) : undefined;
+  // --model is required above, so this takes the explicit branch and the
   // reference is resolved the one way, rather than a second copy of the rules.
-  const deployment = chosen
-    ? catalog.deployments.find((item) => item.id === chosen.deploymentId)!
-    : await resolveDeployment(parsed, dependencies, integration, catalog);
-  const protocol = selectProtocol(deployment, integration, parsed.protocol);
-  const intent = connectionIntent(parsed, dependencies, integration, [deployment], protocol, catalog);
+  const model = best?.model ?? await resolveModel(parsed, dependencies, integration, catalog);
+  const protocol = selectProtocol(model, integration, parsed.protocol);
+  const intent = connectionIntent(parsed, dependencies, integration, [model], protocol, catalog);
   const plan = await integration.plan(context, detection, inspection, intent);
 
   return {
     integration,
     plan,
-    ...(record === undefined ? {} : { recommendationId: record.id }),
-    ...(chosen === undefined || ranked === undefined
-      ? {}
-      : {
-          // The dimensions and their weights, not the candidate's caveats: the
-          // question this answers is why this Deployment ranked first, and a
-          // note about a preferred capability falling short does not answer it.
-          recommendationReasons: [
-            `Chosen by ${ranked.profile.id} ${ranked.profile.profileVersion} (rule ${ranked.result.ruleVersion}), score ${chosen.score?.toFixed(3)} of ${ranked.result.candidates.filter((candidate) => candidate.eligible).length} eligible`,
-            ...(chosen.dimensions ?? []).map(
-              (dimension) => `  ${dimension.priority.padEnd(14)} ${dimension.score.toFixed(2)} ×${dimension.weight.toFixed(2)}  ${dimension.detail}`,
-            ),
-            ...ranked.result.unmeasured.map((entry) => `  not measured — ${entry.priority}`),
-          ],
-        }),
-    deployment,
+    ...(best === undefined ? {} : { recommendationId: best.recommendationId, recommendationReasons: best.reasons }),
+    model,
     protocol: protocol.protocol,
     catalogVersion: catalog.catalogVersion,
   };
@@ -3060,12 +3051,12 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
   if (parsed.dryRun) {
     const warnings = [...preview.plan.warnings, "Dry-run performed no local writes and created no runtime credential."];
     return {
-      data: { dryRun: true, agentId: preview.integration.manifest.id, catalogVersion: preview.catalogVersion, deploymentId: preview.deployment.id, protocol: preview.protocol, plan },
+      data: { dryRun: true, agentId: preview.integration.manifest.id, catalogVersion: preview.catalogVersion, modelId: preview.model.id, protocol: preview.protocol, plan },
       warnings,
       human: [
         `Plan: ${plan.id}`,
         `Agent: ${preview.integration.manifest.displayName}`,
-          `Deployment: ${preview.deployment.id}`,
+          `Model: ${preview.model.id}`,
         ...(preview.recommendationReasons ?? []).map((reason) => `  ${reason}`),
         `Protocol: ${preview.protocol}`,
         `Operations: ${plan.operations.length}`,
@@ -3084,15 +3075,15 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
   }
 
   const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
-  const deployment = catalog.deployments.find((item) => item.id === preview.deployment.id) ?? preview.deployment;
-  const protocol = selectProtocol(deployment, preview.integration, parsed.protocol);
+  const model = catalog.models.find((item) => item.id === preview.model.id) ?? preview.model;
+  const protocol = selectProtocol(model, preview.integration, parsed.protocol);
   const result = await configureAgent(
     parsed,
     dependencies,
     preview.integration,
     // `connect` configures one target it already showed in --dry-run, and its
     // runtime credential is replaced on every run, so nothing is carried over.
-    [deployment],
+    [model],
     protocol,
     catalog,
     "runtime",
@@ -3106,7 +3097,7 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
       connected: true,
       agentId: preview.integration.manifest.id,
       profile: parsed.profile,
-      deploymentId: deployment.id,
+      modelId: model.id,
       protocol: protocol.protocol,
       credentialId: result.binding.credentialId,
       credentialExpiresAt: result.binding.expiresAt,
@@ -3115,12 +3106,12 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
     },
     warnings: result.warnings,
     human: [
-      `Connected ${preview.integration.manifest.displayName} to ${deployment.displayName}.`,
-      // The exit condition is that the user can always see the real Deployment
+      `Connected ${preview.integration.manifest.displayName} to ${model.displayName}.`,
+      // The exit condition is that the user can always see the real Model
       // and the real billing subject. The display name is neither: it does not
-      // identify the deployment, and it says nothing about which credential the
+      // identify the model, and it says nothing about which credential the
       // charges will land on.
-      `Deployment: ${deployment.id}`,
+      `Model: ${model.id}`,
       // `--best` chose it, so the reasons travel with the outcome: a ranking
       // that is only visible in a different command is not an explanation of
       // this one.
@@ -3130,6 +3121,210 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
       `Launch with: apexnova run ${preview.integration.manifest.id}`,
     ].join("\n"),
   };
+}
+
+/**
+ * Changes which model an Agent opens on.
+ *
+ * `switch` is the everyday, free operation: the chosen model joins the set the
+ * profile's permanent key already covers and becomes the default, and the key
+ * itself does not change (ADR 0037 §5). `connect` is the other command -- it
+ * establishes the binding and issues the credential.
+ *
+ * Through v0.6 the word named two different operations depending on how the user
+ * reached it. `apexnova switch` was a second spelling of `connect`, replacing the
+ * binding with a fresh runtime credential, while the picker that actually did
+ * what the docs called switching lived inside `apexnova models` -- so which
+ * models stayed configured, and whether the key survived, depended on which
+ * command you happened to type. There is now one switch, and it is this one.
+ */
+async function executeSwitch(parsed: ParsedArguments, dependencies: CliDependencies) {
+  const integration = requireIntegration(parsed, dependencies, "switch");
+  if (parsed.best && parsed.model) {
+    throw new CliError({
+      code: "INVALID_ARGUMENT",
+      message: "--best and --model both choose the Model; pass one of them.",
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  const context = integrationContext(parsed, dependencies);
+  const detection = requireAvailable(
+    await detectForCommand(parsed, dependencies, integration),
+    integration,
+  );
+  const inspection = await integration.inspect(context, detection);
+  rejectUnusableConfig(inspection, integration);
+
+  const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
+  const previous = await new RuntimeBindingStore(credentialStore(dependencies))
+    .load(integration.manifest.id, parsed.profile)
+    .catch(() => null);
+  const configuredBefore = new Set(previous ? bindingModelIds(previous) : []);
+
+  // An explicit target is a decision that was made before the command ran, so it
+  // is approved the way `connect` is. A target picked from the list was chosen in
+  // front of the user a moment ago -- the pick is the approval, and asking for
+  // --yes afterwards would be putting the same question twice.
+  const explicit = parsed.model !== undefined || parsed.best;
+  const best = parsed.best ? await chooseBestModel(parsed, dependencies, integration, catalog) : undefined;
+  const selected = best?.model
+    ?? (parsed.model
+      ? requireReferencedModel(catalog, parsed.model)
+      : await pickSwitchTarget(parsed, dependencies, integration, catalog, configuredBefore));
+
+  const protocol = selectProtocol(selected, integration, parsed.protocol);
+  // The same computation the write performs. A plan that listed a different
+  // model set from the one applying it produces would be the specific failure
+  // `--dry-run` exists to rule out.
+  const { models, dropped } = modelsAfterSwitch(
+    bindingThatSurvives(previous, protocol),
+    [selected],
+    protocol,
+    catalog,
+  );
+  const added = !configuredBefore.has(selected.id);
+
+  if (parsed.dryRun) {
+    const intent = connectionIntent(parsed, dependencies, integration, models, protocol, catalog);
+    const plan = agentPlanSummary(await integration.plan(context, detection, inspection, intent));
+    return {
+      data: {
+        dryRun: true,
+        agentId: integration.manifest.id,
+        catalogVersion: catalog.catalogVersion,
+        modelId: selected.id,
+        modelIds: models.map((item) => item.id),
+        addedToConfiguration: added,
+        protocol: protocol.protocol,
+        plan,
+      },
+      warnings: [...plan.warnings, "Dry-run performed no local writes and issued no credential."],
+      human: [
+        `Plan: ${plan.id}`,
+        `Agent: ${integration.manifest.displayName}`,
+        `${added ? "Adds" : "Switches to"} ${selected.displayName} (${selected.inferenceAlias}) as the default model.`,
+        `Model: ${selected.id}`,
+        ...(best?.reasons ?? []).map((reason) => `  ${reason}`),
+        `Protocol: ${protocol.protocol}`,
+        `Models after the switch: ${models.map((item) => item.id).join(", ")}`,
+        ...(previous?.kind === "user" ? [`Key ${previous.credentialId} is widened, not replaced.`] : []),
+        ...dropped.map((id) => `  ${id} is no longer available on this endpoint and would be removed.`),
+        `Operations: ${plan.operations.length}`,
+        ...plan.operations.map((operation) => `${operation.mode} ${operation.path} (${operation.contentBytes} bytes)`),
+        "No changes were applied.",
+      ].join("\n"),
+    };
+  }
+  if (explicit && !parsed.yes) {
+    const io = dependencies.io ?? defaultIo();
+    if (!io.isInteractive || parsed.nonInteractive || parsed.json) {
+      throw new CliError({
+        code: "APPROVAL_REQUIRED",
+        message: "switch requires --yes after reviewing switch --dry-run.",
+        exitCode: EXIT_CODES.permission,
+        details: { modelId: selected.id, modelIds: models.map((item) => item.id) },
+      });
+    }
+    // A target named on the command line was not chosen in front of anyone, so
+    // this is where it gets shown before it is applied -- including the models
+    // that stay and the key that does not change, which is the part a reader of
+    // `--model` alone has no way to know. `--yes` answers this in advance;
+    // a terminal that cannot be asked is refused above rather than assumed.
+    io.stdout([
+      `${added ? "Add" : "Switch to"} ${selected.displayName} (${selected.inferenceAlias}) as the default model for ${integration.manifest.displayName}?`,
+      `  Model:    ${selected.id}`,
+      `  Protocol: ${protocol.protocol}`,
+      `  Models after the switch: ${models.map((item) => item.id).join(", ")}`,
+      ...(previous?.kind === "user" ? [`  Key ${previous.credentialId} is widened, not replaced.`] : []),
+      ...dropped.map((id) => `  ${id} is no longer available on this endpoint and will be removed.`),
+      "",
+    ].join("\n"));
+    if (!await resolveConfirm(dependencies)("Apply this switch?")) {
+      throw new CliError({
+        code: "APPROVAL_REQUIRED",
+        message: "Nothing was changed.",
+        exitCode: EXIT_CODES.permission,
+        details: { modelId: selected.id },
+      });
+    }
+  }
+
+  // "auto", not "runtime": switching runs on the key the profile already has.
+  const result = await configureAgent(
+    parsed,
+    dependencies,
+    integration,
+    [selected],
+    protocol,
+    catalog,
+    "auto",
+    best === undefined ? undefined : { grounds: "recommendation", recommendationId: best.recommendationId },
+  );
+  const configured = bindingModelIds(result.binding);
+  return {
+    data: {
+      switchedTo: selected.id,
+      modelIds: configured,
+      addedToConfiguration: added,
+      agentId: integration.manifest.id,
+      profile: parsed.profile,
+      protocol: protocol.protocol,
+      credentialId: result.binding.credentialId,
+      credentialKind: result.binding.kind ?? "runtime",
+      ...(result.transactionId ? { transactionId: result.transactionId } : {}),
+      plan: agentPlanSummary(result.plan),
+    },
+    warnings: result.warnings,
+    human: [
+      `${added ? "Added" : "Switched to"} ${selected.displayName} (${selected.inferenceAlias}); it is now the default model.`,
+      ...(best?.reasons ?? []).map((reason) => `  ${reason}`),
+      ...(configured.length > 1
+        ? [`${configured.length} models stay configured on key ${result.binding.credentialId}: ${configured.join(", ")}.`]
+        : []),
+      `Run "apexnova run ${integration.manifest.id}" to use it.`,
+    ].join("\n"),
+  };
+}
+
+/**
+ * The model list `switch` offers when no target was named.
+ *
+ * Models already in the configuration are marked rather than hidden: picking one
+ * of them is the "make this the default again" case, and a list that dropped
+ * them would make the Agent's own picker and this one disagree about what the
+ * profile can reach.
+ */
+async function pickSwitchTarget(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  integration: AgentIntegration,
+  catalog: HubCatalogSnapshot,
+  configured: ReadonlySet<string>,
+): Promise<HubCatalogModel> {
+  const candidates = compatibleModels(integration, catalog)
+    .filter((model) => !parsed.protocol || model.protocols.some((item) => item.protocol === parsed.protocol));
+  if (candidates.length === 0) {
+    throw new CliError({
+      code: "MODEL_NOT_FOUND",
+      message: `No model ${integration.manifest.displayName} can use is available.`,
+      exitCode: EXIT_CODES.unavailable,
+    });
+  }
+  const io = dependencies.io ?? defaultIo();
+  if (!io.isInteractive || parsed.nonInteractive || parsed.json) {
+    throw new CliError({
+      code: "MODEL_REQUIRED",
+      message: "switch needs --model <id>, or --best, on a non-interactive terminal. Run `apexnova models --json` to list them.",
+      exitCode: EXIT_CODES.usage,
+      details: { compatibleModelIds: candidates.map((model) => model.id) },
+    });
+  }
+  const items: CliPickerItem<HubCatalogModel>[] = candidates.map((model) => ({
+    label: `${model.displayName} (${model.inferenceAlias})`,
+    description: `${model.publisherName ?? model.publisher ?? model.modelType ?? "model"} · ${model.availability.status}${configured.has(model.id) ? " · configured" : ""}`,
+    value: model,
+  }));
+  return resolvePicker(dependencies)("Select a model to switch to (Esc to cancel):", items);
 }
 
 /**
@@ -3173,14 +3368,14 @@ async function usageByKey(
     const entry = byKey.get(key) ?? { requests: 0, detail: new Set<string>() };
     entry.requests += item.requestCount;
     if (item.apiKeyName !== undefined) entry.name = item.apiKeyName;
-    entry.detail.add(`${item.resolvedModel ?? item.requestedModel ?? "unknown model"} on ${item.publicDeploymentId ?? "unknown deployment"}`);
+    entry.detail.add(`${item.resolvedModel ?? item.requestedModel ?? "unknown model"} on ${item.modelId ?? "unknown model"}`);
     byKey.set(key, entry);
   }
   return byKey;
 }
 
 /**
- * The launcher exists to make the Agent talk to the Deployment we configured on
+ * The launcher exists to make the Agent talk to the Model we configured on
  * the credential we issued. On 2026-09-11 it did neither and reported success:
  * OpenCode answered from a different model through a pre-existing long-lived
  * key, while every command printed success and the freshly minted credential
@@ -3221,7 +3416,7 @@ function attributeLaunch(
 function gatewayBilledTo(
   forwarded: readonly ForwardedRequest[],
   binding: RuntimeCredentialBinding,
-): { apiKeyId: string; deploymentId: string; requestCount: number }[] {
+): { apiKeyId: string; modelId: string; requestCount: number }[] {
   const counts = new Map<string, number>();
   for (const request of forwarded) {
     const apiKeyId = request.credentialId ?? binding.credentialId;
@@ -3229,7 +3424,7 @@ function gatewayBilledTo(
   }
   return [...counts].map(([apiKeyId, requestCount]) => ({
     apiKeyId,
-    deploymentId: binding.deploymentId,
+    modelId: binding.modelId,
     requestCount,
   }));
 }
@@ -3322,18 +3517,18 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   // `parsed.gateway`, not the variable below: that one is assigned inside this
   // branch, so reading it here left `--gateway` silently doing nothing whenever
   // a binding already existed -- the run went direct and said nothing.
-  const needConfig = !existing || parsed.deployment !== undefined || parsed.gateway;
+  const needConfig = !existing || parsed.model !== undefined || parsed.gateway;
   let binding = existing;
   let selectionEntryId: string | undefined;
   let gatewayTransactionId: string | undefined;
   const configureWarnings: string[] = [];
   if (needConfig) {
     const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
-    const deployments = await resolveDeployments(parsed, dependencies, integration, catalog, {
-      ...(existing ? { alreadyBound: bindingDeploymentIds(existing) } : {}),
+    const models = await resolveModels(parsed, dependencies, integration, catalog, {
+      ...(existing ? { alreadyBound: bindingModelIds(existing) } : {}),
     });
-    const deployment = deployments[0]!;
-    const protocol = selectSharedProtocol(deployments, integration);
+    const model = models[0]!;
+    const protocol = selectSharedProtocol(models, integration);
     if (parsed.gateway) {
       // Started here, once the endpoint this run will actually use is known --
       // taking whichever endpoint the catalog happened to list first would
@@ -3363,7 +3558,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     // never gets there, a permanent key outlives the failure and a 24-hour one
     // does not.
     const result = await configureAgent(
-      parsed, dependencies, integration, deployments, target, catalog,
+      parsed, dependencies, integration, models, target, catalog,
       gateway ? "runtime" : "auto", undefined, gateway !== undefined,
     );
     binding = result.binding;
@@ -3374,11 +3569,11 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     if (!parsed.json) {
       // The whole set, because that is what the Agent's own model picker will
       // offer, and the one it starts on is named as such.
-      const configured = bindingDeploymentIds(result.binding).length;
+      const configured = bindingModelIds(result.binding).length;
       io.stderr(
         configured > 1
-          ? `Configured ${integration.manifest.displayName} with ${configured} models on one key; it starts on ${deployment.displayName} (${deployment.inferenceAlias}) and switches inside ${integration.manifest.displayName}.\n`
-          : `Configured ${integration.manifest.displayName} with ${deployment.displayName} (${deployment.inferenceAlias}).\n`,
+          ? `Configured ${integration.manifest.displayName} with ${configured} models on one key; it starts on ${model.displayName} (${model.inferenceAlias}) and switches inside ${integration.manifest.displayName}.\n`
+          : `Configured ${integration.manifest.displayName} with ${model.displayName} (${model.inferenceAlias}).\n`,
       );
     }
   }
@@ -3501,7 +3696,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
 
   // A launch that reused an existing binding made no selection of its own, so
   // the attribution points at the decision that is still in force.
-  selectionEntryId ??= await selectionInForce(dependencies, agentId, parsed.profile, binding.deploymentId);
+  selectionEntryId ??= await selectionInForce(dependencies, agentId, parsed.profile, binding.modelId);
 
   // What a route cost is a second event, not an amendment to the first: it is
   // not known when the target is chosen, and rewriting the decision would lose
@@ -3519,7 +3714,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
           integrationId: integration.manifest.id,
           profile: parsed.profile,
           command: "run",
-          deploymentId: binding.deploymentId,
+          modelId: binding.modelId,
           credentialId: binding.credentialId,
           ...(selectionEntryId === undefined ? {} : { selectionId: selectionEntryId }),
           attribution: {
@@ -3551,7 +3746,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     }
   } else if (attribution !== undefined) {
     const billedTo = [
-      ...(attribution.ours > 0 ? [{ apiKeyId: binding.credentialId, deploymentId: binding.deploymentId, requestCount: attribution.ours }] : []),
+      ...(attribution.ours > 0 ? [{ apiKeyId: binding.credentialId, modelId: binding.modelId, requestCount: attribution.ours }] : []),
       ...attribution.others.map((entry) => ({ apiKeyId: entry.key, requestCount: entry.requests })),
     ];
     const status = attribution.ours === 0 && attribution.others.length > 0
@@ -3567,7 +3762,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
           integrationId: integration.manifest.id,
           profile: parsed.profile,
           command: "run",
-          deploymentId: binding.deploymentId,
+          modelId: binding.modelId,
           credentialId: binding.credentialId,
           ...(selectionEntryId === undefined ? {} : { selectionId: selectionEntryId }),
           attribution: {
@@ -3595,7 +3790,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
       details: {
         agentId,
         expectedCredentialId: binding.credentialId,
-        expectedDeploymentId: binding.deploymentId,
+        expectedModelId: binding.modelId,
         served: attribution.others,
       },
     });
@@ -3608,14 +3803,14 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   // Only for a direct run: a gateway run knows exactly what it forwarded, so
   // reporting the ledger's silence would describe a computation it did not do.
   if (gateway === undefined && attribution && attribution.ours === 0 && attribution.others.length === 0) {
-    launchWarnings.push("The ledger shows no settled requests for this run yet, so its Deployment and billing subject were not confirmed.");
+    launchWarnings.push("The ledger shows no settled requests for this run yet, so its Model and billing subject were not confirmed.");
   }
 
   return {
     data: {
       agentId,
       profile: parsed.profile,
-      deploymentId: binding.deploymentId,
+      modelId: binding.modelId,
       credentialKind: binding.kind ?? "runtime",
       credentialExpiresAt: binding.expiresAt,
       credentialRotated: runtime.rotated,
@@ -3629,9 +3824,9 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
       ...(gateway
         ? [forwarded.length === 0
             ? `The local gateway forwarded no requests; this run made none.`
-            : `${forwarded.length} request${forwarded.length === 1 ? "" : "s"} forwarded through the local gateway to ${binding.deploymentId}, each one named.`]
+            : `${forwarded.length} request${forwarded.length === 1 ? "" : "s"} forwarded through the local gateway to ${binding.modelId}, each one named.`]
         : attribution && attribution.ours > 0
-          ? [`${attribution.ours} request${attribution.ours === 1 ? "" : "s"} billed to this launcher's credential on ${binding.deploymentId}.`]
+          ? [`${attribution.ours} request${attribution.ours === 1 ? "" : "s"} billed to this launcher's credential on ${binding.modelId}.`]
           : []),
       // Human mode prints `human` and nothing else.
       ...launchWarnings,
@@ -3728,12 +3923,12 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   const bindingProtocol = binding.protocol;
   const service = hubService(parsed, dependencies);
   const catalog = await service.catalog(parsed.profile, operationSignal(parsed));
-  const deployment = catalog.deployments.find((item) => item.id === binding.deploymentId);
-  const protocol = deployment?.protocols.find((item) => item.protocol === binding.protocol);
-  if (!deployment || !protocol || !inspection.connection?.modelIds.includes(deployment.inferenceAlias)) {
+  const model = catalog.models.find((item) => item.id === binding.modelId);
+  const protocol = model?.protocols.find((item) => item.protocol === binding.protocol);
+  if (!model || !protocol || !inspection.connection?.modelIds.includes(model.inferenceAlias)) {
     throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential no longer matches the visible catalog and the Agent configuration.", exitCode: EXIT_CODES.verification });
   }
-  const estimate = await service.estimatePricing(parsed.profile, deployment.id, LIVE_VERIFY_ESTIMATE_USAGE, operationSignal(parsed));
+  const estimate = await service.estimatePricing(parsed.profile, model.id, LIVE_VERIFY_ESTIMATE_USAGE, operationSignal(parsed));
   if (!parsed.yes) {
     throw new CliError({
       code: "APPROVAL_REQUIRED",
@@ -3746,8 +3941,8 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   const inference = await withRetry(() => (dependencies.verifyHubInference ?? verifyHubInference)({
     endpoint: protocol.baseUrl,
     protocol: bindingProtocol,
-    model: deployment.inferenceAlias,
-    deploymentId: deployment.id,
+    model: model.inferenceAlias,
+    modelId: model.id,
     runtimeCredential: binding.secret,
     requestTimeoutMs: parsed.timeoutSeconds * 1_000,
     allowInsecureLoopback: environment.APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK === "1",
@@ -3769,7 +3964,7 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
   // which key paid for it. A settlement that has not landed is `unconfirmed`,
   // never a confirmed zero.
   const auditWarnings: string[] = [];
-  const selectionInForceId = await selectionInForce(dependencies, integration.manifest.id, parsed.profile, deployment.id);
+  const selectionInForceId = await selectionInForce(dependencies, integration.manifest.id, parsed.profile, model.id);
   try {
     const billedKey = usage?.apiKeyId;
     const status = billedKey === undefined
@@ -3784,7 +3979,7 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
         integrationId: integration.manifest.id,
         profile: parsed.profile,
         command: "verify",
-        deploymentId: deployment.id,
+        modelId: model.id,
         credentialId: binding.credentialId,
         ...(selectionInForceId === undefined ? {} : { selectionId: selectionInForceId }),
         attribution: {
@@ -3798,7 +3993,7 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
                 billedTo: [{
                   apiKeyId: billedKey,
                   ...(usage?.apiKeyName ? { apiKeyName: usage.apiKeyName } : {}),
-                  deploymentId: deployment.id,
+                  modelId: model.id,
                   ...(inference.resolvedModel ? { resolvedModel: inference.resolvedModel } : {}),
                   requestCount: 1,
                 }],
@@ -3824,7 +4019,7 @@ async function executeVerify(parsed: ParsedArguments, dependencies: CliDependenc
     warnings: [...(usageWarning ? [usageWarning] : []), ...auditWarnings] as readonly string[],
     human: [
       `${integration.manifest.displayName} live verification passed for ${inference.requestedModel}.`,
-      `Deployment: ${inference.deploymentId}`,
+      `Model: ${inference.modelId}`,
       `Resolved model: ${inference.resolvedModel}`,
       `Request: ${inference.requestId}`,
       billedLine,
@@ -4152,7 +4347,7 @@ export async function runCli(
         result = await executeConnect(parsed, dependencies);
         break;
       case "switch":
-        result = await executeConnect(parsed, dependencies);
+        result = await executeSwitch(parsed, dependencies);
         break;
       case "verify":
         result = await executeVerify(parsed, dependencies);

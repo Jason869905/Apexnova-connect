@@ -15,14 +15,14 @@ apexnova run codex
 首次运行会让你选模型、创建 key、写配置并启动 Codex。之后直接启动。
 
 ```bash
-apexnova run codex --deployment deployment.apexnova.xxx   # 指定模型
+apexnova run codex --model deployment.apexnova.xxx   # 指定模型
 apexnova run codex --rotating                             # 用 24h 短期凭据
 apexnova run codex -- --help                              # -- 之后透传给 Codex
 ```
 
 ## 只支持 Responses API
 
-Codex 现在只接受 `wire_api = "responses"`，因此本集成**只声明 `openai-responses`**。只暴露 `openai-chat` 的 deployment 在 Codex 上不可用：
+Codex 现在只接受 `wire_api = "responses"`，因此本集成**只声明 `openai-responses`**。只暴露 `openai-chat` 的 model 在 Codex 上不可用：
 
 ```
 Error [PROTOCOL_NOT_SUPPORTED]: Codex only speaks the Responses API and cannot consume openai-chat-completions.
@@ -37,7 +37,7 @@ Error [PROTOCOL_NOT_SUPPORTED]: Codex only speaks the Responses API and cannot c
 只写三处，其余内容（注释、其他 provider、profile、审批策略）逐字保留：
 
 ```toml
-model = "<deployment inferenceAlias>"
+model = "<model inferenceAlias>"
 model_provider = "apexnova"
 
 [model_providers.apexnova]
@@ -54,7 +54,7 @@ wire_api = "responses"
 先看看会改什么：
 
 ```bash
-apexnova connect codex --deployment deployment.apexnova.xxx --dry-run
+apexnova connect codex --model deployment.apexnova.xxx --dry-run
 ```
 
 ## 已知限制
@@ -70,7 +70,7 @@ apexnova connect codex --deployment deployment.apexnova.xxx --dry-run
 
 - **需要重启 Codex。** 配置在启动时读取。
 - **直接运行 `codex` 不会带上凭据。** 凭据只在 `apexnova run codex` 启动的进程环境里。
-- **会改动你的默认模型。** `model` 是根表的键，连接会把它换成绑定的 deployment；`restore` 会原样改回去。
+- **会改动你的默认模型。** `model` 是根表的键，连接会把它换成绑定的 model；`restore` 会原样改回去。
 
 ## 恢复
 
@@ -86,7 +86,7 @@ apexnova restore <transaction-id> --yes
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `PROTOCOL_NOT_SUPPORTED` | 该 deployment 只有 `openai-chat` | 换一个暴露 `openai-responses` 的 |
+| `PROTOCOL_NOT_SUPPORTED` | 该 model 只有 `openai-chat` | 换一个暴露 `openai-responses` 的 |
 | `UNSUPPORTED_LAYOUT` | `model_providers.apexnova` 用了无法安全编辑的写法 | 改成 `[model_providers.apexnova]` 表或删掉 |
 | `INVALID_CONFIG` | `config.toml` 不是合法 TOML | 修复语法；报错只给位置，不回显文件内容 |
 | `AGENT_NOT_FOUND`（启动时） | Windows 上 PATH 里没有原生 `codex.exe` | 确认安装方式，npm 的 `.cmd` shim 无法直接 spawn |

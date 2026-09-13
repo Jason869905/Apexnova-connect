@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { checkbox, select } from "@inquirer/prompts";
+import { checkbox, confirm, select } from "@inquirer/prompts";
 
 import {
   toPlatform,
@@ -91,6 +91,8 @@ export interface CliDependencies {
   readonly pick?: <T>(message: string, items: readonly CliPickerItem<T>[]) => Promise<T>;
   /** Picks one or more items. Returns them in the order the list offered them. */
   readonly pickMany?: <T>(message: string, items: readonly CliMultiPickerItem<T>[]) => Promise<readonly T[]>;
+  /** Asks the operator to approve an action described above the prompt. */
+  readonly confirm?: (message: string) => Promise<boolean>;
 }
 
 export interface CliRunResult {
@@ -113,10 +115,10 @@ export interface ParsedArguments {
   readonly agent?: string;
   readonly protocol?: string;
   readonly compatibleOnly: boolean;
-  /** The default deployment: the first `--deployment`. */
-  readonly deployment?: string;
-  /** Every `--deployment`, in the order given. Absent when none was passed. */
-  readonly deployments?: readonly string[];
+  /** The default model: the first `--model`. */
+  readonly model?: string;
+  /** Every `--model`, in the order given. Absent when none was passed. */
+  readonly models?: readonly string[];
   readonly dryRun: boolean;
   readonly list: boolean;
   readonly live: boolean;
@@ -145,8 +147,8 @@ export interface ParsedArguments {
   readonly reason?: string;
   readonly requestId?: string;
   readonly scenarioId?: string;
-  /** Deployment references (id, alias or inference alias) the ranking is limited to. */
-  /** Take the top of the ranking instead of naming a Deployment. */
+  /** Model references (id, alias or inference alias) the ranking is limited to. */
+  /** Take the top of the ranking instead of naming a Model. */
   readonly best: boolean;
   /** Route this run through the local gateway. Off unless asked for. */
   readonly gateway: boolean;
@@ -155,7 +157,7 @@ export interface ParsedArguments {
   /** How many routes `audit` prints, newest first. */
   readonly limit?: number;
   readonly modelAllowlist?: readonly string[];
-  /** Model publishers whose deployments must not be recommended. */
+  /** Model publishers whose models must not be recommended. */
   readonly excludePublishers?: readonly string[];
   readonly maxPrice?: string;
 }
@@ -235,6 +237,22 @@ async function defaultPickMany<T>(
     loop: false,
     pageSize: 12,
   });
+}
+
+async function defaultConfirm(message: string): Promise<boolean> {
+  // Default no. A confirmation whose default is yes turns a stray Enter into an
+  // approval, which is the opposite of what asking was for.
+  return confirm({ message, default: false });
+}
+
+/**
+ * Asks for approval in front of the operator.
+ *
+ * `--yes` is the non-interactive form of the same answer, so callers check it
+ * first and only reach here when there is a terminal to ask on.
+ */
+export function resolveConfirm(dependencies: CliDependencies): (message: string) => Promise<boolean> {
+  return dependencies.confirm ?? defaultConfirm;
 }
 
 export function resolveMultiPicker(
@@ -327,7 +345,7 @@ function withRetryableHub(service: HubCommandService, sleep: (milliseconds: numb
     whoami: (profileId, signal) => retry(() => service.whoami(profileId, signal), signal),
     balance: (profileId, signal) => retry(() => service.balance(profileId, signal), signal),
     catalog: (profileId, signal) => retry(() => service.catalog(profileId, signal), signal),
-    estimatePricing: (profileId, deploymentId, usage, signal) => retry(() => service.estimatePricing(profileId, deploymentId, usage, signal), signal),
+    estimatePricing: (profileId, modelId, usage, signal) => retry(() => service.estimatePricing(profileId, modelId, usage, signal), signal),
     usage: (profileId, requestId, signal) => retry(() => service.usage(profileId, requestId, signal), signal),
     usageQuery: (profileId, query, signal) => retry(() => service.usageQuery(profileId, query, signal), signal),
     createRuntimeCredential: (profileId, input, signal) => retry(() => service.createRuntimeCredential(profileId, input, signal), signal),

@@ -14,7 +14,7 @@ const subject: EvidenceSubject = {
   agentVersion: "1.18.29",
   integrationId: "opencode",
   integrationVersion: "0.2.1",
-  deploymentId: "deployment.nova",
+  deploymentId: "model.nova",
   protocol: "openai-responses",
   platform: "linux-x64",
 };
@@ -125,7 +125,7 @@ describe("computeVerdict", () => {
       { ...subject, agentVersion: "1.19.0" },
       { ...subject, integrationVersion: "0.3.0" },
       { ...subject, platform: "darwin-arm64" },
-      { ...subject, deploymentId: "deployment.other" },
+      { ...subject, deploymentId: "model.other" },
     ]) {
       const verdict = computeVerdict({ subject: changed, evidence, now: new Date("2026-09-20T10:00:00.000Z") });
       expect(verdict.verdict).toBe("unknown");
@@ -140,7 +140,7 @@ describe("computeVerdict", () => {
 
     expect(computeVerdict({ subject: collected, evidence, now }).verdict).toBe("compatible");
 
-    // The deployment ID is the same and the record has not expired, but it
+    // The model ID is the same and the record has not expired, but it
     // tested a different implementation, which is the drift 12A.5(a) was about.
     const rebuilt = { ...subject, implementationFingerprint: "impl-999999999999" };
     expect(computeVerdict({ subject: rebuilt, evidence, now }).verdict).toBe("unknown");

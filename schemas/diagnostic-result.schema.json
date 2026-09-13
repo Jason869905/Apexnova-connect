@@ -7,7 +7,7 @@
   "properties": {
     "schemaVersion": { "$ref": "common-definitions.schema.json#/$defs/schemaVersion" },
     "id": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
-    "subjectType": { "enum": ["agent", "connection", "credential", "deployment", "hub"] },
+    "subjectType": { "enum": ["agent", "connection", "credential", "model", "hub"] },
     "subjectId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
     "operation": { "enum": ["detect", "inspect", "connect", "verify", "switch", "restore", "doctor"] },
     "status": { "enum": ["pass", "warning", "fail", "unknown"] },

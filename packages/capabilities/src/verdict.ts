@@ -68,7 +68,7 @@ function newest(left: Observation | undefined, right: Observation): Observation 
 
 /**
  * Computes the verdict for one subject from the evidence on hand. Every subject
- * field has to match: a different Agent version, Integration version, Deployment
+ * field has to match: a different Agent version, Integration version, Model
  * or platform is a different question, and M0 makes those changes expire
  * evidence rather than carry it over. Expired records are still reported --
  * they explain why something reads `unknown` -- but they cannot support

@@ -11,7 +11,7 @@
 兼容性不是静态标签，而是特定版本组合在特定时间和测试条件下的可重复结论。
 
 ```text
-Agent + Integration + Model Deployment + Platform + Test Suite + Time
+Agent + Integration + Model Model + Platform + Test Suite + Time
 ```
 
 任何公开的 `compatible` 或 `incompatible` 都必须能够追溯到 Evidence。证据不足时返回 `unverified`。
@@ -75,7 +75,7 @@ Agent + Integration + Model Deployment + Platform + Test Suite + Time
 
 回答「用起来快不快、稳不稳」。全部由重复运行产生，**不接受任何一方的声明**——目录的 `availability.status` 是 Hub 声明，只能过滤候选，不进分数。
 
-每条 Operational Evidence 必须随证据记下**测量条件**，否则两个数字不可比：客户端位置与网络、并发度、请求体与输出长度、时间戳。这是「区域」在本项目里唯一站得住的位置——它描述测量是在哪做的，不是 Deployment 的一个属性（见 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)）。
+每条 Operational Evidence 必须随证据记下**测量条件**，否则两个数字不可比：客户端位置与网络、并发度、请求体与输出长度、时间戳。这是「区域」在本项目里唯一站得住的位置——它描述测量是在哪做的，不是 Model 的一个属性（见 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)）。
 
 | 指标 | 判定方式 | 聚合 |
 | --- | --- | --- |
@@ -132,7 +132,7 @@ M4 后引入，用于比较任务效果，**不与技术兼容性混合**——�
 - `createdAt`、`observedAt`、`expiresAt`；
 - Agent ID 和版本；
 - Integration ID 和版本；
-- Model Deployment ID 和服务端模型 ID；
+- Model Model ID 和服务端模型 ID；
 - Provider 和区域；
 - 平台和运行环境摘要；
 - Test Suite ID、版本和用例 ID；
@@ -151,7 +151,7 @@ Evidence 创建后不可修改。纠错通过新 Evidence 指向 `supersedes`，
 
 - Agent 的所有 required Capability 都有有效证据；
 - 没有未解决的必需能力失败；
-- Evidence 与当前 Agent、Integration、Deployment 和 Test Suite 版本兼容；
+- Evidence 与当前 Agent、Integration、Model 和 Test Suite 版本兼容；
 - Evidence 未过期。
 
 ### `compatible-with-limits`
@@ -183,7 +183,7 @@ Evidence 创建后不可修改。纠错通过新 Evidence 指向 `supersedes`，
 
 - Agent 主版本或相关协议实现变化；
 - Integration 解析或 Gateway 实现变化；
-- Model Deployment 的模型版本、Endpoint 或 Provider 实现变化——判据是目录的 `implementationFingerprint` 与 `implementationChangedAt`：指纹进 `subject`（[需求 12B.4](apexnova-ai-hub-requirements.md)），因此换了实现就是另一个 subject，旧记录不会被读成新实现的结论；指纹回退到旧值时用 `implementationChangedAt` 判断（同一个值可能再次出现，但变更时间是新的）；
+- Model Model 的模型版本、Endpoint 或 Provider 实现变化——判据是目录的 `implementationFingerprint` 与 `implementationChangedAt`：指纹进 `subject`（[需求 12B.4](apexnova-ai-hub-requirements.md)），因此换了实现就是另一个 subject，旧记录不会被读成新实现的结论；指纹回退到旧值时用 `implementationChangedAt` 判断（同一个值可能再次出现，但变更时间是新的）；
 - Test Suite 的破坏性变化；
 - 到达 Evidence 类型的 TTL；
 - Provider 通知弃用或能力回退。
@@ -205,7 +205,7 @@ Evidence 创建后不可修改。纠错通过新 Evidence 指向 `supersedes`，
 证据冲突时：
 
 1. 不按来源名称直接覆盖；
-2. 先检查模型、Deployment、区域和版本是否实际不同；
+2. 先检查模型、Model、区域和版本是否实际不同；
 3. 比较测试套件、样本量、时间和环境；
 4. 无法解释时降级为 `unverified` 或 `compatible-with-limits`；
 5. 创建复现任务，不删除不利证据。

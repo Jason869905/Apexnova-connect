@@ -43,3 +43,5 @@
 - [ADR 0035：凭证文件后端：显式选择才有，绝不自动降级](0035-explicit-file-credential-backend.md)
 - [ADR 0036：Linux 默认后端改为凭证文件，放弃 keyring 作为前置条件](0036-file-backend-becomes-the-linux-default.md)
 - [ADR 0037：一枚永久 key 覆盖一组模型，换模型不换 key](0037-one-key-many-models.md)
+- [ADR 0038：`models` 只读，`switch` 换模型](0038-models-reads-switch-writes.md)
+- [ADR 0039：Connect 只有 Model，没有 Deployment](0039-connect-only-has-models.md)

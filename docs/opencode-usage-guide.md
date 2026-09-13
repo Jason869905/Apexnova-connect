@@ -17,7 +17,7 @@
 ```
 apexnova login        # 网页授权，一次性
 apexnova run opencode # 多选模型 + 创建 key + 写配置 + 启动（之后在 OpenCode 里自由换模型）
-apexnova models       # 上下键换默认模型，新模型自动加入配置
+apexnova switch opencode  # 上下键换默认模型，新模型自动加入配置，key 不变
 apexnova usage        # 按模型/按 key 看用量
 apexnova balance      # 看余额
 ```
@@ -59,7 +59,7 @@ apexnova balance      # 看余额
 
 **配置文件里不会出现任何密钥。** 密钥由 `apexnova run opencode` 注入进程环境。
 
-支持 `openai-responses` 和 `openai-chat-completions` 两种协议；一个 provider 段不能混用两种，混用会返回 `MIXED_PROTOCOLS`。选多个模型时 Connect 先按这条规则筛：一组模型必须在同一个协议、同一个 base URL 上，否则报 `PROTOCOL_NOT_SHARED` 并列出分歧的 deployment。已被弃用的复数 `providers` 结构会被识别为 `LEGACY_CONFIG` 并拒绝改写。
+支持 `openai-responses` 和 `openai-chat-completions` 两种协议；一个 provider 段不能混用两种，混用会返回 `MIXED_PROTOCOLS`。选多个模型时 Connect 先按这条规则筛：一组模型必须在同一个协议、同一个 base URL 上，否则报 `PROTOCOL_NOT_SHARED` 并列出分歧的 model。已被弃用的复数 `providers` 结构会被识别为 `LEGACY_CONFIG` 并拒绝改写。
 
 ## 快速开始
 
@@ -81,11 +81,11 @@ apexnova opencode
 也可以指定模型或传参：
 
 ```bash
-# 指定模型（deployment ID 从 apexnova models 输出中获取）
-apexnova opencode --deployment deployment.apexnova.xxx
+# 指定模型（model ID 从 apexnova models 输出中获取）
+apexnova opencode --model deployment.apexnova.xxx
 
 # 一次配置多个模型，第一个是默认
-apexnova opencode --deployment deployment.apexnova.xxx --deployment deployment.apexnova.yyy
+apexnova opencode --model deployment.apexnova.xxx --model deployment.apexnova.yyy
 
 # 传参给 OpenCode
 apexnova opencode -- --model apexnova/glm-5.2
@@ -98,20 +98,28 @@ apexnova opencode -- --model apexnova/glm-5.2
 要换的模型**当初没勾**时，回到 Connect：
 
 ```bash
-apexnova models
+apexnova switch opencode
 ```
 
 列出所有可用模型（已配置的标 `configured`），上下键选中目标，回车。这是一次**加上并置顶**：没配过的模型加进配置，已经配过的就只把默认模型指向它；其余模型全部保留，**key 不变**——Connect 走 `PATCH /v1/api-keys/{id}` 扩大这枚 key 的授权范围，而不是另发一枚。按 Esc 取消。
 
-非交互模式重复传 `--deployment` 给 `run`，语义相同（第一个为默认）：
+直接指定目标时要 `--yes`（从列表里挑不用，那次选择就是确认）：
 
 ```bash
-apexnova run opencode --deployment deployment.apexnova.xxx --json
+apexnova switch opencode --model deployment.apexnova.xxx --yes
 ```
 
-`apexnova switch opencode --deployment <id> --yes` 是另一回事：它走 `connect` 的路径，发一枚 **24 小时的 runtime credential** 并替换当前绑定，用于按次追踪而不是日常换模型。
+`apexnova models` 只列目录，不改任何东西。v0.6 及之前这个选择器在 `models` 里，现在在 `switch`（[ADR 0038](decisions/0038-models-reads-switch-writes.md)）。
 
-> **非交互首次运行必须指定模型**：没有已绑定的 deployment 且终端不可交互（`--json`、`--non-interactive`、CI）时，`apexnova opencode` 不会替你挑一个，而是返回 `DEPLOYMENT_REQUIRED`（退出码 2）。先用 `apexnova models --json` 列出候选，再传 `--deployment`。
+非交互模式重复传 `--model` 给 `run`，语义相同（第一个为默认）：
+
+```bash
+apexnova run opencode --model deployment.apexnova.xxx --json
+```
+
+`apexnova connect opencode --model <id> --yes` 是另一回事：它发一枚 **24 小时的 runtime credential** 并替换当前绑定，用于按次追踪而不是日常换模型。v0.6 及之前 `switch` 是它的别名。
+
+> **非交互首次运行必须指定模型**：没有已绑定的 model 且终端不可交互（`--json`、`--non-interactive`、CI）时，`apexnova opencode` 不会替你挑一个，而是返回 `MODEL_REQUIRED`（退出码 2）。先用 `apexnova models --json` 列出候选，再传 `--model`。
 
 ### 3. 查看用量和余额
 
@@ -131,7 +139,7 @@ apexnova login
 apexnova opencode
 
 # 4. 加一个当初没勾的模型（上下键选择，key 不变）
-apexnova models
+apexnova switch opencode
 
 # 5. 查看用量
 apexnova usage --granularity day

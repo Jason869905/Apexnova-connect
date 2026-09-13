@@ -196,7 +196,7 @@ export function createOpenCodeIntegration(
         // is a model the key would be refused for.
         models: (intent.models ?? [
           {
-            deploymentId: intent.deploymentId,
+            modelId: intent.modelId,
             inferenceAlias: intent.inferenceAlias,
             ...(intent.modelName === undefined ? {} : { modelName: intent.modelName }),
             ...(intent.limits ? { limits: intent.limits } : {}),

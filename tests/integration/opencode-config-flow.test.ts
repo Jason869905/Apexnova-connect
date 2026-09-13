@@ -62,7 +62,7 @@ describe("OpenCode configuration lifecycle", () => {
       const intent: ConnectionIntent = {
         planId: "opencode-flow-plan",
         createdAt: "2026-09-02T20:00:00.000Z",
-        deploymentId: "deployment.nova",
+        modelId: "model.nova",
         inferenceAlias: "nova-coder",
         modelName: "Nova Coder",
         protocol: "openai-responses",
@@ -120,7 +120,7 @@ describe("OpenCode configuration lifecycle", () => {
       const intent: ConnectionIntent = {
         planId: "opencode-idempotent-plan",
         createdAt: "2026-09-02T20:00:00.000Z",
-        deploymentId: "deployment.nova",
+        modelId: "model.nova",
         inferenceAlias: "nova-coder",
         modelName: "Nova Coder",
         protocol: "openai-responses",

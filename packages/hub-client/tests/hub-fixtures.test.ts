@@ -36,17 +36,17 @@ function clientReturning(body: unknown, status = 200) {
 describe("Hub's published fixtures", () => {
   it("parses the catalog snapshot, including the evidence level on each capability", async () => {
     const snapshot = await clientReturning(fixture("catalog-snapshot.json")).catalog();
-    const deployment = snapshot.deployments[0]!;
+    const model = snapshot.models[0]!;
 
-    expect(deployment.capabilityStatements.length).toBeGreaterThan(0);
+    expect(model.capabilityStatements.length).toBeGreaterThan(0);
     // Everything the catalog emits today is a claim nobody has measured, which
     // is exactly why it must not be read as a tested result.
-    expect(deployment.capabilityStatements.every((statement) => statement.sourceType === "provider-claim")).toBe(true);
-    expect(deployment.capabilityStatements.map((statement) => statement.capabilityId)).toContain("tool.calling");
-    expect(deployment.implementationFingerprint).toBeDefined();
+    expect(model.capabilityStatements.every((statement) => statement.sourceType === "provider-claim")).toBe(true);
+    expect(model.capabilityStatements.map((statement) => statement.capabilityId)).toContain("tool.calling");
+    expect(model.implementationFingerprint).toBeDefined();
     // Required by the contract, and the input M4 scores cost from.
-    expect(deployment.pricing).toMatchObject({ currency: "USD", billingMode: "token", unit: 1_000_000 });
-    expect(deployment.limits?.contextWindow).toBeGreaterThan(0);
+    expect(model.pricing).toMatchObject({ currency: "USD", billingMode: "token", unit: 1_000_000 });
+    expect(model.limits?.contextWindow).toBeGreaterThan(0);
   });
 
   it("reads a null price as no price, not as a broken catalog", async () => {
@@ -55,24 +55,32 @@ describe("Hub's published fixtures", () => {
     // and only the first was implemented -- so one null took the entire catalog
     // down, and with it every command that reads one.
     const snapshot = fixture("catalog-snapshot.json") as {
-      deployments: { pricing?: Record<string, unknown> }[];
+      models: { id: string; deploymentIds: string[] }[];
+      deployments: { modelId: string; pricing?: Record<string, unknown> }[];
     };
     const priced = snapshot.deployments[0]!;
+    const pricedModel = snapshot.models[0]!;
     const withNullPrice = {
       ...snapshot,
+      // A second model, not a second line behind the same one: Hub publishes one
+      // callable entry per model, and two would be refused rather than resolved.
+      models: [
+        { ...pricedModel, id: "model.unpriced", deploymentIds: ["deployment.unpriced"] },
+        pricedModel,
+      ],
       deployments: [
-        { ...priced, id: "deployment.unpriced", pricing: { ...priced.pricing, input: null, output: null } },
+        { ...priced, id: "deployment.unpriced", modelId: "model.unpriced", pricing: { ...priced.pricing, input: null, output: null } },
         priced,
       ],
     };
 
     const parsed = await clientReturning(withNullPrice).catalog();
 
-    expect(parsed.deployments).toHaveLength(2);
-    expect(parsed.deployments[0]!.pricing).toBeUndefined();
-    // The rest of the catalog is unaffected: one deployment without a published
+    expect(parsed.models).toHaveLength(2);
+    expect(parsed.models[0]!.pricing).toBeUndefined();
+    // The rest of the catalog is unaffected: one model without a published
     // price says nothing about the others.
-    expect(parsed.deployments[1]!.pricing).toBeDefined();
+    expect(parsed.models[1]!.pricing).toBeDefined();
   });
 
   it("parses a usage list whose unsettled row has no money at all", async () => {
