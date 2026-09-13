@@ -35,7 +35,7 @@
 | 产品 | Hermes Agent `>=0.21.0` |
 | 平台 | Linux（Hermes 官方支持 Linux/macOS/WSL2，未提供原生 Windows 版；macOS 不在本项目支持范围内，见 [ADR 0024](../../../docs/decisions/0024-narrow-platform-claims.md)） |
 | 配置文件 | `$HERMES_HOME/config.yaml`，默认 `~/.hermes/config.yaml` |
-| 协议 | openai-responses、openai-chat-completions、anthropic-messages |
+| 协议 | `openai-chat-completions`、`anthropic-messages`（**不含 `openai-responses`**：Hermes 在该协议上的适配在 M5 期间被证明不成立，已从 manifest 移除） |
 | 凭据 | `APEXNOVA_API_KEY`，由 `apexnova run hermes` 注入进程环境 |
 | 生效方式 | 需要重启 Hermes |
 
@@ -60,6 +60,7 @@ model:
 - **不写 `custom_providers`。** 官方向导会额外往 `custom_providers` 列表里写一条，让连接出现在 `hermes model` 菜单里。本集成不写，受管理字段越少、恢复越干净；代价是这条连接不出现在那个菜单中。
 - **不接管 `fallback_model`。** Hermes 的故障转移配置由用户自己掌握。
 - **`.env` 优先级见上。**
+- **Hermes 的退出码不反映请求是否成功。** 2026-09-12 的验收里，一次每个请求都被上游拒绝的运行，Hermes 仍然以退出码 0 结束并报 `exited successfully`——是 Hermes 自己吞掉了错误，不是 Connect 的行为。因此**不要拿 `apexnova run hermes` 的退出码判断这次运行是否真的产生了结果**；用 `apexnova audit` 的逐请求归属，或经 `--gateway` 运行（它逐条记录每个请求的状态码）。
 
 ## 断开与恢复
 

@@ -518,3 +518,13 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 审计行 `32 requests — 11 on …pmbd4pri, 11 on …yx89z6df, 10 on …sxumk8j7` 是 [ADR 0021](decisions/0021-gateway-credential-renewal.md)「归属按凭据拆分」第一次在真实运行上兑现。
 
 **环境记录**：后台（无 TTY）跑 OpenCode 会卡住不动，十一分钟零请求；前台正常。杀掉卡住的 Agent 顺带在真机上验证了 [ADR 0029](decisions/0029-launch-must-honour-the-configured-file.md) 的失败清理——网关端口立即释放、配置被取回。
+
+## 2026-09-13 Hermes 首次经启动器完成闭环（[ADR 0031](decisions/0031-first-stable-integration.md)）
+
+按 ADR 0023 逐条判定 `stable` 时发现：**Hermes 从来没有一次 `run` 加归属对账的记录**——M2 的生命周期走的是 `verify --live`，而唯一一次经启动器的尝试（2026-09-12 Gateway 验收）每个请求都被拒。当日补跑：
+
+- `run hermes --deployment …cmq4770nr…`，协议 `openai-chat`，Agent 退出 0；
+- **`attributedRequests: 1`**；审计 `billed (run): confirmed via ledger-window — 1 on cmtzrrtsa00xk5i91eodow8yz`；
+- `restore` 后 6188 字节的真实 `config.yaml` 与运行前 **逐字节一致**（`diff` 确认）。
+
+据此 **Hermes 升为 `stable`，是本项目第一个**。`claude-code` 不升：它声称 Windows 与 Linux，而 **Windows 的 launcher 至今未验证**（本清单第 319 行仍记为 `[partial]`）。

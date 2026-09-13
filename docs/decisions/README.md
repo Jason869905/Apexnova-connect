@@ -36,3 +36,4 @@
 - [ADR 0028：M2 收口](0028-m2-closure.md)
 - [ADR 0029：启动必须落在刚写的那份配置上，否则拒绝启动](0029-launch-must-honour-the-configured-file.md)
 - [ADR 0030：运行时凭据有效期可配置，续期窗口按比例缩放](0030-configurable-credential-lifetime.md)
+- [ADR 0031：Hermes 升 `stable`，Claude Code 不升](0031-first-stable-integration.md)

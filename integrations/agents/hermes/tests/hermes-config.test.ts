@@ -10,6 +10,7 @@ import {
   detectHermes,
   envFileDefines,
   hermesApiMode,
+  hermesIntegration,
   inspectHermes,
   planHermesConfig,
 } from "../src/index.js";
@@ -222,5 +223,45 @@ describe("planHermesConfig", () => {
         hubBaseUrl: "https://user:secret@api.apexnova.example/v1",
       }),
     ).toThrowError(/HTTPS and contain no credentials/);
+  });
+});
+
+describe("planLaunch and the configuration it was given", () => {
+  const context = (configPath?: string) => ({
+    platform: "linux" as const,
+    workingDirectory: "/tmp",
+    homeDirectory: "/home/someone",
+    environment: {} as Record<string, string | undefined>,
+    ...(configPath === undefined ? {} : { configPath }),
+  });
+
+  it("points Hermes at the configuration through HERMES_HOME", async () => {
+    // ADR 0029 first recorded that Hermes honours no override. That was wrong,
+    // and this integration's own README had said `$HERMES_HOME/config.yaml` all
+    // along -- an invented variable name was probed instead of the documented
+    // one. `hermes config path` follows HERMES_HOME.
+    const plan = await hermesIntegration.planLaunch({
+      context: context("/somewhere/config.yaml"),
+      credentialEnvironment: {},
+      args: [],
+    });
+
+    expect(plan.environment.HERMES_HOME).toBe("/somewhere");
+  });
+
+  it("refuses a file name HERMES_HOME cannot express", async () => {
+    await expect(hermesIntegration.planLaunch({
+      context: context("/somewhere/other.yaml"),
+      credentialEnvironment: {},
+      args: [],
+    })).rejects.toMatchObject({ code: "LAUNCH_CONFIG_UNREACHABLE" });
+  });
+
+  it("leaves the environment alone when no configuration was named", async () => {
+    const plan = await hermesIntegration.planLaunch({
+      context: context(), credentialEnvironment: {}, args: [],
+    });
+
+    expect(plan.environment.HERMES_HOME).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { win32 } from "node:path";
+import { win32, basename, dirname} from "node:path";
 
 import {
   AgentIntegrationError,
@@ -240,18 +240,25 @@ export function createOpenCodeIntegration(
     },
 
     async planLaunch(request: LaunchRequest): Promise<LaunchPlan> {
-      // Refused rather than launched: this Agent has no way of being pointed
-      // at another configuration file, so launching would start it on its own
-      // while Connect had just written ours somewhere else. That is the defect
-      // this guard exists for -- it ran, exited zero, and used a different
-      // provider entirely.
+      // OpenCode honours `XDG_CONFIG_HOME`, reading `<dir>/opencode/opencode.
+      // jsonc` (or `.json`) from it -- the same shape `configCandidates` already
+      // searches. So an explicit path in that shape can be pointed at; anything
+      // else cannot, and is refused rather than launched against OpenCode's own
+      // configuration, which is what made it answer from its built-in provider
+      // while Connect believed it had configured the run.
       const explicit = explicitConfigPath(request.context);
+      let xdgConfigHome: string | undefined;
       if (explicit !== undefined) {
-        throw unlaunchableConfig(
-          OPENCODE_DISPLAY_NAME,
-          explicit,
-          "it reads its own configuration locations and honours no override (OPENCODE_CONFIG has no effect on 1.18.29)",
-        );
+        const base = basename(explicit);
+        const parent = dirname(explicit);
+        if ((base !== "opencode.jsonc" && base !== "opencode.json") || basename(parent) !== "opencode") {
+          throw unlaunchableConfig(
+            OPENCODE_DISPLAY_NAME,
+            explicit,
+            "it can only be directed through XDG_CONFIG_HOME, which means a path ending in opencode/opencode.jsonc or opencode/opencode.json",
+          );
+        }
+        xdgConfigHome = dirname(parent);
       }
       return {
         executable: resolveOpenCodeExecutable(request.context, options.pathExists),
@@ -259,6 +266,7 @@ export function createOpenCodeIntegration(
         environment: {
           ...request.context.environment,
           ...request.credentialEnvironment,
+          ...(xdgConfigHome === undefined ? {} : { XDG_CONFIG_HOME: xdgConfigHome }),
         },
       };
     },

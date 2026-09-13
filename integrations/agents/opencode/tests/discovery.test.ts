@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { detectOpenCode, inspectOpenCode } from "../src/index.js";
+import { detectOpenCode, inspectOpenCode, openCodeIntegration } from "../src/index.js";
 
 const testRoots: string[] = [];
 
@@ -228,5 +228,48 @@ describe("OpenCode inspection", () => {
     expect(JSON.stringify(result)).not.toContain("secret");
     expect(JSON.stringify(result)).not.toContain("hidden");
     expect(result.warnings).toHaveLength(1);
+  });
+});
+
+describe("planLaunch and the configuration it was given", () => {
+  const context = (configPath?: string) => ({
+    platform: "linux" as const,
+    workingDirectory: "/tmp",
+    homeDirectory: "/home/someone",
+    environment: {} as Record<string, string | undefined>,
+    ...(configPath === undefined ? {} : { configPath }),
+  });
+
+  it("points OpenCode at an XDG-shaped path through XDG_CONFIG_HOME", async () => {
+    // ADR 0029 first recorded that OpenCode honours no override at all. That was
+    // wrong: it had been probed with an invented variable name rather than the
+    // mechanism the product documents. `XDG_CONFIG_HOME` works, and this
+    // integration's own discovery already searched that shape.
+    const plan = await openCodeIntegration.planLaunch({
+      context: context("/somewhere/opencode/opencode.jsonc"),
+      credentialEnvironment: {},
+      args: [],
+    });
+
+    expect(plan.environment.XDG_CONFIG_HOME).toBe("/somewhere");
+  });
+
+  it("refuses a path XDG_CONFIG_HOME cannot express", async () => {
+    // The variable names a directory, not a file, so only the layout OpenCode
+    // looks for can be reached. Launching anyway would start it on its own
+    // configuration while Connect had written ours somewhere else.
+    await expect(openCodeIntegration.planLaunch({
+      context: context("/somewhere/else/my-config.jsonc"),
+      credentialEnvironment: {},
+      args: [],
+    })).rejects.toMatchObject({ code: "LAUNCH_CONFIG_UNREACHABLE" });
+  });
+
+  it("leaves the environment alone when no configuration was named", async () => {
+    const plan = await openCodeIntegration.planLaunch({
+      context: context(), credentialEnvironment: {}, args: [],
+    });
+
+    expect(plan.environment.XDG_CONFIG_HOME).toBeUndefined();
   });
 });

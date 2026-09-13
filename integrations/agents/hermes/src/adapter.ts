@@ -1,3 +1,4 @@
+import { basename, dirname } from "node:path";
 import {
   AgentIntegrationError,
   protocolRootUrl,
@@ -156,17 +157,16 @@ export function createHermesIntegration(
           "Hermes Agent has no native Windows build; run it under WSL2.",
         );
       }
-      // Refused rather than launched: Hermes has no way of being pointed at
-      // another configuration file, so launching would start it on its own
-      // while Connect had just written ours somewhere else. That is the defect
-      // this guard exists for -- it ran, exited zero, and used a different
-      // provider entirely.
+      // Hermes reads `$HERMES_HOME/config.yaml` -- which this integration's own
+      // README has always said -- so it can be directed when the path carries
+      // that file name, and only then. Anything else is refused rather than
+      // launched against ~/.hermes while Connect had written ours elsewhere.
       const explicit = explicitConfigPath(request.context);
-      if (explicit !== undefined) {
+      if (explicit !== undefined && basename(explicit) !== "config.yaml") {
         throw unlaunchableConfig(
           HERMES_DISPLAY_NAME,
           explicit,
-          "it reads ~/.hermes/config.yaml and honours no override (HERMES_CONFIG has no effect on 0.21.0)",
+          "it reads $HERMES_HOME/config.yaml and has no option for another file name",
         );
       }
       return {
@@ -175,6 +175,7 @@ export function createHermesIntegration(
         environment: {
           ...request.context.environment,
           ...request.credentialEnvironment,
+          ...(explicit === undefined ? {} : { HERMES_HOME: dirname(explicit) }),
         },
       };
     },

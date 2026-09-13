@@ -41,8 +41,17 @@ OpenCode 答得出内容，是因为它**自带 provider**——`opencode models
 | --- | --- | --- |
 | Claude Code | `--settings <file>` | 指过去 |
 | Codex | `$CODEX_HOME/config.toml` | 文件名是 `config.toml` 时设 `CODEX_HOME`，否则拒绝 |
-| OpenCode | 无。实测 `OPENCODE_CONFIG` 在 1.18.29 上无效 | 拒绝 |
-| Hermes | 无。实测 `HERMES_CONFIG` 在 0.21.0 上无效（`hermes config path` 不变） | 拒绝 |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/opencode.jsonc`（或 `.json`） | 路径是这个形状时设 `XDG_CONFIG_HOME`，否则拒绝 |
+| Hermes | `$HERMES_HOME/config.yaml` | 文件名是 `config.yaml` 时设 `HERMES_HOME`，否则拒绝 |
+
+> **2026-09-13 更正。** 上表后两行原本写的是「无机制，一律拒绝」，依据是实测 `OPENCODE_CONFIG` 与 `HERMES_CONFIG` 无效。**那个依据是错的：我测的是自己猜的变量名，不是产品实际使用的机制。**
+>
+> - **Hermes 用 `HERMES_HOME`**，而这件事**本集成自己的 README 一直写着**（`$HERMES_HOME/config.yaml`）。`hermes config path` 跟着它变；
+> - **OpenCode 用 `XDG_CONFIG_HOME`**，而**本集成的 `configCandidates` 一直在按这个形状搜索**。决定性探针：把 `XDG_CONFIG_HOME` 指向一份写了不存在模型的配置，OpenCode 报错；不设则正常运行。
+>
+> 两处答案都在仓库里躺着，我没有去读，而是去猜了两个变量名，各测一次失败就下了结论。**「测过」与「测对了东西」是两回事**——这正是本记录第 3 节要求「指过去，或者拒绝启动」时想防的那种草率，只不过这次犯在判定机制上，而不是判定行为上。
+>
+> 两个启动器现在都会把 Agent 指过去；无法表达的路径形状仍然拒绝。
 
 拒绝用 `LAUNCH_CONFIG_UNREACHABLE`，消息说明配置已写到哪里、为什么指不过去、以及为什么宁可不启动。
 
