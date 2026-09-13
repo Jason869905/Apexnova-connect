@@ -501,3 +501,20 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 - **本会话自己的 `~/.claude/settings.json` 全程未被触碰**（mtime 仍是 09-11，内容不含 loopback）。
 
 顺带记两个在做这条时发现并修掉的缺陷，见 [ADR 0029](decisions/0029-launch-must-honour-the-configured-file.md)。
+
+## 2026-09-13 跨过凭据到期的实跑（[ADR 0020](decisions/0020-gateway-batch-closure.md) 条件 1 达成）
+
+`--credential-ttl 120` 配一个需要三十次顺序工具调用的任务，把「等满 23 小时」换成几分钟。
+
+| | 第一次（失败） | 最终 |
+| --- | --- | --- |
+| 时长 | 3 分 13 秒 | **3 分 19 秒** |
+| 结果 | Agent 死于 `Invalid API key` | **退出 0，三十个文件全对** |
+| 续期 | 只发生 1 次（应约 3 次） | **2 次，均成功** |
+| 请求 | 31，分记两枚凭据 | **32，分记三枚（11 / 11 / 10）** |
+
+失败那次的根因见 [ADR 0030](decisions/0030-configurable-credential-lifetime.md) 第 5 节：运行期续期继承了整条命令的截止时间（默认 120 秒），**任何比 `--timeout` 更长的 `--gateway` 运行都无法续期**。同一根因还静默丢掉了长会话的计费对账。
+
+审计行 `32 requests — 11 on …pmbd4pri, 11 on …yx89z6df, 10 on …sxumk8j7` 是 [ADR 0021](decisions/0021-gateway-credential-renewal.md)「归属按凭据拆分」第一次在真实运行上兑现。
+
+**环境记录**：后台（无 TTY）跑 OpenCode 会卡住不动，十一分钟零请求；前台正常。杀掉卡住的 Agent 顺带在真机上验证了 [ADR 0029](decisions/0029-launch-must-honour-the-configured-file.md) 的失败清理——网关端口立即释放、配置被取回。

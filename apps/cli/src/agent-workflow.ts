@@ -51,11 +51,38 @@ import {
   type CliDependencies,
   type CliPickerItem,
   type ParsedArguments,
+  inFlightSignal,
 } from "./cli-core.js";
 import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-binding-store.js";
 
 const RUNTIME_ROTATION_WINDOW_MS = 60 * 60 * 1_000;
-const RUNTIME_CREDENTIAL_TTL_SECONDS = 86_400;
+export const RUNTIME_CREDENTIAL_TTL_SECONDS = 86_400;
+
+/**
+ * How long before expiry a credential should be replaced.
+ *
+ * The last hour, or the last half of its life, whichever is shorter. A fixed
+ * hour was right while every credential lived a day, and became nonsense once
+ * the lifetime was configurable (ADR 0030): a ten-minute credential would be
+ * due the moment it was issued, and every request would mint another.
+ *
+ * Bindings written before `issuedAt` existed keep the fixed hour, which for a
+ * 24-hour credential is what the halving rule gives anyway.
+ */
+function rotationWindowMs(binding: RuntimeCredentialBinding): number {
+  if (binding.issuedAt === undefined || binding.expiresAt === undefined) return RUNTIME_ROTATION_WINDOW_MS;
+  const lifetime = Date.parse(binding.expiresAt) - Date.parse(binding.issuedAt);
+  if (!Number.isFinite(lifetime) || lifetime <= 0) return RUNTIME_ROTATION_WINDOW_MS;
+  return Math.min(RUNTIME_ROTATION_WINDOW_MS, Math.floor(lifetime / 2));
+}
+
+/** The lifetime a renewal should reproduce: the one this binding was issued with. */
+function bindingLifetimeSeconds(binding: RuntimeCredentialBinding): number {
+  if (binding.issuedAt === undefined || binding.expiresAt === undefined) return RUNTIME_CREDENTIAL_TTL_SECONDS;
+  const lifetime = Date.parse(binding.expiresAt) - Date.parse(binding.issuedAt);
+  if (!Number.isFinite(lifetime) || lifetime <= 0) return RUNTIME_CREDENTIAL_TTL_SECONDS;
+  return Math.max(1, Math.round(lifetime / 1_000));
+}
 
 /**
  * Whether a binding is close enough to expiry that a run should replace it
@@ -68,7 +95,7 @@ const RUNTIME_CREDENTIAL_TTL_SECONDS = 86_400;
  */
 export function runtimeCredentialIsDue(binding: RuntimeCredentialBinding, now: number): boolean {
   if (binding.kind === "user" || binding.expiresAt === undefined) return false;
-  return Date.parse(binding.expiresAt) - now <= RUNTIME_ROTATION_WINDOW_MS;
+  return Date.parse(binding.expiresAt) - now <= rotationWindowMs(binding);
 }
 
 export interface LaunchOutcome {
@@ -326,17 +353,22 @@ export async function ensureCredential(
       kind: "user",
     };
   }
-  if (parsed.rotating || mode === "runtime") {
+  if (parsed.rotating || parsed.credentialTtlSeconds !== undefined || mode === "runtime") {
+    const issuedAt = new Date(currentTime(dependencies)).toISOString();
     const created = await service.createRuntimeCredential(parsed.profile, {
       name: credentialName(integration, parsed.profile),
       protocols: [protocol.protocol],
       publicDeploymentIds: [deployment.id],
-      expiresIn: RUNTIME_CREDENTIAL_TTL_SECONDS,
+      expiresIn: parsed.credentialTtlSeconds ?? RUNTIME_CREDENTIAL_TTL_SECONDS,
     }, signal);
     return {
       credentialId: created.credentialId,
       secret: created.secret,
       expiresAt: created.expiresAt,
+      // Hub's own expiry is authoritative; `issuedAt` is ours, and the pair is
+      // what makes the renewal window a fraction of the life rather than a
+      // fixed hour.
+      issuedAt,
       protocol: protocol.protocol,
       deploymentId: deployment.id,
       kind: "runtime",
@@ -653,6 +685,13 @@ export async function runtimeCredentialForLaunch(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   integration: AgentIntegration,
+  /**
+   * Deadline for this renewal. Callers renewing *during* a launched Agent's run
+   * must pass `inFlightSignal`: the command's own `operationSignal` has long
+   * expired by then, and inheriting it made every renewal past the timeout fail
+   * instantly -- on exactly the long runs that are the only ones needing one.
+   */
+  options: { readonly signal?: AbortSignal } = {},
 ): Promise<LaunchOutcome> {
   const agentId = integration.manifest.id;
   const bindings = new RuntimeBindingStore(credentialStore(dependencies));
@@ -669,30 +708,37 @@ export async function runtimeCredentialForLaunch(
       return { binding: current, rotated: false, warnings: [] as string[] };
     }
     const service = hubService(parsed, dependencies);
-    const signal = operationSignal(parsed);
+    const signal = options.signal ?? operationSignal(parsed);
     const catalog = await service.catalog(parsed.profile, signal);
     const deployment = catalog.deployments.find((item) => item.id === current.deploymentId);
     const protocol = deployment?.protocols.find((item) => item.protocol === current.protocol);
     if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
       throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential cannot be renewed because its deployment or protocol is no longer available.", exitCode: EXIT_CODES.verification });
     }
+    // The replacement keeps the lifetime the run was started with. Renewing a
+    // ten-minute credential into a day-long one would quietly undo the choice.
+    const lifetimeSeconds = bindingLifetimeSeconds(current);
+    const issuedAt = new Date(currentTime(dependencies)).toISOString();
     const created = await service.createRuntimeCredential(parsed.profile, {
       name: credentialName(integration, parsed.profile),
       protocols: [current.protocol],
       publicDeploymentIds: [current.deploymentId],
-      expiresIn: 86_400,
+      expiresIn: lifetimeSeconds,
     }, signal);
     const replacement = {
       credentialId: created.credentialId,
       secret: created.secret,
       expiresAt: created.expiresAt,
+      issuedAt,
       protocol: current.protocol,
       deploymentId: current.deploymentId,
       ...(current.transactionId ? { transactionId: current.transactionId } : {}),
       ...(current.restoreTarget ? { restoreTarget: current.restoreTarget } : {}),
     };
     try {
-      if (Date.parse(created.expiresAt) - currentTime(dependencies) <= RUNTIME_ROTATION_WINDOW_MS) {
+      // Measured against this credential's own window, not a fixed hour: with a
+      // short lifetime the fixed comparison rejected every replacement Hub sent.
+      if (Date.parse(created.expiresAt) - currentTime(dependencies) <= rotationWindowMs(replacement)) {
         throw new CliError({ code: "INVALID_RESPONSE", message: "Hub issued a runtime credential with an insufficient lifetime.", exitCode: EXIT_CODES.runtime });
       }
       const active = (await service.runtimeCredentials(parsed.profile, signal)).find((item) => item.credentialId === created.credentialId);
@@ -713,5 +759,5 @@ export async function runtimeCredentialForLaunch(
       }
     }
     return { binding: replacement, rotated: true, warnings };
-  });
+  }, options.signal === undefined ? {} : { signal: options.signal });
 }

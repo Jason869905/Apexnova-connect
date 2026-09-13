@@ -1213,7 +1213,12 @@ describe("CLI", () => {
     expect(loaded?.restoreTarget).toBeUndefined();
     await bindings.save("opencode", "legacy", loaded!);
 
-    expect(JSON.parse((await credentials.get(key))!.reveal())).toMatchObject({ version: 3, credentialId: "rtc_legacy", kind: "runtime" });
+    const stored = JSON.parse((await credentials.get(key))!.reveal()) as Record<string, unknown>;
+    expect(stored).toMatchObject({ version: 4, credentialId: "rtc_legacy", kind: "runtime" });
+    // `issuedAt` is not invented for a binding that never carried one. Guessing
+    // it would silently change the renewal window, which is derived from it --
+    // a made-up issue time is a made-up lifetime.
+    expect(stored.issuedAt).toBeUndefined();
   });
 
   it("does not fall back to an implicit production Hub", async () => {
@@ -2501,6 +2506,73 @@ describe("CLI", () => {
     // undoing something rather than passing vacuously.
     expect(duringLaunch).toContain("http://127.0.0.1:");
     expect(await readFile(configPath, "utf8")).not.toContain("127.0.0.1");
+  });
+
+  it("honours --credential-ttl, and renews on the same lifetime rather than a day", async () => {
+    // ADR 0020's first condition asks for a run that crosses credential expiry.
+    // With a fixed 24-hour lifetime the only way to reach that code was to wait
+    // out the day, which is why nobody ever had. A configurable lifetime makes
+    // the path reachable -- and a ten-minute run has no business holding a
+    // day-long credential either.
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-ttl-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{}\n", "utf8");
+
+    const start = Date.parse("2026-09-13T09:00:00.000Z");
+    let clock = start;
+    const asked: number[] = [];
+    const created: string[] = [];
+    const hub = mockHub({
+      createRuntimeCredential: async (_profile, input) => {
+        asked.push(input.expiresIn as number);
+        created.push(`rtc_${created.length + 1}`);
+        return {
+          credentialId: created[created.length - 1]!,
+          expiresAt: new Date(clock + (input.expiresIn as number) * 1_000).toISOString(),
+          deviceId: "device_1",
+          secret: SecretValue.from(`secret-${created.length}`),
+        };
+      },
+      runtimeCredentials: async () =>
+        created.map((credentialId) => ({
+          credentialId, name: "OpenCode", prefix: "anrt_abcd...wxyz", deviceId: "device_1",
+          protocols: ["openai-responses"], publicDeploymentIds: ["deployment.nova"],
+          expiresAt: new Date(clock + 600_000).toISOString(), createdAt: "2026-09-13T09:00:00.000Z",
+        })),
+    });
+    const credentials = memoryCredentials();
+    const deps = () => ({
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: hub,
+      now: () => new Date(clock),
+      launchAgent: async () => 0,
+      platform: "win32" as const,
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+    });
+
+    const capture = captureIo();
+    const first = await runCli(
+      ["run", "opencode", "--credential-ttl", "600", "--deployment", "deployment.nova", "--json"],
+      { io: capture.io, ...deps(), createRequestId: () => "local_ttl" },
+    );
+    if (first.exitCode !== EXIT_CODES.success) throw new Error(`${capture.stdout()}${capture.stderr()}`);
+    expect(asked).toEqual([600]);
+
+    // Six minutes on: past half of a ten-minute life, so this launch replaces
+    // it. Under the fixed hour the credential would have been due the instant
+    // it was issued, and every launch would have minted another.
+    clock = start + 6 * 60_000;
+    const again = captureIo();
+    const second = await runCli(["run", "opencode", "--json"], { io: again.io, ...deps(), createRequestId: () => "local_ttl_2" });
+    if (second.exitCode !== EXIT_CODES.success) throw new Error(`${again.stdout()}${again.stderr()}`);
+
+    // Renewed once, and on the lifetime the run was started with. Reissuing at
+    // 86400 would quietly undo the choice the first command made.
+    expect(asked).toEqual([600, 600]);
+    expect(created).toEqual(["rtc_1", "rtc_2"]);
   });
 
   it("refuses to send a run direct when the gateway was asked for", async () => {

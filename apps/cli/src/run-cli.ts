@@ -86,6 +86,7 @@ import {
   type CliPickerItem,
   type CliRunResult,
   type ParsedArguments,
+  inFlightSignal,
 } from "./cli-core.js";
 import {
   configureAgent,
@@ -173,6 +174,9 @@ Global options:
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
   --record <path>        Write a replayable recording of a suite run
   --within <days>        Refresh evidence expiring within this many days (default 7)
+  --credential-ttl <s>   Runtime credential lifetime, 120-86400 seconds (default 86400).
+                         Implies a runtime credential; renewal fires in the last half
+                         of its life, capped at an hour
   --reason <why>         Why an evidence record is being revoked (required)
   --scenario <id>        Scenario to rank for (default coding-general)
   --max-price <amount>   Blended price ceiling per million tokens for recommend
@@ -235,12 +239,12 @@ const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   detect: ["--config"],
   inspect: ["--config"],
   doctor: ["--config"],
-  connect: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--dry-run", "--yes"],
-  switch: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--dry-run", "--yes"],
+  connect: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--credential-ttl", "--dry-run", "--yes"],
+  switch: ["--deployment", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--credential-ttl", "--dry-run", "--yes"],
   verify: ["--live", "--config", "--yes"],
   restore: ["--list", "--dry-run", "--yes", "--discard-local-changes", "--config"],
-  run: ["--deployment", "--gateway", "--key", "--rotating", "--config"],
-  opencode: ["--deployment", "--gateway", "--key", "--rotating", "--config"],
+  run: ["--deployment", "--gateway", "--key", "--rotating", "--credential-ttl", "--config"],
+  opencode: ["--deployment", "--gateway", "--key", "--rotating", "--credential-ttl", "--config"],
   credential: ["--key", "--rotating", "--api-key-helper"],
   recommend: ["--scenario", "--deployment", "--max-price", "--model-allowlist", "--exclude-publisher"],
   compatibility: [
@@ -297,6 +301,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let budget: string | undefined;
   let recordPath: string | undefined;
   let withinDays: number | undefined;
+  let credentialTtlSeconds: number | undefined;
   let reason: string | undefined;
   let requestIdFilter: string | undefined;
   let scenarioId: string | undefined;
@@ -420,6 +425,22 @@ function parseArguments(args: readonly string[]): ParsedArguments {
           throw new CliError({
             code: "INVALID_ARGUMENT",
             message: "--within must be a whole number of days between 0 and 365.",
+            exitCode: EXIT_CODES.usage,
+          });
+        }
+        index += 1;
+        break;
+      }
+      case "--credential-ttl": {
+        const value = valueAfter(args, index, arg);
+        credentialTtlSeconds = Number(value);
+        // The floor is two minutes because the renewal window is half the
+        // lifetime: below that the replacement is due almost as soon as it
+        // arrives, and the run would spend itself minting credentials.
+        if (!Number.isSafeInteger(credentialTtlSeconds) || credentialTtlSeconds < 120 || credentialTtlSeconds > 86_400) {
+          throw new CliError({
+            code: "INVALID_ARGUMENT",
+            message: "--credential-ttl must be a whole number of seconds between 120 and 86400.",
             exitCode: EXIT_CODES.usage,
           });
         }
@@ -552,6 +573,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(budget ? { budget } : {}),
     ...(recordPath ? { recordPath } : {}),
     ...(withinDays === undefined ? {} : { withinDays }),
+    ...(credentialTtlSeconds === undefined ? {} : { credentialTtlSeconds }),
     ...(reason ? { reason } : {}),
     ...(requestIdFilter ? { requestId: requestIdFilter } : {}),
     ...(scenarioId ? { scenarioId } : {}),
@@ -2966,11 +2988,17 @@ async function usageByKey(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   from: string,
+  /**
+   * The reconciliation that runs *after* a launch needs its own deadline. The
+   * command's own has expired by then on any run worth reconciling, which lost
+   * the attribution on exactly the long sessions where it matters most.
+   */
+  signal: AbortSignal = operationSignal(parsed),
 ): Promise<Map<string, { requests: number; name?: string; detail: Set<string> }>> {
   const result = await hubService(parsed, dependencies).usageQuery(
     parsed.profile,
     { from, granularity: "hour" },
-    operationSignal(parsed),
+    signal,
   );
   const byKey = new Map<string, { requests: number; name?: string; detail: Set<string> }>();
   // `granularity` was asked for, so the aggregate shape is what comes back; the
@@ -3080,7 +3108,9 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
    */
   async function renewGatewayCredential(): Promise<void> {
     try {
-      const outcome = await runtimeCredentialForLaunch(parsed, dependencies, integration);
+      // A fresh deadline per attempt. The command's own has expired by the
+      // time a long run needs renewing, which is the only time it does.
+      const outcome = await runtimeCredentialForLaunch(parsed, dependencies, integration, { signal: inFlightSignal(parsed) });
       const replaced = gatewayBinding!.credentialId !== outcome.binding.credentialId;
       gatewayBinding = outcome.binding;
       renewalFailedAt = undefined;
@@ -3255,6 +3285,13 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     );
   } catch (cause) {
     await releaseGateway();
+    // The gateway's own notices are the only record of what it did while the
+    // Agent was running -- a credential renewed, or a renewal that failed and
+    // left the run on a credential about to expire. They used to be assembled
+    // after a successful launch and dropped on any other path, which threw them
+    // away exactly when they explain the failure: an Agent that dies on
+    // "Invalid API key" says nothing about why the key stopped working.
+    for (const notice of gatewayNotices) io.stderr(`${notice}\n`);
     throw cause;
   }
 
@@ -3276,7 +3313,11 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   let attribution: LaunchAttribution | undefined;
   if (before !== undefined) {
     try {
-      attribution = attributeLaunch(before, await usageByKey(parsed, dependencies, from), billedCredentialIds);
+      attribution = attributeLaunch(
+        before,
+        await usageByKey(parsed, dependencies, from, inFlightSignal(parsed)),
+        billedCredentialIds,
+      );
     } catch {
       launchWarnings.push("The billing ledger could not be read after the run, so the requests it made were not attributed.");
     }

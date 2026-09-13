@@ -122,6 +122,13 @@ export interface ParsedArguments {
   readonly budget?: string;
   readonly recordPath?: string;
   readonly withinDays?: number;
+  /**
+   * Lifetime for a runtime credential, in seconds. Absent means the 24-hour
+   * default. Configurable because a ten-minute run does not need a day-long
+   * credential, and because a renewal path that can only be exercised by
+   * waiting 23 hours is one nobody exercises (ADR 0030).
+   */
+  readonly credentialTtlSeconds?: number;
   readonly reason?: string;
   readonly requestId?: string;
   readonly scenarioId?: string;
@@ -326,20 +333,46 @@ export function filesystemCode(error: unknown): string | undefined {
 
 const RUNTIME_ROTATION_LOCK_STALE_MS = 5 * 60 * 1_000;
 
+/**
+ * A deadline for work that happens *while* a launched Agent is running, rather
+ * than as part of the command's own sequence.
+ *
+ * `operationSignal` is one deadline for the whole command, and a `run` outlives
+ * it by design: with the default 120 seconds, a three-minute session had an
+ * expired signal by its second credential renewal, and the rotation lock then
+ * refused instantly. Same reasoning as `compensationSignal` -- see its comment.
+ */
+export function inFlightSignal(parsed: ParsedArguments): AbortSignal {
+  return AbortSignal.timeout(Math.min(parsed.timeoutSeconds, 60) * 1_000);
+}
+
 export async function withRuntimeRotationLock<T>(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   task: () => Promise<T>,
+  options: { readonly signal?: AbortSignal } = {},
 ): Promise<T> {
   const lockRoot = join(localStateRoot(dependencies), "locks");
   await mkdir(lockRoot, { recursive: true, mode: 0o700 });
   const profileHash = createHash("sha256").update(parsed.profile, "utf8").digest("hex").slice(0, 32);
   const lockPath = join(lockRoot, `runtime-${profileHash}.lock`);
-  const signal = operationSignal(parsed);
+  const signal = options.signal ?? operationSignal(parsed);
   let handle;
+  // Only true once a held lock has actually been seen. Without it the timeout
+  // below reported "waiting for another rotation" when nothing else was
+  // rotating at all -- the deadline had simply passed before the first attempt,
+  // which sent the reader looking for a concurrent process that did not exist.
+  let contended = false;
   for (;;) {
     if (signal.aborted) {
-      throw new CliError({ code: "CREDENTIAL_ROTATION_BUSY", message: "Timed out waiting for another credential rotation to finish.", exitCode: EXIT_CODES.conflict, retryable: true });
+      throw new CliError({
+        code: "CREDENTIAL_ROTATION_BUSY",
+        message: contended
+          ? "Timed out waiting for another credential rotation to finish."
+          : "The deadline for this operation passed before the credential rotation could start; nothing else was holding the lock.",
+        exitCode: EXIT_CODES.conflict,
+        retryable: true,
+      });
     }
     try {
       handle = await open(lockPath, "wx", 0o600);
@@ -347,6 +380,7 @@ export async function withRuntimeRotationLock<T>(
       break;
     } catch (error) {
       if (filesystemCode(error) !== "EEXIST") throw error;
+      contended = true;
       try {
         const info = await stat(lockPath);
         if (Date.now() - info.mtimeMs > RUNTIME_ROTATION_LOCK_STALE_MS) {

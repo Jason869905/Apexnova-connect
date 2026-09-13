@@ -8,6 +8,14 @@ export interface RuntimeCredentialBinding {
   readonly credentialId: string;
   readonly secret: SecretValue;
   readonly expiresAt?: string;
+  /**
+   * When this credential was issued. Kept so the renewal window can be a
+   * fraction of the credential's life rather than a fixed hour: "the last
+   * hour" is meaningless for a credential that lives ten minutes, and the
+   * lifetime became configurable in ADR 0030. Absent on bindings written
+   * before that, which fall back to the fixed hour.
+   */
+  readonly issuedAt?: string;
   readonly protocol: string;
   readonly deploymentId: string;
   readonly kind?: "user" | "runtime";
@@ -42,6 +50,19 @@ interface StoredBindingV2 {
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
 }
 
+interface StoredBindingV4 {
+  readonly version: 4;
+  readonly credentialId: string;
+  readonly secret: string;
+  readonly expiresAt?: string;
+  readonly issuedAt?: string;
+  readonly protocol: string;
+  readonly deploymentId: string;
+  readonly kind?: "user" | "runtime";
+  readonly transactionId?: string;
+  readonly restoreTarget?: RuntimeCredentialRestoreTarget;
+}
+
 interface StoredBindingV3 {
   readonly version: 3;
   readonly credentialId: string;
@@ -54,7 +75,7 @@ interface StoredBindingV3 {
   readonly restoreTarget?: RuntimeCredentialRestoreTarget;
 }
 
-type StoredBinding = StoredBindingV1 | StoredBindingV2 | StoredBindingV3;
+type StoredBinding = StoredBindingV1 | StoredBindingV2 | StoredBindingV3 | StoredBindingV4;
 
 /**
  * v0.1 stored the single binding under the hard-coded integration ID
@@ -85,23 +106,28 @@ function parseRestoreTarget(value: unknown, depth = 0): RuntimeCredentialRestore
   };
 }
 
-function parse(value: unknown): StoredBindingV3 {
+function parse(value: unknown): StoredBindingV4 {
   if (typeof value !== "object" || value === null) throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
-  const item = value as Omit<Partial<StoredBindingV3>, "version"> & { version?: number };
-  if ((item.version !== 1 && item.version !== 2 && item.version !== 3) || (item.version !== 3 && (typeof item.expiresAt !== "string" || !Number.isFinite(Date.parse(item.expiresAt))))) {
+  const item = value as Omit<Partial<StoredBindingV4>, "version"> & { version?: number };
+  const optionalExpiry = item.version === 3 || item.version === 4;
+  if ((item.version !== 1 && item.version !== 2 && item.version !== 3 && item.version !== 4) || (!optionalExpiry && (typeof item.expiresAt !== "string" || !Number.isFinite(Date.parse(item.expiresAt))))) {
     throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
   }
-  if (item.version === 3 && item.expiresAt !== undefined && (typeof item.expiresAt !== "string" || !Number.isFinite(Date.parse(item.expiresAt)))) {
+  if (optionalExpiry && item.expiresAt !== undefined && (typeof item.expiresAt !== "string" || !Number.isFinite(Date.parse(item.expiresAt)))) {
+    throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
+  }
+  if (item.issuedAt !== undefined && (typeof item.issuedAt !== "string" || !Number.isFinite(Date.parse(item.issuedAt)))) {
     throw new HubClientError("SESSION_CORRUPT", "Stored runtime credential binding is invalid.");
   }
   return {
-    version: 3,
+    version: 4,
     credentialId: requiredString(item.credentialId),
     secret: requiredString(item.secret),
     ...(item.expiresAt !== undefined && item.expiresAt !== null ? { expiresAt: requiredString(item.expiresAt) } : {}),
+    ...(item.issuedAt !== undefined && item.issuedAt !== null ? { issuedAt: requiredString(item.issuedAt) } : {}),
     protocol: requiredString(item.protocol),
     deploymentId: requiredString(item.deploymentId),
-    ...(item.version === 3 && item.kind !== undefined ? { kind: item.kind } : { kind: "runtime" as const }),
+    ...(optionalExpiry && item.kind !== undefined ? { kind: item.kind } : { kind: "runtime" as const }),
     ...((item.version ?? 0) >= 2 && item.transactionId !== undefined ? { transactionId: requiredString(item.transactionId) } : {}),
     ...((item.version ?? 0) >= 2 && item.restoreTarget !== undefined ? { restoreTarget: parseRestoreTarget(item.restoreTarget) } : {}),
   };
@@ -126,6 +152,7 @@ export class RuntimeBindingStore {
       credentialId: binding.credentialId,
       secret: SecretValue.from(binding.secret),
       ...(binding.expiresAt ? { expiresAt: binding.expiresAt } : {}),
+      ...(binding.issuedAt ? { issuedAt: binding.issuedAt } : {}),
       protocol: binding.protocol,
       deploymentId: binding.deploymentId,
       ...(binding.kind ? { kind: binding.kind } : {}),
@@ -136,10 +163,11 @@ export class RuntimeBindingStore {
 
   async save(agentId: string, profileId: string, binding: RuntimeCredentialBinding): Promise<void> {
     const stored = parse({
-      version: 3,
+      version: 4,
       credentialId: binding.credentialId,
       secret: binding.secret.reveal(),
       ...(binding.expiresAt ? { expiresAt: binding.expiresAt } : {}),
+      ...(binding.issuedAt ? { issuedAt: binding.issuedAt } : {}),
       protocol: binding.protocol,
       deploymentId: binding.deploymentId,
       ...(binding.kind ? { kind: binding.kind } : {}),
