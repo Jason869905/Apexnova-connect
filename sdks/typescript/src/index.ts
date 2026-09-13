@@ -72,7 +72,7 @@ export type {
 
 export { assertSafeBaseUrl, protocolRootUrl } from "./protocol-url.js";
 
-export { probeExecutableVersion, toPlatform } from "./process-probe.js";
+export { nativeWindowsTarget, probeExecutableVersion, toPlatform } from "./process-probe.js";
 
 export type {
   CommandProbe,

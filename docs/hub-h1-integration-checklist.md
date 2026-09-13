@@ -542,3 +542,13 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 **`claude-code` 的 Windows 记录不能直接用于升档**：这台机器上有两份 Claude Code，`detect` 报 npm shim 的 2.1.233，而启动器只认 `claude.exe`、跑的是原生安装的 2.1.201。**检测与启动不是同一份安装**，记录会写下错误的版本。详见 ADR 0032 第 3 节。
 
 另记三条：npm 版 Claude Code 在 Windows 上无法被启动（没有 `.exe`，而拒绝消息没说该怎么办）；从 `C:\` 驱动器根运行会被判为非绝对路径；**证据无法跨平台流动**——CLI 只推不拉，本次两份 Windows 证据是手工复制进 Linux 库的。
+
+## 2026-09-13 Claude Code Windows 闭环（修复后重跑，[ADR 0033](decisions/0033-probe-what-the-launcher-starts.md)）
+
+同日早先那次也通过了，但它写下的版本是 2.1.233 而实际运行的是 2.1.201——**与事实不符的记录撑不起「真实记录」**，因此在修好版本探针后作废重跑：
+
+- `run claude-code --deployment …cmq4770nr… -- -p "Reply with exactly: WINDOWS-OK"`，PATH 含原生 `claude.exe`；
+- **`attributedRequests: 1`**，Agent 退出 0；
+- `restore` 后 `C:\Users\wakee\.claude\settings.json` 与运行前**逐字节一致**。
+
+`detect` 现在报 **2.1.201**——启动器真正会启动的那一份（修复前报 2.1.233）。据此 **`claude-code` 升为 `stable`**，是第二个。

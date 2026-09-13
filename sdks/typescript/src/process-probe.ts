@@ -77,6 +77,23 @@ function execute(
   });
 }
 
+/**
+ * The first real `.exe` among `where.exe` output, which is what a launcher on
+ * Windows will start: a `.cmd` shim cannot be spawned with `shell:false`, so
+ * every integration resolves `<name>.exe` from PATH.
+ *
+ * Split out to be testable. The Windows branch of `defaultProbe` spawns real
+ * processes and had no coverage at all, which is how "probe the shim, launch
+ * the exe" survived until a machine turned up with two installs at different
+ * versions.
+ */
+export function nativeWindowsTarget(whereOutput: string): string | undefined {
+  return whereOutput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.toLowerCase().endsWith(".exe"));
+}
+
 function defaultProbe(
   executable: string,
   args: readonly string[],
@@ -89,9 +106,24 @@ function defaultProbe(
     if (!located.found || located.error || !located.stdout?.trim()) {
       return { found: false };
     }
-    // `.cmd` shims need cmd.exe on Windows. `executable` is validated against
-    // SAFE_EXECUTABLE and the arguments are the integration's own constants, so
-    // nothing user-controlled is interpolated into the command line.
+    // Prefer a real `.exe`, because that is what every launcher on Windows
+    // starts: a `.cmd` shim cannot be spawned with `shell:false`, so all three
+    // integrations resolve `<name>.exe` from PATH. Probing the shim instead
+    // meant reporting the version of one install while launching another --
+    // observed on 2026-09-13 with Claude Code 2.1.233 (npm shim) detected and
+    // 2.1.201 (native exe) launched. The other two agreed only because their
+    // shim and exe came from the same install.
+    //
+    // The path comes from `where.exe` and is spawned directly, which is what
+    // the launchers already do with the same value.
+    const exe = nativeWindowsTarget(located.stdout);
+    if (exe) return execute(exe, args, timeoutMs);
+
+    // No native target. The launcher will refuse, and the version reported here
+    // is the shim's -- which is the only thing there is to report.
+    // `executable` is validated against SAFE_EXECUTABLE and the arguments are
+    // the integration's own constants, so nothing user-controlled is
+    // interpolated into the command line.
     return execute(
       "cmd.exe",
       ["/d", "/s", "/c", `${executable}.cmd ${args.join(" ")}`],

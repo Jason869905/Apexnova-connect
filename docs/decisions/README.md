@@ -38,3 +38,4 @@
 - [ADR 0030：运行时凭据有效期可配置，续期窗口按比例缩放](0030-configurable-credential-lifetime.md)
 - [ADR 0031：Hermes 升 `stable`，Claude Code 不升](0031-first-stable-integration.md)
 - [ADR 0032：在 Windows 上原生验证，三条缺口关闭但带出两个缺陷](0032-windows-verification.md)
+- [ADR 0033：探针改为探启动器真正会启动的那一个；Claude Code 升 `stable`](0033-probe-what-the-launcher-starts.md)

@@ -12,7 +12,7 @@ export const claudeCodeManifest: IntegrationManifest = {
   "displayName": "Claude Code",
   "description": "Point Claude Code at Apexnova AI Hub through its documented LLM gateway settings.",
   "version": "0.1.0",
-  "status": "experimental",
+  "status": "stable",
   "category": "agent",
   "delivery": {
     "modes": [

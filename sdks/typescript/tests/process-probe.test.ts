@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { probeExecutableVersion, toPlatform } from "../src/index.js";
+import { nativeWindowsTarget, probeExecutableVersion, toPlatform } from "../src/index.js";
 
 async function version(stdout: string): Promise<string | undefined> {
   const probe = await probeExecutableVersion({
@@ -88,5 +88,36 @@ describe("probeExecutableVersion", () => {
     expect(toPlatform("darwin")).toBe("macos");
     expect(toPlatform("linux")).toBe("linux");
     expect(toPlatform("freebsd")).toBeUndefined();
+  });
+});
+
+describe("nativeWindowsTarget", () => {
+  it("picks the .exe a launcher would start, not the shim beside it", () => {
+    // Observed on 2026-09-13: one machine carried Claude Code twice -- npm's
+    // shim at 2.1.233 and a native exe at 2.1.201 -- and the probe reported the
+    // shim's version while the launcher started the exe. Every Windows launcher
+    // in this repository resolves `<name>.exe`, because a `.cmd` cannot be
+    // spawned with `shell:false`.
+    const output = [
+      "C:\\Users\\someone\\AppData\\Roaming\\npm\\claude",
+      "C:\\Users\\someone\\AppData\\Roaming\\npm\\claude.cmd",
+      "C:\\Users\\someone\\.local\\bin\\claude.exe",
+    ].join("\r\n");
+
+    expect(nativeWindowsTarget(output)).toBe("C:\\Users\\someone\\.local\\bin\\claude.exe");
+  });
+
+  it("prefers the first .exe when PATH offers several", () => {
+    const output = "C:\\first\\tool.exe\r\nC:\\second\\tool.exe\r\n";
+
+    expect(nativeWindowsTarget(output)).toBe("C:\\first\\tool.exe");
+  });
+
+  it("finds nothing when only a shim is installed", () => {
+    // The launcher will refuse in this case, and saying so honestly is better
+    // than reporting a version for something that cannot be started.
+    const output = "C:\\Users\\someone\\AppData\\Roaming\\npm\\claude.cmd\r\n";
+
+    expect(nativeWindowsTarget(output)).toBeUndefined();
   });
 });

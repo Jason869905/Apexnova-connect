@@ -59,7 +59,7 @@ export function resolveClaudeCodeExecutable(
 
   throw new AgentIntegrationError(
     "AGENT_NOT_FOUND",
-    "Claude Code was detected, but no native claude.exe target was found on PATH.",
+    "Claude Code was detected, but no native claude.exe target was found on PATH. An npm install ships claude.cmd, which cannot be started without a shell, and this launcher does not use one. Install the native build, or put the directory holding claude.exe ahead of the npm shim on PATH.",
   );
 }
 

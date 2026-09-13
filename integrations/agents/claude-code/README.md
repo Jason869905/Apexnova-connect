@@ -60,6 +60,8 @@ Claude Code 每隔 `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`（默认 5 分钟）调�
 - **不写项目级 `.claude/settings.json`。** 该文件会被提交进仓库并共享给所有克隆者。
 - **settings 里已有凭据或第三方 `apiKeyHelper` 时会警告。** 它们优先级高于启动器注入的凭据；`inspect` 与 `doctor` 会指出来（只报变量名，不读取也不输出值）。
 - **`apexnova credential print <agent>` 会把凭据打到 stdout。** 它是给 helper 用的，输出里不含任何其他内容。凭据本来就存在同一用户可读的系统凭证库里，这个命令没有引入新的暴露面，但不要把它的输出重定向进文件或日志。
+- **Windows 上必须是原生安装。** 启动器只接受 `claude.exe`：npm 安装提供的是 `claude.cmd`，而 `.cmd` 无法以 `shell: false` 启动，本项目不使用 shell。只装了 npm 版会得到 `AGENT_NOT_FOUND`，消息里写明了出路（装原生版，或把 `claude.exe` 所在目录排到 npm shim 之前）。
+- **同机存在两份安装时，以 `claude.exe` 为准。** 2026-09-13 在一台同时装有 npm 版（2.1.233）与原生版（2.1.201）的 Windows 上发现：检测报的是 shim 的版本，启动的却是 exe。已修（[ADR 0033](../../../docs/decisions/0033-probe-what-the-launcher-starts.md)）——检测现在探的就是启动器会启动的那一个。但这意味着**你自己敲 `claude` 可能启动的是另一份**。
 - **模型名直传。** `ANTHROPIC_MODEL` 写的是 Hub 的 `inferenceAlias`，由 Hub 负责解析到实际部署。
 
 ## 断开与恢复

@@ -66,7 +66,7 @@ export function resolveCodexExecutable(
 
   throw new AgentIntegrationError(
     "AGENT_NOT_FOUND",
-    "Codex was detected, but no native codex.exe target was found on PATH.",
+    "Codex was detected, but no native codex.exe target was found on PATH. An npm install ships codex.cmd, which cannot be started without a shell, and this launcher does not use one. Install the native build, or put the directory holding codex.exe ahead of the npm shim on PATH.",
   );
 }
 
