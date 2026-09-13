@@ -81,6 +81,18 @@ apexnova inspect claude-code
 apexnova inspect codex --config ./config.toml
 ```
 
+### `apexnova init`
+
+写入本地 Hub 配置（base URL、OAuth client ID、路径前缀），供后续所有命令使用。
+
+```text
+apexnova init --hub-url https://api.example.test --client-id apexnova-connect
+```
+
+选项：`--hub-url <url>`、`--client-id <id>`、`--path-prefix <p>`。
+
+未配置且没有内置默认地址时，命令不会回落到某个隐含的生产地址——它会明确报错要求先 `init`。
+
 ### `apexnova login`
 
 显式发起 Apexnova AI Hub Device Authorization。UI 只展示 `user_code`、验证 URI 和有效期。
@@ -99,12 +111,11 @@ H1 staging contract test 通过前，开发版必须显式配置 Hub base URL �
 ```text
 apexnova logout
 apexnova logout --yes
-apexnova logout --all-devices
 ```
 
 **还有可恢复事务、或仍有 Agent 连着时，`logout` 拒绝执行**（`APPROVAL_REQUIRED`），并点名具体的事务 id 与 Agent。理由是它**不可逆**：`restore` 需要当前会话向 Hub 重新签发被回滚到的那枚凭据，会话一旦删除，那个事务就**永远无法恢复**——Agent 的配置停在指向 Hub 的状态，而账号已经不在手里。`--yes` 表示知情并照此登出。
 
-`--all-devices` 需要服务端支持和额外确认。
+**`--all-devices` 尚未实现**（需要服务端支持和额外确认）。传给它会以 `INVALID_ARGUMENT` 拒绝，因为 `logout` 不读取它。
 
 ### `apexnova whoami`
 
@@ -193,19 +204,26 @@ apexnova usage --key <keyId> --from 2026-09-01T00:00:00Z --to 2026-09-07T00:00:0
 ```text
 apexnova connect opencode --deployment apexnova/model-x --dry-run
 apexnova connect codex --deployment apexnova/model-x --yes
-apexnova connect opencode --connection-profile coding-fast
+apexnova connect opencode --best --yes
 ```
 
 选项：
 
 ```text
---deployment <id>
---connection-profile <name>
---protocol <id>
---gateway auto|on|off
---dry-run
---plan-file <path>
+--deployment <id>          指定 Deployment
+--best                     连到推荐排名第一的，并把依据写进审计
+--protocol <id>            指定协议（Deployment 暴露多个时）
+--scenario <id>            --best 使用的 Scenario（默认 coding-general）
+--max-price <per-1M>       --best 的混合单价上限
+--model-allowlist <refs>   --best 只考虑这些 Deployment（逗号分隔）
+--exclude-publisher <names> --best 永不选择这些发布方
+--credential-ttl <秒>      运行时凭据有效期，120～86400（默认 86400），蕴含 --rotating
+--api-key-helper           让 Agent 自己取凭据（仅支持该机制的 Agent，如 Claude Code）
+--config <path>            指定要写入的配置文件
+--dry-run | --yes          预览 / 执行
 ```
+
+**`--connection-profile` 与 `--plan-file` 尚未实现**：`connection-profile.schema.json` 存在，但 CLI 不接受该选项，传入会以 `INVALID_ARGUMENT` 拒绝。**`connect` 也没有 `--gateway`**——Gateway 是 `run` 的开关（默认关闭）。
 
 流程固定为：
 
@@ -246,10 +264,28 @@ M1 不承诺 Agent 进程启动后的热更新；超长会话的无感轮换需�
 切换到已存在 ConnectionProfile 或 Deployment，仍必须生成 Plan。
 
 ```text
-apexnova switch opencode --connection-profile coding-cheap
+apexnova switch opencode --deployment apexnova/model-y --yes
+apexnova switch opencode --best --yes
 ```
 
-首版只提供显式切换，不承诺当前 Agent 会话内热切换。
+选项与 `connect` 相同（`--connection-profile` 同样**尚未实现**）。
+
+首版只提供显式切换，不承诺当前 Agent 会话内热切换。每次切换写一条 `selected` 审计记录，并把上一次连接留成可恢复事务。
+
+### `apexnova audit [agent]`
+
+读路由审计日志。每次连接目标的确定写一条不可变记录（`selected`），事后的计费对账写第二条（`attributed`），恢复写 `released`。
+
+```text
+apexnova audit
+apexnova audit opencode --limit 20
+```
+
+选项：`--limit <n>`。
+
+记录回答三句话：**选了哪个 Deployment、依据是什么、实际由谁计费**。依据（`grounds`）取值 `explicit` / `recommendation` / `existing` / `interactive` / `restore`；来自推荐时引用具体的 `rec.sha256.<hash>`。计费的 `method` 为 `gateway`（逐请求，含 Hub 的 `requestId`）或 `ledger-window`（台账前后差值）。
+
+**不得只写「切到了 X」**——那是结果，不是可审计的依据。台账未结算时记 `unconfirmed`，而不是记成已确认的零次。
 
 ### `apexnova restore [transaction-id]`
 

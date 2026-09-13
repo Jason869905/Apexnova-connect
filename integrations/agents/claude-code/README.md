@@ -2,7 +2,7 @@
 
 通过 Claude Code 官方文档中的 LLM gateway 配置，把 Claude Code 指向 Apexnova AI Hub。只使用官方允许的认证和 Gateway 能力，不抓取或复用第三方订阅令牌。
 
-状态：`experimental`。
+状态：**`stable`**（[ADR 0033](../../../docs/decisions/0033-probe-what-the-launcher-starts.md)）。
 
 ## 支持范围
 

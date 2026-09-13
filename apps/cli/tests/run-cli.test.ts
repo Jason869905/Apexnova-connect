@@ -2665,6 +2665,35 @@ describe("CLI", () => {
     expect(created).toEqual(["rtc_1", "rtc_2"]);
   });
 
+  it("accepts --api-key-helper on connect, which three documents tell users to run", async () => {
+    // The unread-option guard registers what each command reads, and this one
+    // was left out while `connectionIntent` had been reading it all along. The
+    // CLI therefore refused a working, documented flag -- found by comparing the
+    // guides against the option table rather than by any test, which is the same
+    // way the stale READMEs surfaced.
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-helper-"));
+    const configPath = join(root, "settings.json");
+    await writeFile(configPath, "{}\n", "utf8");
+    const capture = captureIo();
+
+    const result = await runCli(
+      ["connect", "claude-code", "--deployment", "deployment.nova", "--api-key-helper", "--dry-run", "--json"],
+      {
+        io: capture.io,
+        credentialStore: memoryCredentials(),
+        registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+        hubService: mockHub(),
+        ...(await isolatedState()),
+        cwd: root,
+        createRequestId: () => "local_helper",
+      },
+    );
+
+    // Whatever the plan decides, it must not be refused for naming the flag.
+    expect(capture.stderr()).not.toContain("does not read --api-key-helper");
+    expect(result.exitCode).not.toBe(EXIT_CODES.usage);
+  });
+
   it("refuses to send a run direct when the gateway was asked for", async () => {
     // The flag silently doing nothing is the failure this milestone keeps
     // finding; asked-for-and-not-running is a contradiction, not a fallback.

@@ -110,12 +110,14 @@ Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hu
 
 不同产品的扩展接口不同，因此 Apexnova-connect 采用“能力驱动”而不是“所有平台体验完全一致”的设计。
 
+四个 Agent Integration 的状态判定标准见 [ADR 0023](docs/decisions/0023-integration-status-ladder.md)：两条可机检（声称的每个平台 × 协议都要有实测结论、文档齐全），三条人工逐条判定（每平台的端到端闭环记录、失败可恢复验收、已知限制不得为空）。**macOS 不在支持范围内**（[ADR 0024](docs/decisions/0024-narrow-platform-claims.md)）。
+
 | 类别 | 集成 | 计划方式 | 当前状态 |
 | --- | --- | --- | --- |
-| Agent | OpenCode | 自定义 Provider 配置与启动器 | `experimental`，已完成真实环境验收 |
-| Agent | Codex | `config.toml` 自定义 model provider 与启动器 | `experimental`，待真实环境验收 |
-| Agent | Claude Code | 官方 LLM gateway 设置与启动器 | `experimental`，待真实环境验收 |
-| Agent | Hermes Agent | `config.yaml` 自定义 custom endpoint 与启动器 | `experimental`，待真实环境验收 |
+| Agent | OpenCode | 自定义 Provider 配置与启动器 | **`stable`**（Windows、Linux） |
+| Agent | Codex | `config.toml` 自定义 model provider 与启动器 | **`stable`**（Windows、Linux） |
+| Agent | Claude Code | 官方 LLM gateway 设置与启动器 | **`stable`**（Windows、Linux） |
+| Agent | Hermes Agent | `config.yaml` 自定义 custom endpoint 与启动器 | **`stable`**（Linux；Hermes 无原生 Windows 版） |
 | Agent | DeepSeek Harness | 根据其公开扩展能力选择插件、Provider 或 Gateway | 待调研 |
 | 自动化 | n8n | Community Node 或凭证化节点集成 | 待调研 |
 | 自动化 | Dify | Model Provider 或插件集成 | 待调研 |

@@ -14,22 +14,26 @@ apexnova run hermes
 
 ```bash
 apexnova run hermes --deployment deployment.apexnova.xxx
-apexnova run hermes --protocol anthropic-messages --deployment deployment.apexnova.xxx
+
+# 选协议要在 connect 上做：run 不接受 --protocol，会以 INVALID_ARGUMENT 拒绝
+apexnova connect hermes --protocol anthropic-messages --deployment deployment.apexnova.xxx --yes
+apexnova run hermes
 ```
 
 在 Windows 上 `apexnova detect` / `doctor` 不会列出 Hermes——manifest 没有声明该平台。请在 WSL2 里使用。
 
-## 三种协议都支持
+## 支持两种协议
 
-Hermes 是四个 Agent 里唯一三种协议全支持的，通过 `model.api_mode` 选择：
+本集成为 Hermes 声明两种协议，通过 `model.api_mode` 选择：
 
 | Hub 协议 | Hermes `api_mode` |
 |---|---|
-| `openai-responses` | `codex_responses` |
 | `openai-chat-completions` | `chat_completions` |
 | `anthropic-messages` | `anthropic_messages` |
 
-不指定 `--protocol` 时按 deployment 暴露的顺序选第一个可用的。本集成**总是显式写出 `api_mode`**，不留给 Hermes 自动探测，避免 Responses 的部署被悄悄当成 chat completions。
+**不含 `openai-responses`**：Hermes 在该协议上的适配在 M5 期间被证明不成立，已从 manifest 移除。只暴露 `openai-responses` 的 Deployment 在 Hermes 上不可用，`connect` 会返回 `PROTOCOL_NOT_SUPPORTED`。
+
+不指定 `--protocol` 时按 deployment 暴露的顺序选第一个可用的（`--protocol` 属于 `connect` 与 `switch`，不属于 `run`）。本集成**总是显式写出 `api_mode`**，不留给 Hermes 自动探测，避免 Responses 的部署被悄悄当成 chat completions。
 
 ## 受管理的字段
 

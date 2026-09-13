@@ -2,7 +2,7 @@
 
 Connects the [Codex CLI](https://github.com/openai/codex) to Apexnova AI Hub through Codex's own custom model provider mechanism.
 
-状态：`experimental`。
+状态：**`stable`**（[ADR 0034](../../../docs/decisions/0034-opencode-and-codex-stable.md)）。
 
 ## 支持范围
 

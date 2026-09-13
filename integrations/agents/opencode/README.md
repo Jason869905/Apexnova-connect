@@ -2,6 +2,8 @@
 
 把 OpenCode 的 Provider 配置接到 Apexnova AI Hub 上的模型。这是本项目的第一个 Integration，也是 `apexnova run opencode` 这条一命令路径的对象。
 
+状态：**`stable`**（[ADR 0034](../../../docs/decisions/0034-opencode-and-codex-stable.md)）。
+
 ## 支持范围
 
 | 项目 | 值 |

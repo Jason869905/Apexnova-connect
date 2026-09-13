@@ -40,6 +40,14 @@ Integration 不应：
 - 把未脱敏的用户配置或提示词写入日志；
 - 自动重放可能有副作用的请求。
 
+### `planLaunch` 的两条硬规则
+
+这两条各自是用一个真实缺陷换来的，公共契约套件会强制它们。
+
+**一、启动必须落在 Connect 刚写的那份配置上，否则拒绝启动。** `planLaunch` 收到的 `context.configPath` 不是装饰——用 `explicitConfigPath()` 读它，然后要么把 Agent 指过去（命令行参数或该产品自己的配置位置变量），要么抛 `unlaunchableConfig()`。**悄悄启动到另一份配置上不是第三个选项**：OpenCode 曾因此用自带 provider 作答、退出 0，而请求记在了别人账上，输出里没有任何线索。见 [ADR 0029](decisions/0029-launch-must-honour-the-configured-file.md)。
+
+**二、检测报告的版本必须是启动器会启动的那一个。** 在 Windows 上尤其容易错：`.cmd` 无法以 `shell: false` 启动，所以启动器只能用 `<名字>.exe`，而同一台机器上的 shim 与 exe 可能是两份不同安装。共享探针已经按这条修好（优先取 `where.exe` 结果里的 `.exe`），新 Integration 只要用 `probeExecutableVersion` 就自动继承。见 [ADR 0033](decisions/0033-probe-what-the-launcher-starts.md)。
+
 ## 5. 定义恢复语义
 
 至少覆盖以下情况：
@@ -69,3 +77,7 @@ Integration 不应：
 ## 7. 文档
 
 Integration README 应说明支持状态、安装方法、能力矩阵、受管理的配置、重启要求、已知限制、断开和恢复步骤，以及对应的官方扩展文档。
+
+**「已知限制」不得为空，也不得过时**——它是 `stable` 的第五条判定条件（[ADR 0023](decisions/0023-integration-status-ladder.md) 第 3 节）。前四条都可以在只跑顺利路径的情况下满足；一个已知限制为空的 Integration，说明没有人认真用过它。
+
+这一节不是形式要求。2026-09-13 的逐条判定里，四个 Integration 有两个在这里出了问题：`opencode` 的 README 停在 M1（写着 manifest 还是 `planned`），`hermes` 的 README 声称一个已从 manifest 移除的协议。**README 不参与构建也不参与测试**，所以除非有人对着标准逐条读，它只会越漂越远。

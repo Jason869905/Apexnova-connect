@@ -2,7 +2,7 @@
 
 把 [Hermes Agent](https://github.com/NousResearch/hermes-agent)（Nous Research）指向 Apexnova AI Hub，走它自己的 custom OpenAI 兼容端点机制。
 
-状态：`experimental`。
+状态：**`stable`**（[ADR 0031](../../../docs/decisions/0031-first-stable-integration.md)）。
 
 ## 实机核实记录（2026-09-07，Hermes Agent v0.21.0 / 2026.8.31，git 安装，Linux/WSL2）
 
