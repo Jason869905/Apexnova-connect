@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { win32 } from "node:path";
+import { win32, basename, dirname} from "node:path";
 
 import {
   AgentIntegrationError,
@@ -18,6 +18,8 @@ import {
   type LaunchRequest,
   type ProtocolId,
   type VerificationResult,
+  explicitConfigPath,
+  unlaunchableConfig,
 } from "@apexnova-connect/integration-sdk";
 
 import { planCodexConfig } from "./codex-config.js";
@@ -159,12 +161,24 @@ export function createCodexIntegration(
     },
 
     async planLaunch(request: LaunchRequest): Promise<LaunchPlan> {
+      // Codex reads `$CODEX_HOME/config.toml` and has no flag for an arbitrary
+      // file, so it can be directed only when the path is a `config.toml`.
+      // Anything else is refused rather than launched against ~/.codex.
+      const explicit = explicitConfigPath(request.context);
+      if (explicit !== undefined && basename(explicit) !== "config.toml") {
+        throw unlaunchableConfig(
+          CODEX_DISPLAY_NAME,
+          explicit,
+          "it reads $CODEX_HOME/config.toml and has no option for another file name",
+        );
+      }
       return {
         executable: resolveCodexExecutable(request.context, options.pathExists),
         args: [...request.args],
         environment: {
           ...request.context.environment,
           ...request.credentialEnvironment,
+          ...(explicit === undefined ? {} : { CODEX_HOME: dirname(explicit) }),
         },
       };
     },

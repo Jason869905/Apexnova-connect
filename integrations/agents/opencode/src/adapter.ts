@@ -19,6 +19,8 @@ import {
   type LaunchRequest,
   type ProtocolId,
   type VerificationResult,
+  explicitConfigPath,
+  unlaunchableConfig,
 } from "@apexnova-connect/integration-sdk";
 
 import {
@@ -238,6 +240,19 @@ export function createOpenCodeIntegration(
     },
 
     async planLaunch(request: LaunchRequest): Promise<LaunchPlan> {
+      // Refused rather than launched: this Agent has no way of being pointed
+      // at another configuration file, so launching would start it on its own
+      // while Connect had just written ours somewhere else. That is the defect
+      // this guard exists for -- it ran, exited zero, and used a different
+      // provider entirely.
+      const explicit = explicitConfigPath(request.context);
+      if (explicit !== undefined) {
+        throw unlaunchableConfig(
+          OPENCODE_DISPLAY_NAME,
+          explicit,
+          "it reads its own configuration locations and honours no override (OPENCODE_CONFIG has no effect on 1.18.29)",
+        );
+      }
       return {
         executable: resolveOpenCodeExecutable(request.context, options.pathExists),
         args: [...request.args],

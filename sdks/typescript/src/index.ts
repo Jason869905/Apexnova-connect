@@ -56,7 +56,7 @@ export type {
   WriteFileOperation,
 } from "./lifecycle.js";
 
-export { AgentIntegrationError } from "./agent.js";
+export { AgentIntegrationError, explicitConfigPath, unlaunchableConfig } from "./agent.js";
 
 export type {
   AgentInspection,

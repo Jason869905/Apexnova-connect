@@ -490,3 +490,14 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 理由（随记录公开留存）：*Superseded: collected by capability suite 0.3.0, whose published identity does not cover openai-chat-completions. Re-collected identically under 0.4.0, which does.*
 
 撤销**不是删除**：记录仍可按 id 读取，只是不再支持任何判定，并从此带着这条理由。这正是它该有的处置——那四次运行确实发生过，不该被抹掉；被抹掉的只是它们对判定的支持力。
+
+## 2026-09-13 Claude Code 经 Gateway 端到端（[ADR 0020](decisions/0020-gateway-batch-closure.md) 条件 2 达成）
+
+这条从 [ADR 0019](decisions/0019-gateway-first-slice-review.md) 起一直记为「环境所限」，理由是 Claude Code 的配置就是本会话在用的文件。**理由不成立**：`--config` 可以指到隔离路径——只是它此前不起作用，见下。
+
+- 环境：WSL2 Linux，Claude Code（`/usr/bin/claude`），隔离配置 `/tmp/tmp.l1fx35qZ1B/settings.json`；
+- 命令：`run claude-code --config <iso>/settings.json --gateway --deployment …cmq4770nr… -- -p "Reply with exactly OK"`；
+- 结果：**Agent 退出 0、答出 `OK`、`attributedRequests: 1`**。审计记录 `billed (run): confirmed via gateway, 1 request`，含 `POST /anthropic/v1/messages 200 in 5465ms (0720a469-…)`；
+- **本会话自己的 `~/.claude/settings.json` 全程未被触碰**（mtime 仍是 09-11，内容不含 loopback）。
+
+顺带记两个在做这条时发现并修掉的缺陷，见 [ADR 0029](decisions/0029-launch-must-honour-the-configured-file.md)。

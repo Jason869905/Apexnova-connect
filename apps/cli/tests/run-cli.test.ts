@@ -2468,6 +2468,41 @@ describe("CLI", () => {
     ]);
   });
 
+  it("takes the gateway back when the Agent exits non-zero", async () => {
+    // Closing the gateway and restoring the configuration used to happen only
+    // after a successful launch. An Agent exiting non-zero raises AGENT_EXITED,
+    // so that path left the server listening -- the process then never exited
+    // at all -- and left a dead loopback address in the Agent's config for the
+    // next launch to find.
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-gateway-fail-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{}\n", "utf8");
+    const capture = captureIo();
+    let duringLaunch = "";
+
+    const result = await runCli(["run", "opencode", "--gateway", "--deployment", "deployment.nova"], {
+      io: capture.io,
+      credentialStore: memoryCredentials(),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub(),
+      launchAgent: async () => {
+        duringLaunch = await readFile(configPath, "utf8");
+        return 1;
+      },
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      cwd: root,
+      createRequestId: () => "local_gateway_fail",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.runtime);
+    // The run really did go through the gateway, so the restore below is
+    // undoing something rather than passing vacuously.
+    expect(duringLaunch).toContain("http://127.0.0.1:");
+    expect(await readFile(configPath, "utf8")).not.toContain("127.0.0.1");
+  });
+
   it("refuses to send a run direct when the gateway was asked for", async () => {
     // The flag silently doing nothing is the failure this milestone keeps
     // finding; asked-for-and-not-running is a contradiction, not a fallback.

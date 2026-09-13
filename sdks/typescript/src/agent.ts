@@ -1,3 +1,5 @@
+import { isAbsolute, resolve } from "node:path";
+
 import type {
   ApplyReceipt,
   AvailableDetection,
@@ -137,6 +139,33 @@ export interface AgentIntegration
  * exit codes, so a new integration reports errors the CLI already understands
  * without the CLI importing anything product-specific.
  */
+/**
+ * The configuration path the caller asked for, absolute, or `undefined` when
+ * the Agent's own default is in use.
+ *
+ * `planLaunch` has to consult this. Connect writing one configuration file and
+ * then launching a process that reads a different one was a real defect: with
+ * `--config` pointing elsewhere, OpenCode answered from its own built-in
+ * provider, exited zero, and the gateway saw no requests at all. An Agent that
+ * cannot be told which file to read must be refused a launch, not launched
+ * against the wrong one.
+ */
+export function explicitConfigPath(context: IntegrationContext): string | undefined {
+  if (!context.configPath) return undefined;
+  return isAbsolute(context.configPath)
+    ? resolve(context.configPath)
+    : resolve(context.workingDirectory, context.configPath);
+}
+
+/** Thrown when `--config` names a file the Agent has no way of being pointed at. */
+export function unlaunchableConfig(displayName: string, configPath: string, how: string): AgentIntegrationError {
+  return new AgentIntegrationError(
+    "LAUNCH_CONFIG_UNREACHABLE",
+    `${displayName} cannot be told to read ${configPath}: ${how}. The configuration was written there, but launching would start ${displayName} on a different one, so the launch is refused.`,
+    { details: { configPath } },
+  );
+}
+
 export class AgentIntegrationError extends Error {
   readonly code: string;
   readonly details: Readonly<Record<string, unknown>>;

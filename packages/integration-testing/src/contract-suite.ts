@@ -351,15 +351,44 @@ export function describeIntegrationContract(
       }
     });
 
-    it.skipIf(fixtures.readOnly)("plans a launch that injects the credential into the environment only", async () => {
-      const launch = await integration.planLaunch({
-        context,
-        credentialEnvironment: { [integration.credentialEnvironmentVariable]: SECRET },
-        args: ["--version"],
-      });
+    /**
+     * `context` here always carries an explicit `configPath`, and the previous
+     * version of this test asserted the plan came back with the arguments
+     * untouched -- which encoded the defect rather than catching it. Connect
+     * wrote its configuration to that path and then launched an Agent that read
+     * its own: OpenCode answered from its built-in provider, exited zero, and
+     * the gateway recorded no requests at all.
+     *
+     * The rule is therefore: point the Agent at the file, or refuse to launch.
+     * Silently starting it on a different configuration is not a third option.
+     */
+    it.skipIf(fixtures.readOnly)("points the Agent at the configuration it was given, or refuses to launch", async () => {
+      let launch: Awaited<ReturnType<typeof integration.planLaunch>>;
+      try {
+        launch = await integration.planLaunch({
+          context,
+          credentialEnvironment: { [integration.credentialEnvironmentVariable]: SECRET },
+          args: ["--version"],
+        });
+      } catch (cause) {
+        // Refusing is a correct answer for an Agent with no way to be directed.
+        expect(cause).toBeInstanceOf(AgentIntegrationError);
+        expect((cause as AgentIntegrationError).code).toBe("LAUNCH_CONFIG_UNREACHABLE");
+        expect((cause as AgentIntegrationError).message).toContain(configPath);
+        return;
+      }
+
+      // Having launched, the plan has to carry the configured location. The
+      // base context contributes no paths (see `contractEnvironment`), so this
+      // can only come from the integration deciding to pass it on.
+      const directed = [
+        ...launch.args,
+        ...Object.values(launch.environment).filter((value): value is string => typeof value === "string"),
+      ].join("\n");
+      expect(directed).toContain(dirname(configPath));
 
       expect(launch.executable.length).toBeGreaterThan(0);
-      expect(launch.args).toEqual(["--version"]);
+      expect(launch.args).toContain("--version");
       expect(launch.environment[integration.credentialEnvironmentVariable]).toBe(SECRET);
       expect(launch.args.join(" ")).not.toContain(SECRET);
       expect(launch.executable).not.toContain(SECRET);

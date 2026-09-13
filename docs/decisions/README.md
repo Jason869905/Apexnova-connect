@@ -34,3 +34,4 @@
 - [ADR 0026：Linux 两格补齐，只剩 Windows](0026-linux-collection-completes.md)
 - [ADR 0027：M2 的平台退出条件改为两个平台](0027-m2-exit-condition-two-platforms.md)
 - [ADR 0028：M2 收口](0028-m2-closure.md)
+- [ADR 0029：启动必须落在刚写的那份配置上，否则拒绝启动](0029-launch-must-honour-the-configured-file.md)

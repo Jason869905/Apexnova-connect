@@ -15,6 +15,8 @@ import {
   type LaunchRequest,
   type ProtocolId,
   type VerificationResult,
+  explicitConfigPath,
+  unlaunchableConfig,
 } from "@apexnova-connect/integration-sdk";
 
 import { hermesApiMode, planHermesConfig } from "./hermes-config.js";
@@ -152,6 +154,19 @@ export function createHermesIntegration(
         throw new AgentIntegrationError(
           "AGENT_NOT_FOUND",
           "Hermes Agent has no native Windows build; run it under WSL2.",
+        );
+      }
+      // Refused rather than launched: Hermes has no way of being pointed at
+      // another configuration file, so launching would start it on its own
+      // while Connect had just written ours somewhere else. That is the defect
+      // this guard exists for -- it ran, exited zero, and used a different
+      // provider entirely.
+      const explicit = explicitConfigPath(request.context);
+      if (explicit !== undefined) {
+        throw unlaunchableConfig(
+          HERMES_DISPLAY_NAME,
+          explicit,
+          "it reads ~/.hermes/config.yaml and honours no override (HERMES_CONFIG has no effect on 0.21.0)",
         );
       }
       return {

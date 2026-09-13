@@ -18,6 +18,7 @@ import {
   type LaunchRequest,
   type ProtocolId,
   type VerificationResult,
+  explicitConfigPath,
 } from "@apexnova-connect/integration-sdk";
 
 import { planClaudeCodeSettings } from "./claude-code-settings.js";
@@ -155,9 +156,13 @@ export function createClaudeCodeIntegration(
     },
 
     async planLaunch(request: LaunchRequest): Promise<LaunchPlan> {
+      // `--settings` is how Claude Code is told to read a file other than its
+      // own. Without it, `--config` wrote one settings file and launched a
+      // process that read another -- and the run still reported success.
+      const settings = explicitConfigPath(request.context);
       return {
         executable: resolveClaudeCodeExecutable(request.context, options.pathExists),
-        args: [...request.args],
+        args: settings === undefined ? [...request.args] : ["--settings", settings, ...request.args],
         environment: {
           ...request.context.environment,
           ...request.credentialEnvironment,

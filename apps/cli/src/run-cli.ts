@@ -3212,24 +3212,15 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     });
   }
 
-  // Through the gateway the Agent gets the local token, never the Hub
-  // credential: that is the point of the process boundary, not a side effect of
-  // it.
-  await launchAgent(
-    parsed,
-    dependencies,
-    integration,
-    gateway ? { ...binding, secret: SecretValue.from(gateway.localToken) } : binding,
-    agentArgs,
-  );
-
-  // Whatever the gateway ended up holding is what the last requests were billed
-  // to, so the audit names that one. What each individual request cost is in
-  // `billedTo`, which is split per credential below.
-  if (gatewayBinding !== undefined) binding = gatewayBinding;
-  launchWarnings.push(...gatewayNotices);
-
-  if (gateway) {
+  // Closing the gateway and taking the configuration back are not conditional
+  // on the Agent having succeeded. Before this was a function called from both
+  // paths, a launch that threw -- an Agent exiting non-zero raises
+  // `AGENT_EXITED` -- left the gateway listening, so the process never exited
+  // at all, and left the loopback address in the Agent's configuration.
+  let released = false;
+  async function releaseGateway(): Promise<void> {
+    if (gateway === undefined || released) return;
+    released = true;
     await gateway.close();
     // The configuration names an ephemeral loopback port and a token that died
     // with the process. Leaving it behind would give the next launch an address
@@ -3250,6 +3241,30 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
       }
     }
   }
+
+  // Through the gateway the Agent gets the local token, never the Hub
+  // credential: that is the point of the process boundary, not a side effect of
+  // it.
+  try {
+    await launchAgent(
+      parsed,
+      dependencies,
+      integration,
+      gateway ? { ...binding, secret: SecretValue.from(gateway.localToken) } : binding,
+      agentArgs,
+    );
+  } catch (cause) {
+    await releaseGateway();
+    throw cause;
+  }
+
+  // Whatever the gateway ended up holding is what the last requests were billed
+  // to, so the audit names that one. What each individual request cost is in
+  // `billedTo`, which is split per credential below.
+  if (gatewayBinding !== undefined) binding = gatewayBinding;
+  launchWarnings.push(...gatewayNotices);
+
+  await releaseGateway();
 
   // Every credential this run's requests could have been billed to: the one in
   // force at the end, plus any the gateway actually used before a renewal.
