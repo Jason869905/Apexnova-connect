@@ -231,6 +231,83 @@ describe("OpenCode inspection", () => {
   });
 });
 
+describe("the model set a plan writes", () => {
+  const planContext = {
+    platform: "linux" as const,
+    workingDirectory: tmpdir(),
+    homeDirectory: tmpdir(),
+    environment: {} as Record<string, string | undefined>,
+  };
+  const detection = {
+    agentId: "opencode",
+    displayName: "OpenCode",
+    status: "installed" as const,
+    productVersion: "1.18.29",
+    configPath: "/tmp/opencode/opencode.jsonc",
+    configExists: false,
+    configScope: "global" as const,
+    evidence: ["test"],
+    warnings: [] as string[],
+  };
+  const inspection = {
+    agentId: "opencode",
+    configPath: detection.configPath,
+    status: "not-configured" as const,
+    managed: false,
+    warnings: [] as string[],
+  };
+  const intent = {
+    planId: "plan.models",
+    createdAt: "2026-09-13T12:00:00.000Z",
+    deploymentId: "deployment.nova",
+    inferenceAlias: "nova",
+    modelName: "Nova Coder",
+    protocol: "openai-responses" as const,
+    baseUrl: "https://api.example.test/v1/responses",
+    apiKeyEnvironmentVariable: "APEXNOVA_API_KEY",
+    limits: { context: 128000, output: 8192 },
+  };
+
+  function written(plan: { operations: readonly { content: string }[] }) {
+    return JSON.parse(plan.operations[0]!.content) as {
+      model: string;
+      provider: { apexnova: { models: Record<string, { name: string; limit?: unknown }> } };
+    };
+  }
+
+  it("writes every model the intent carries, and starts on the first", async () => {
+    // The whole point of the set: OpenCode's own picker switches between these,
+    // so all of them have to be in the provider it was given.
+    const plan = await openCodeIntegration.plan(
+      planContext,
+      detection,
+      inspection,
+      {
+        ...intent,
+        models: [
+          { deploymentId: "deployment.nova", inferenceAlias: "nova", modelName: "Nova Coder", limits: { context: 128000, output: 8192 } },
+          { deploymentId: "deployment.aux", inferenceAlias: "aux", modelName: "Aux Reasoner" },
+        ],
+      },
+    );
+
+    const config = written(plan);
+    expect(Object.keys(config.provider.apexnova.models)).toEqual(["nova", "aux"]);
+    expect(config.provider.apexnova.models.aux?.name).toBe("Aux Reasoner");
+    expect(config.provider.apexnova.models.aux?.limit).toBeUndefined();
+    expect(config.model).toBe("apexnova/nova");
+  });
+
+  it("configures the single model an intent without a set names", async () => {
+    // A caller that knows nothing about model sets still gets what it asked for.
+    const plan = await openCodeIntegration.plan(planContext, detection, inspection, intent);
+
+    const config = written(plan);
+    expect(Object.keys(config.provider.apexnova.models)).toEqual(["nova"]);
+    expect(config.model).toBe("apexnova/nova");
+  });
+});
+
 describe("planLaunch and the configuration it was given", () => {
   // Paths are built with the host's own `path`, never written with a literal
   // separator. CI caught the difference: a Windows runner resolved the

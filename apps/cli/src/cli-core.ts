@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { select } from "@inquirer/prompts";
+import { checkbox, select } from "@inquirer/prompts";
 
 import {
   toPlatform,
@@ -64,6 +64,11 @@ export interface CliPickerItem<T> {
   readonly value: T;
 }
 
+export interface CliMultiPickerItem<T> extends CliPickerItem<T> {
+  /** Ticked when the list opens: what the profile already has. */
+  readonly checked?: boolean;
+}
+
 export interface CliDependencies {
   readonly io?: CliIo;
   readonly cwd?: string;
@@ -84,6 +89,8 @@ export interface CliDependencies {
   readonly now?: () => Date;
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   readonly pick?: <T>(message: string, items: readonly CliPickerItem<T>[]) => Promise<T>;
+  /** Picks one or more items. Returns them in the order the list offered them. */
+  readonly pickMany?: <T>(message: string, items: readonly CliMultiPickerItem<T>[]) => Promise<readonly T[]>;
 }
 
 export interface CliRunResult {
@@ -106,7 +113,10 @@ export interface ParsedArguments {
   readonly agent?: string;
   readonly protocol?: string;
   readonly compatibleOnly: boolean;
+  /** The default deployment: the first `--deployment`. */
   readonly deployment?: string;
+  /** Every `--deployment`, in the order given. Absent when none was passed. */
+  readonly deployments?: readonly string[];
   readonly dryRun: boolean;
   readonly list: boolean;
   readonly live: boolean;
@@ -204,6 +214,33 @@ async function defaultPick<T>(message: string, items: readonly CliPickerItem<T>[
 
 export function resolvePicker(dependencies: CliDependencies): <T>(message: string, items: readonly CliPickerItem<T>[]) => Promise<T> {
   return dependencies.pick ?? defaultPick;
+}
+
+async function defaultPickMany<T>(
+  message: string,
+  items: readonly CliMultiPickerItem<T>[],
+): Promise<readonly T[]> {
+  if (items.length === 0) throw new CliError({ code: "INVALID_ARGUMENT", message: "No items to pick from.", exitCode: EXIT_CODES.usage });
+  return checkbox({
+    message,
+    choices: items.map((item) => ({
+      name: item.label,
+      value: item.value,
+      ...(item.description ? { description: item.description } : {}),
+      ...(item.checked ? { checked: true } : {}),
+    })),
+    // An empty selection configures nothing and is a mistake, not a choice, so
+    // the prompt says so rather than returning a set the caller has to refuse.
+    required: true,
+    loop: false,
+    pageSize: 12,
+  });
+}
+
+export function resolveMultiPicker(
+  dependencies: CliDependencies,
+): <T>(message: string, items: readonly CliMultiPickerItem<T>[]) => Promise<readonly T[]> {
+  return dependencies.pickMany ?? defaultPickMany;
 }
 
 export function noOperands(parsed: ParsedArguments): void {

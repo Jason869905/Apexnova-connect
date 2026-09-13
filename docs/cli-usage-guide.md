@@ -136,11 +136,26 @@ Expires: 2026-09-06T12:00:00Z
 ## 第 3 步：一行启动 Agent
 
 ```bash
-apexnova run <agent>            # 自动选模型 + 创建 key + 写配置 + 启动
+apexnova run <agent>            # 选模型 + 创建 key + 写配置 + 启动
 apexnova run <agent> -- <args>  # -- 之后的参数透传给 Agent
 ```
 
-首次运行会选模型并写配置；之后直接启动。非交互环境（`--json`、`--non-interactive`、CI）没有已绑定的 deployment 时**不会**替你挑一个，而是返回 `DEPLOYMENT_REQUIRED`（退出码 2）——先用 `apexnova models --json` 列出候选，再传 `--deployment`。
+首次运行会选模型并写配置；之后直接启动。
+
+**一次可以选多个模型。**交互模式下首次运行弹出的是多选框：空格勾选、回车确认，勾了不止一个再问一次「先用哪个」。勾中的模型全部写进 Agent 的配置，共用**同一枚永久 key**，于是之后在 Agent 自己的界面里换模型不用回到 Connect，也不会多花一次授权：
+
+```bash
+apexnova run opencode           # 勾 nova + glm，默认 nova
+                                # 之后在 OpenCode 里直接切到 glm，key 不变
+```
+
+非交互环境（`--json`、`--non-interactive`、CI）没有已绑定的 deployment 时**不会**替你挑一个，而是返回 `DEPLOYMENT_REQUIRED`（退出码 2）——先用 `apexnova models --json` 列出候选，再传 `--deployment`；`--deployment` 可以重复，第一个就是默认模型：
+
+```bash
+apexnova run opencode --deployment deployment.a --deployment deployment.b --json
+```
+
+一个 Agent 只配置一个 endpoint，所以一组模型必须在同一个协议和同一个 base URL 上。做不到时报 `PROTOCOL_NOT_SHARED` 并列出分歧的 deployment——少配一个会让你拿到一个选得中、用不了的模型。
 
 启动器要求 `detect` 结果为 `installed`：只有配置文件、没有可执行文件时返回 `AGENT_NOT_FOUND`。
 
@@ -231,7 +246,7 @@ apexnova agents                                  # 支持哪些 Agent
 apexnova whoami                                  # 当前账号与套餐
 apexnova detect [agent]                          # 装没装、版本、配置在哪
 apexnova inspect <agent>                         # 当前 Provider、协议、受管理字段
-apexnova models [--agent <id>]                   # 模型目录，交互模式可上下键切换
+apexnova models [--agent <id>]                   # 模型目录，交互模式上下键切换默认模型（新模型自动加入配置，key 不变）
 apexnova recommend <agent>                       # 按证据排名，说明为什么
 apexnova usage --granularity day                 # 用量
 apexnova balance                                 # 余额

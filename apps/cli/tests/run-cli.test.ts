@@ -77,6 +77,26 @@ function registryWith(overrides: Partial<AgentIntegration> = {}) {
   }]);
 }
 
+/**
+ * A catalog with a second model on the same endpoint, for the cases about a set
+ * of models rather than one: OpenCode configures one provider, so two models are
+ * only a set when they answer on the same protocol and base URL.
+ */
+function twoModelCatalog(): Awaited<ReturnType<HubCommandService["catalog"]>> {
+  const base = { protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" };
+  return {
+    schemaVersion: "0.1", catalogVersion: "cat_2", generatedAt: "2026-09-04T12:00:00Z", expiresAt: "2026-09-04T12:15:00Z", providers: [],
+    models: [
+      { id: "model.nova", name: "Nova Coder", publisher: "apexnova", modelType: "chat", capabilities: [], deploymentIds: ["deployment.nova"] },
+      { id: "model.aux", name: "Aux Reasoner", publisher: "apexnova", modelType: "chat", capabilities: [], deploymentIds: ["deployment.aux"] },
+    ],
+    deployments: [
+      { id: "deployment.nova", providerId: "provider.apexnova-ai-hub", modelId: "model.nova", displayName: "Nova Coder", inferenceAlias: "nova", aliases: ["nova"], protocols: [base], limits: { contextWindow: 128000, maxOutputTokens: 8192 }, capabilities: [], capabilityStatements: [], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } },
+      { id: "deployment.aux", providerId: "provider.apexnova-ai-hub", modelId: "model.aux", displayName: "Aux Reasoner", inferenceAlias: "aux", aliases: ["aux"], protocols: [base], limits: { contextWindow: 64000, maxOutputTokens: 4096 }, capabilities: [], capabilityStatements: [], availability: { status: "available", observedAt: "2026-09-04T12:00:00Z" } },
+    ],
+  };
+}
+
 function mockHub(overrides: Partial<HubCommandService> = {}): HubCommandService {
   return {
     login: async (_profile, prompt) => {
@@ -647,6 +667,150 @@ describe("CLI", () => {
     expect(restored.exitCode).toBe(EXIT_CODES.success);
     expect(await readFile(configPath, "utf8")).toBe(original);
     expect(revoke).toHaveBeenCalledWith("default", "rtc_1", expect.any(AbortSignal));
+  });
+
+  it("configures every selected model on one permanent key and starts on the first", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-multi-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
+    const credentials = memoryCredentials();
+    const createApiKey = vi.fn(async (_profile: string, input: { publicDeploymentIds?: readonly string[] }) => ({
+      id: "key_1", name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user" as const,
+      protocols: ["openai-responses"], publicDeploymentIds: [...(input.publicDeploymentIds ?? [])],
+      createdAt: "2026-09-06T12:00:00Z", secret: SecretValue.from("api-key-secret"),
+    }));
+    const capture = captureIo();
+
+    const result = await runCli(
+      ["run", "opencode", "--deployment", "deployment.nova", "--deployment", "deployment.aux", "--json"],
+      {
+        io: capture.io,
+        credentialStore: credentials,
+        registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+        hubService: mockHub({
+          catalog: async () => twoModelCatalog(),
+          createApiKey: createApiKey as unknown as HubCommandService["createApiKey"],
+        }),
+        launchAgent: async () => 0,
+        platform: "win32",
+        environment: { LOCALAPPDATA: root },
+        homeDirectory: root,
+        createRequestId: () => "local_multi",
+      },
+    );
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    // One key for the whole set: the Agent switches models inside its own UI,
+    // and a key scoped to the default alone would fail closed on the second one.
+    expect(createApiKey.mock.calls[0]?.[1]).toMatchObject({
+      publicDeploymentIds: ["deployment.nova", "deployment.aux"],
+      expiresIn: null,
+    });
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      model: string;
+      provider: { apexnova: { models: Record<string, unknown> } };
+    };
+    expect(Object.keys(config.provider.apexnova.models)).toEqual(["nova", "aux"]);
+    expect(config.model).toBe("apexnova/nova");
+    expect(JSON.parse(capture.stdout()).data).toMatchObject({ deploymentId: "deployment.nova", credentialKind: "user" });
+    const binding = await new RuntimeBindingStore(credentials).load("opencode", "default");
+    expect(binding?.deploymentIds).toEqual(["deployment.nova", "deployment.aux"]);
+  });
+
+  it("adds a switched-to model to the configuration on the key that is already there", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-add-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
+    const credentials = memoryCredentials();
+    // The profile as a first `run` left it: one model, one permanent key.
+    await new RuntimeBindingStore(credentials).save("opencode", "default", {
+      credentialId: "key_1",
+      secret: SecretValue.from("api-key-secret"),
+      protocol: "openai-responses",
+      deploymentId: "deployment.nova",
+      kind: "user",
+    });
+    const createApiKey = vi.fn(async () => { throw new Error("a switch must not mint a second key"); });
+    const updateApiKey = vi.fn(async (_profile: string, id: string, input: { publicDeploymentIds?: readonly string[] }) => ({
+      id, name: "OpenCode", prefix: "sk_abcd...wxyz", kind: "user" as const,
+      protocols: ["openai-responses"], publicDeploymentIds: [...(input.publicDeploymentIds ?? [])],
+      createdAt: "2026-09-06T12:00:00Z",
+    }));
+    const revokeApiKey = vi.fn(async () => undefined);
+    const capture = captureIo();
+
+    const result = await runCli(["models", "--agent", "opencode"], {
+      io: { ...capture.io, isInteractive: true },
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({
+        catalog: async () => twoModelCatalog(),
+        createApiKey: createApiKey as unknown as HubCommandService["createApiKey"],
+        updateApiKey: updateApiKey as unknown as HubCommandService["updateApiKey"],
+        revokeApiKey,
+      }),
+      pick: (async (_message: string, items: readonly { value: { id: string } }[]) =>
+        items.find((item) => item.value.id === "deployment.aux")!.value) as never,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_switch_add",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    // The same key, widened rather than replaced -- and so never revoked.
+    expect(createApiKey).not.toHaveBeenCalled();
+    expect(revokeApiKey).not.toHaveBeenCalled();
+    expect(updateApiKey.mock.calls[0]?.[1]).toBe("key_1");
+    expect(updateApiKey.mock.calls[0]?.[2]).toMatchObject({ publicDeploymentIds: ["deployment.aux", "deployment.nova"] });
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      model: string;
+      provider: { apexnova: { models: Record<string, unknown> } };
+    };
+    // The model that was already configured stays; the new one is the default.
+    expect(Object.keys(config.provider.apexnova.models).sort()).toEqual(["aux", "nova"]);
+    expect(config.model).toBe("apexnova/aux");
+    const binding = await new RuntimeBindingStore(credentials).load("opencode", "default");
+    expect(binding?.credentialId).toBe("key_1");
+    expect(binding?.secret.reveal()).toBe("api-key-secret");
+    expect(binding?.deploymentId).toBe("deployment.aux");
+    expect(binding?.deploymentIds).toEqual(["deployment.aux", "deployment.nova"]);
+    expect(capture.stdout()).toContain("2 models stay configured");
+  });
+
+  it("asks which of several ticked models the Agent should start on", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-tick-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
+    const credentials = memoryCredentials();
+    const capture = captureIo();
+
+    const result = await runCli(["run", "opencode"], {
+      io: { ...capture.io, isInteractive: true },
+      credentialStore: credentials,
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
+      hubService: mockHub({ catalog: async () => twoModelCatalog() }),
+      launchAgent: async () => 0,
+      pickMany: (async (_message: string, items: readonly { value: unknown }[]) =>
+        items.map((item) => item.value)) as never,
+      // The default is a choice of its own: taking whichever the checkbox listed
+      // first would be a decision nobody made.
+      pick: (async (_message: string, items: readonly { value: { id: string } }[]) =>
+        items.find((item) => item.value.id === "deployment.aux")!.value) as never,
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
+      createRequestId: () => "local_tick",
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const config = JSON.parse(await readFile(configPath, "utf8")) as {
+      model: string;
+      provider: { apexnova: { models: Record<string, unknown> } };
+    };
+    expect(config.model).toBe("apexnova/aux");
+    expect(Object.keys(config.provider.apexnova.models)).toEqual(["aux", "nova"]);
+    expect(capture.stderr()).toContain("2 models on one key");
   });
 
   describe("a switch that fails", () => {
@@ -1348,7 +1512,10 @@ describe("CLI", () => {
     await bindings.save("opencode", "legacy", loaded!);
 
     const stored = JSON.parse((await credentials.get(key))!.reveal()) as Record<string, unknown>;
-    expect(stored).toMatchObject({ version: 4, credentialId: "rtc_legacy", kind: "runtime" });
+    expect(stored).toMatchObject({ version: 5, credentialId: "rtc_legacy", kind: "runtime" });
+    // A binding written before the model set covers the one deployment it named
+    // -- exactly what its credential was issued for, nothing widened by upgrade.
+    expect(stored.deploymentIds).toEqual(["deployment.nova"]);
     // `issuedAt` is not invented for a binding that never carried one. Guessing
     // it would silently change the renewal window, which is derived from it --
     // a made-up issue time is a made-up lifetime.

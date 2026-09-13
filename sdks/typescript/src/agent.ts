@@ -49,6 +49,19 @@ export interface ModelLimits {
 }
 
 /**
+ * One model a connection makes available. The set shares `protocol` and
+ * `baseUrl` with the intent that carries it: a product configures one endpoint
+ * and picks models inside it, so a set spanning two endpoints is not one
+ * connection.
+ */
+export interface ConnectionModel {
+  readonly deploymentId: string;
+  readonly inferenceAlias: string;
+  readonly modelName?: string;
+  readonly limits?: ModelLimits;
+}
+
+/**
  * What the orchestrator asks an integration to configure. `protocol` and
  * `baseUrl` come straight from the Hub catalog projection; mapping them onto
  * the target product's own vocabulary is the integration's job.
@@ -56,9 +69,21 @@ export interface ModelLimits {
 export interface ConnectionIntent {
   readonly planId: string;
   readonly createdAt: string;
+  /** The default model: what the product should select until the user changes it. */
   readonly deploymentId: string;
   readonly inferenceAlias: string;
   readonly modelName?: string;
+  /**
+   * Every model to write into the configuration, default first -- so a product
+   * whose own UI can switch models has them all to switch between without
+   * another Connect command, on the one credential the set was issued for.
+   *
+   * Absent means the single model named by the fields above. A product that can
+   * only hold one model ignores this and configures that one; the orchestrator
+   * still issues the credential for the whole set, so nothing it writes can
+   * reach a model the key does not cover.
+   */
+  readonly models?: readonly ConnectionModel[];
   readonly protocol: ProtocolId;
   readonly baseUrl: string;
   readonly apiKeyEnvironmentVariable: string;

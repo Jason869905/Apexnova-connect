@@ -189,15 +189,25 @@ export function createOpenCodeIntegration(
           ? {}
           : { allowInsecureLoopback: intent.allowInsecureLoopback }),
         apiKeyEnvironmentVariable: intent.apiKeyEnvironmentVariable,
-        models: [
+        // Every model the intent carries, not just the default: OpenCode's own
+        // model picker switches between whatever this provider declares, and a
+        // switch inside the running Agent is the one that costs the user
+        // nothing. The credential covers the whole set, so none of these entries
+        // is a model the key would be refused for.
+        models: (intent.models ?? [
           {
-            id: intent.inferenceAlias,
-            name: intent.modelName ?? intent.inferenceAlias,
-            protocol,
-            upstreamId: intent.inferenceAlias,
+            deploymentId: intent.deploymentId,
+            inferenceAlias: intent.inferenceAlias,
+            ...(intent.modelName === undefined ? {} : { modelName: intent.modelName }),
             ...(intent.limits ? { limits: intent.limits } : {}),
           },
-        ],
+        ]).map((model) => ({
+          id: model.inferenceAlias,
+          name: model.modelName ?? model.inferenceAlias,
+          protocol,
+          upstreamId: model.inferenceAlias,
+          ...(model.limits ? { limits: model.limits } : {}),
+        })),
         defaultModelId: intent.inferenceAlias,
       });
     },

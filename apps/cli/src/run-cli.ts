@@ -100,12 +100,18 @@ import {
   launchAgent,
   requireAvailable,
   resolveDeployment,
+  resolveDeployments,
   runtimeCredentialForLaunch,
   runtimeCredentialIsDue,
   selectProtocol,
+  selectSharedProtocol,
   toProtocolId,
 } from "./agent-workflow.js";
-import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-binding-store.js";
+import {
+  RuntimeBindingStore,
+  bindingDeploymentIds,
+  type RuntimeCredentialBinding,
+} from "./runtime-binding-store.js";
 import {
   credentialStoreSelection,
   hubConfigDefaults,
@@ -171,7 +177,8 @@ Global options:
   --agent <id>           Filter a catalog for an Agent
   --protocol <id>        Select or filter a protocol
   --compatible-only      Hide unavailable or unsupported deployments
-  --deployment <id>      Select a public model deployment
+  --deployment <id>      Select a public model deployment; repeat it to configure
+                         several models at once, the first being the default
   --best                 Connect to the top of the ranking, and record why
   --gateway              Route this run through a local gateway (default off)
   --budget <amount>      Local ceiling for a billable suite run (default 0.05)
@@ -311,6 +318,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let protocol: string | undefined;
   let compatibleOnly = false;
   let deployment: string | undefined;
+  const deployments: string[] = [];
   let budget: string | undefined;
   let recordPath: string | undefined;
   let withinDays: number | undefined;
@@ -433,7 +441,12 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         break;
       }
       case "--deployment":
-        deployment = valueAfter(args, index, arg);
+        // Repeatable: `run` writes every model named here into the Agent's
+        // configuration on one credential, and the first is the one it starts
+        // on. Commands that act on a single deployment read `deployment`, which
+        // stays that first one.
+        deployments.push(valueAfter(args, index, arg));
+        deployment = deployments[0];
         index += 1;
         break;
       case "--within": {
@@ -588,6 +601,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(protocol ? { protocol } : {}),
     compatibleOnly,
     ...(deployment ? { deployment } : {}),
+    ...(deployments.length > 0 ? { deployments } : {}),
     ...(budget ? { budget } : {}),
     ...(recordPath ? { recordPath } : {}),
     ...(withinDays === undefined ? {} : { withinDays }),
@@ -935,18 +949,43 @@ async function executeModels(parsed: ParsedArguments, dependencies: CliDependenc
       });
     }
     const picker = resolvePicker(dependencies);
+    const previousBinding = await new RuntimeBindingStore(credentialStore(dependencies))
+      .load(target.manifest.id, parsed.profile)
+      .catch(() => null);
+    const alreadyConfigured = new Set(previousBinding ? bindingDeploymentIds(previousBinding) : []);
     const items: CliPickerItem<HubCatalogDeployment>[] = deployments.map((deployment) => ({
       label: `${deployment.displayName} (${deployment.inferenceAlias})`,
-      description: `${deployment.model?.name ?? deployment.modelId} · ${deployment.availability.status}`,
+      description: `${deployment.model?.name ?? deployment.modelId} · ${deployment.availability.status}${alreadyConfigured.has(deployment.id) ? " · configured" : ""}`,
       value: deployment,
     }));
     const selected = await picker("Select a model to switch to (Esc to cancel):", items);
+    // A switch re-points the default; it does not narrow what the profile can
+    // reach. `configureAgent` keeps the models already configured wherever the
+    // credential survives, so a model picked here is added to the set if it is
+    // new and simply becomes the default if it was already there -- on the same
+    // key, which is what makes the switch free.
     const protocol = selectProtocol(selected, target);
-    const result = await configureAgent(parsed, dependencies, target, selected, protocol, catalog);
+    const result = await configureAgent(parsed, dependencies, target, [selected], protocol, catalog);
+    const configured = bindingDeploymentIds(result.binding);
+    const added = !bindingDeploymentIds(previousBinding ?? result.binding).includes(selected.id);
     return {
-      data: { ...catalogEnvelope, switchedTo: selected.id, agentId: target.manifest.id, credentialKind: result.binding.kind ?? "runtime" },
+      data: {
+        ...catalogEnvelope,
+        switchedTo: selected.id,
+        deploymentIds: configured,
+        addedToConfiguration: added,
+        agentId: target.manifest.id,
+        credentialId: result.binding.credentialId,
+        credentialKind: result.binding.kind ?? "runtime",
+      },
       warnings: [...warnings, ...result.warnings],
-      human: `Switched to ${selected.displayName} (${selected.inferenceAlias}). Run "apexnova run ${target.manifest.id}" to use it.`,
+      human: [
+        `${added ? "Added" : "Switched to"} ${selected.displayName} (${selected.inferenceAlias}); it is now the default model.`,
+        ...(configured.length > 1
+          ? [`${configured.length} models stay configured on key ${result.binding.credentialId}: ${configured.join(", ")}.`]
+          : []),
+        `Run "apexnova run ${target.manifest.id}" to use it.`,
+      ].join("\n"),
     };
   }
   return { data: catalogEnvelope, warnings, human };
@@ -1077,15 +1116,18 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
     if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
       throw new CliError({ code: "BINDING_MISMATCH", message: "The previous runtime target is no longer available; configuration was not restored.", exitCode: EXIT_CODES.verification });
     }
+    // The rolled-back configuration offers the model set it was written with, so
+    // the credential that goes back with it covers the same set.
+    const targetDeploymentIds = bindingDeploymentIds(target);
     const created = await service.createRuntimeCredential(parsed.profile, {
       name: `${integration.manifest.displayName} (${parsed.profile})`,
       protocols: [target.protocol],
-      publicDeploymentIds: [target.deploymentId],
+      publicDeploymentIds: targetDeploymentIds,
       expiresIn: 86_400,
     }, operationSignal(parsed));
     try {
       const active = (await service.runtimeCredentials(parsed.profile, operationSignal(parsed))).find((item) => item.credentialId === created.credentialId);
-      if (!active || !active.protocols.includes(target.protocol) || !active.publicDeploymentIds.includes(target.deploymentId)) {
+      if (!active || !active.protocols.includes(target.protocol) || !targetDeploymentIds.every((id) => active.publicDeploymentIds.includes(id))) {
         throw new CliError({ code: "VERIFICATION_FAILED", message: "The restored runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
       }
       replacement = {
@@ -1094,6 +1136,7 @@ async function executeRestore(parsed: ParsedArguments, dependencies: CliDependen
         expiresAt: created.expiresAt,
         protocol: target.protocol,
         deploymentId: target.deploymentId,
+        deploymentIds: targetDeploymentIds,
         ...(target.transactionId ? { transactionId: target.transactionId } : {}),
         ...(target.restoreTarget ? { restoreTarget: target.restoreTarget } : {}),
       };
@@ -2984,7 +3027,7 @@ async function createAgentPlan(
     ? catalog.deployments.find((item) => item.id === chosen.deploymentId)!
     : await resolveDeployment(parsed, dependencies, integration, catalog);
   const protocol = selectProtocol(deployment, integration, parsed.protocol);
-  const intent = connectionIntent(parsed, dependencies, integration, deployment, protocol, catalog);
+  const intent = connectionIntent(parsed, dependencies, integration, [deployment], protocol, catalog);
   const plan = await integration.plan(context, detection, inspection, intent);
 
   return {
@@ -3047,7 +3090,9 @@ async function executeConnect(parsed: ParsedArguments, dependencies: CliDependen
     parsed,
     dependencies,
     preview.integration,
-    deployment,
+    // `connect` configures one target it already showed in --dry-run, and its
+    // runtime credential is replaced on every run, so nothing is carried over.
+    [deployment],
     protocol,
     catalog,
     "runtime",
@@ -3284,8 +3329,11 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
   const configureWarnings: string[] = [];
   if (needConfig) {
     const catalog = await hubService(parsed, dependencies).catalog(parsed.profile, operationSignal(parsed));
-    const deployment = await resolveDeployment(parsed, dependencies, integration, catalog, existing?.deploymentId);
-    const protocol = selectProtocol(deployment, integration);
+    const deployments = await resolveDeployments(parsed, dependencies, integration, catalog, {
+      ...(existing ? { alreadyBound: bindingDeploymentIds(existing) } : {}),
+    });
+    const deployment = deployments[0]!;
+    const protocol = selectSharedProtocol(deployments, integration);
     if (parsed.gateway) {
       // Started here, once the endpoint this run will actually use is known --
       // taking whichever endpoint the catalog happened to list first would
@@ -3315,7 +3363,7 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     // never gets there, a permanent key outlives the failure and a 24-hour one
     // does not.
     const result = await configureAgent(
-      parsed, dependencies, integration, deployment, target, catalog,
+      parsed, dependencies, integration, deployments, target, catalog,
       gateway ? "runtime" : "auto", undefined, gateway !== undefined,
     );
     binding = result.binding;
@@ -3324,7 +3372,14 @@ async function executeRun(parsed: ParsedArguments, dependencies: CliDependencies
     selectionEntryId = result.auditEntryId;
     configureWarnings.push(...result.warnings);
     if (!parsed.json) {
-      io.stderr(`Configured ${integration.manifest.displayName} with ${deployment.displayName} (${deployment.inferenceAlias}).\n`);
+      // The whole set, because that is what the Agent's own model picker will
+      // offer, and the one it starts on is named as such.
+      const configured = bindingDeploymentIds(result.binding).length;
+      io.stderr(
+        configured > 1
+          ? `Configured ${integration.manifest.displayName} with ${configured} models on one key; it starts on ${deployment.displayName} (${deployment.inferenceAlias}) and switches inside ${integration.manifest.displayName}.\n`
+          : `Configured ${integration.manifest.displayName} with ${deployment.displayName} (${deployment.inferenceAlias}).\n`,
+      );
     }
   }
   if (!binding) {

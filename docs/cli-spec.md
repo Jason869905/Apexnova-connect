@@ -127,15 +127,20 @@ apexnova logout --yes
 
 ### `apexnova run <agent>`
 
-一行命令完成连接与启动：自动选模型 → 创建 key → 写配置 → 启动目标 Agent。已经连接过的 profile 直接启动，不再生成计划。
+一行命令完成连接与启动：选模型 → 创建 key → 写配置 → 启动目标 Agent。已经连接过的 profile 直接启动，不再生成计划。
+
+**可以一次选多个模型。**交互模式下首次运行弹出多选框（空格勾选、回车确认），勾了不止一个时再问一次「先用哪个」；勾选的全部写进 Agent 的配置，用**同一枚 key**授权，之后在 Agent 自己的界面里换模型不需要再回到 Connect。非交互模式重复传 `--deployment` 达到同样效果，第一个是默认模型。
 
 ```text
 apexnova run opencode
 apexnova run codex --deployment <id>
+apexnova run opencode --deployment <id-a> --deployment <id-b>   # 两个模型，一枚 key，默认 a
 apexnova run claude-code --key <keyId>
 apexnova run opencode --rotating
 apexnova run opencode -- --model apexnova/glm-5.2
 ```
+
+一个 Agent 只配置一个 endpoint，所以一组模型必须在**同一个 protocol 且同一个 baseUrl** 上：做不到时报 `PROTOCOL_NOT_SHARED` 并列出分歧的 deployment，而不是悄悄少配一个——那会让用户拿到一个选得中、用不了的模型。
 
 `apexnova opencode` 保留为 `apexnova run opencode` 的别名，v0.1 的文档和安装脚本继续有效。
 
@@ -144,7 +149,8 @@ apexnova run opencode -- --model apexnova/glm-5.2
 选项：
 
 ```text
---deployment <id>      指定模型（省略时自动选第一个；交互模式弹出上下键选择器）
+--deployment <id>      指定模型；可重复，第一个是默认模型。省略时交互模式弹出多选框，
+                       非交互模式在没有已绑定 deployment 时报 DEPLOYMENT_REQUIRED
 --key <id>             绑定已有 API key（跳过创建，用于按工具追踪用量）
 --rotating             使用 24h 短期 runtime credential 而非永久 key
 --gateway              经本地 Gateway 转发（默认关闭；蕴含 --rotating，见下）
@@ -154,7 +160,9 @@ apexnova run opencode -- --model apexnova/glm-5.2
 
 流程：`detect → resolve deployment → ensure key → plan → apply → launch`。
 
-`ensure key` 行为：默认 `POST /v1/api-keys` 创建永久 `sk-` key；`--rotating` 创建 24h `anrt_`；`--key <id>` 验证存在并提示输入 secret。已有配置时跳过 plan/apply 直接 launch。永久 key 不过期无需续期；`--rotating` 剩余不足 1 小时时自动续期。
+`ensure key` 行为：默认 `POST /v1/api-keys` 创建永久 `sk-` key，`publicDeploymentIds` 覆盖**这次配置的全部模型**；`--rotating` 创建 24h `anrt_`（同样覆盖全部模型）；`--key <id>` 验证存在并提示输入 secret。已有配置时跳过 plan/apply 直接 launch。永久 key 不过期无需续期；`--rotating` 剩余不足 1 小时时自动续期，续期后的凭据覆盖同一组模型。
+
+**永久 key 在 logout 之前不变。**已经有一枚本 profile 的永久 key 时，加模型走 `PATCH /v1/api-keys/{id}` 扩大 `publicDeploymentIds`（发送的是并集），而不是另发一枚——Agent 配置里引用的 secret 不变，Hub 侧的配额也不会被一次换模型吃掉。PATCH 的结果会读回校验：Hub 没有真的放宽授权范围时报 `VERIFICATION_FAILED`，因为没放宽意味着用户选中的模型第一次调用就会 fail closed。key 已被服务端撤销（`NOT_FOUND`）是唯一会重新签发的情况。
 
 **`--gateway` 一律使用短期 credential**，等同于 `--rotating`。默认发永久 key 的理由是「直连时凭据在 Agent 自己的配置里，换一枚就得在它读过之后改写那份配置」——**经 Gateway 时 Agent 拿的是本地令牌，这个理由不成立**。续期发生在 Gateway 进程内、请求到来时，Agent 无感知；同时到期的多个请求共用一次续期。**续期窗口是「最后一小时，或寿命的后一半，取较短者」**（对 24 小时凭据即原来的一小时），且续期会复制原有寿命而不是退回 24 小时，见 [ADR 0030](decisions/0030-configurable-credential-lifetime.md)。**运行期内的续期与结束后的计费对账各自使用独立的截止时间**，不继承 `--timeout`——否则任何比它更长的运行都无法续期、也读不到台账。续期失败不中断运行：凭据此刻仍然有效（「到期」指剩余不足 1 小时），运行继续并给出警告，真到期后 Hub 返回的 401 原样透传。见 [ADR 0021](decisions/0021-gateway-credential-renewal.md)。
 
@@ -179,7 +187,9 @@ apexnova models --protocol openai-responses
 apexnova models --compatible-only
 ```
 
-`--compatible-only` 只隐藏明确不兼容项；未验证项必须单独标记，不能当作兼容。交互模式（TTY + 非 `--json` + 非 `--non-interactive`）：上下键选择，回车切换（创建 key + 更新配置），Esc 取消。
+`--compatible-only` 只隐藏明确不兼容项；未验证项必须单独标记，不能当作兼容。交互模式（TTY + 非 `--json` + 非 `--non-interactive`）：上下键选择，回车切换，Esc 取消。已经配置过的模型在描述里标 `configured`。
+
+**切换是「加上并置顶」，不是「换掉」**：选中的模型不在配置里就加进去，已经在就只把默认模型指向它；其余已配置的模型全部保留，key 不变（不新建、不撤销，必要时按上面的规则 PATCH 扩大范围）。这样在 Agent 界面里换模型和在 Connect 里换模型得到的是同一份可用模型集合。目录里已经消失、或不再在同一 endpoint 上提供的旧模型会被移出配置并给出警告——没有东西可以用来描述它了。
 
 ### `apexnova usage`
 

@@ -28,10 +28,11 @@ import {
   type LaunchPlan,
   type ProtocolId,
 } from "@apexnova-connect/integration-sdk";
-import type {
-  HubCatalogDeployment,
-  HubCatalogProtocol,
-  HubCatalogSnapshot,
+import {
+  HubClientError,
+  type HubCatalogDeployment,
+  type HubCatalogProtocol,
+  type HubCatalogSnapshot,
 } from "@apexnova-connect/hub-client";
 
 import {
@@ -45,6 +46,7 @@ import {
   localStateRoot,
   operationSignal,
   resolvePicker,
+  resolveMultiPicker,
   withRuntimeRotationLock,
   CliError,
   EXIT_CODES,
@@ -53,7 +55,11 @@ import {
   type ParsedArguments,
   inFlightSignal,
 } from "./cli-core.js";
-import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-binding-store.js";
+import {
+  RuntimeBindingStore,
+  bindingDeploymentIds,
+  type RuntimeCredentialBinding,
+} from "./runtime-binding-store.js";
 
 const RUNTIME_ROTATION_WINDOW_MS = 60 * 60 * 1_000;
 export const RUNTIME_CREDENTIAL_TTL_SECONDS = 86_400;
@@ -187,6 +193,52 @@ export function selectProtocol(
 }
 
 /**
+ * The one endpoint a whole model set can be served through.
+ *
+ * A configuration names a protocol and a base URL once and lists models under
+ * it, so a set is only a set if every deployment in it answers on the same pair
+ * -- the protocol alone is not enough, because the catalog gives each deployment
+ * its own URL for it, and a set that agrees on `openai-responses` while
+ * disagreeing on where it lives would send half the models to an address that
+ * does not serve them. Refused by name rather than silently narrowed: dropping
+ * the odd one out would leave the user with a model they picked and cannot use.
+ */
+export function selectSharedProtocol(
+  deployments: readonly HubCatalogDeployment[],
+  integration: AgentIntegration,
+  requested?: string,
+): HubCatalogProtocol {
+  const [primary, ...rest] = deployments;
+  if (!primary) throw protocolNotSupported(integration);
+  if (rest.length === 0) return selectProtocol(primary, integration, requested);
+  const usable = hubProtocolsFor(integration);
+  const candidates = primary.protocols.filter((item) =>
+    requested ? item.protocol === requested : usable.has(item.protocol),
+  );
+  for (const candidate of candidates) {
+    if (!usable.has(candidate.protocol)) continue;
+    const dissenting = rest.filter(
+      (deployment) => !deployment.protocols.some(
+        (item) => item.protocol === candidate.protocol && item.baseUrl === candidate.baseUrl,
+      ),
+    );
+    if (dissenting.length === 0) return candidate;
+  }
+  throw new CliError({
+    code: "PROTOCOL_NOT_SHARED",
+    message: `${integration.manifest.displayName} configures one endpoint for all its models, and the selected deployments have none in common. Pick models that share a protocol, or configure them one at a time.`,
+    exitCode: EXIT_CODES.unavailable,
+    details: {
+      supportedProtocols: integration.supportedProtocols,
+      deployments: deployments.map((deployment) => ({
+        id: deployment.id,
+        protocols: deployment.protocols.map((item) => item.protocol),
+      })),
+    },
+  });
+}
+
+/**
  * Accepts what the catalog shows a user. IDs are matched first and exactly, so a
  * deployment can never be shadowed by another one's alias; aliases resolve only
  * when they name exactly one deployment, because guessing which of several the
@@ -213,6 +265,44 @@ export function selectDeploymentByReference(
   return undefined;
 }
 
+/** The deployment a `--deployment` reference names, refused if it cannot serve. */
+function requireReferencedDeployment(
+  catalog: HubCatalogSnapshot,
+  reference: string,
+): HubCatalogDeployment {
+  const deployment = selectDeploymentByReference(catalog, reference);
+  if (!deployment) {
+    throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "The selected deployment is not present in the visible Hub catalog.", exitCode: EXIT_CODES.unavailable });
+  }
+  if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") {
+    throw new CliError({ code: "DEPLOYMENT_UNAVAILABLE", message: `Deployment ${deployment.id} is ${deployment.availability.status}.`, exitCode: EXIT_CODES.unavailable });
+  }
+  return deployment;
+}
+
+function compatibleDeployments(
+  integration: AgentIntegration,
+  catalog: HubCatalogSnapshot,
+): readonly HubCatalogDeployment[] {
+  const usable = hubProtocolsFor(integration);
+  return catalog.deployments.filter((deployment) =>
+    deployment.availability.status === "available" &&
+    deployment.protocols.some((protocol) => usable.has(protocol.protocol)),
+  );
+}
+
+function deploymentLabel(
+  deployment: HubCatalogDeployment,
+  catalog: HubCatalogSnapshot,
+): CliPickerItem<HubCatalogDeployment> {
+  const model = catalog.models.find((item) => item.id === deployment.modelId);
+  return {
+    label: `${deployment.displayName} (${deployment.inferenceAlias})`,
+    description: `${model?.name ?? deployment.modelId} · ${deployment.availability.status}`,
+    value: deployment,
+  };
+}
+
 export async function resolveDeployment(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
@@ -220,38 +310,21 @@ export async function resolveDeployment(
   catalog: HubCatalogSnapshot,
   existingDeploymentId?: string,
 ): Promise<HubCatalogDeployment> {
-  const usable = hubProtocolsFor(integration);
-  const compatible = catalog.deployments.filter((deployment) =>
-    deployment.availability.status === "available" &&
-    deployment.protocols.some((protocol) => usable.has(protocol.protocol)),
-  );
-  if (parsed.deployment) {
-    const deployment = selectDeploymentByReference(catalog, parsed.deployment);
-    if (!deployment) {
-      throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "The selected deployment is not present in the visible Hub catalog.", exitCode: EXIT_CODES.unavailable });
-    }
-    if (deployment.availability.status !== "available" && deployment.availability.status !== "degraded") {
-      throw new CliError({ code: "DEPLOYMENT_UNAVAILABLE", message: `Deployment ${deployment.id} is ${deployment.availability.status}.`, exitCode: EXIT_CODES.unavailable });
-    }
-    return deployment;
-  }
+  if (parsed.deployment) return requireReferencedDeployment(catalog, parsed.deployment);
   if (existingDeploymentId) {
     const existing = catalog.deployments.find((item) => item.id === existingDeploymentId);
     if (existing && (existing.availability.status === "available" || existing.availability.status === "degraded")) return existing;
   }
+  const compatible = compatibleDeployments(integration, catalog);
   if (compatible.length === 0) {
     throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "No compatible deployments are available.", exitCode: EXIT_CODES.unavailable });
   }
   const io = dependencies.io ?? defaultIo();
   if (io.isInteractive && !parsed.nonInteractive && !parsed.json) {
-    const picker = resolvePicker(dependencies);
-    const modelsById = new Map(catalog.models.map((model) => [model.id, model]));
-    const items: CliPickerItem<HubCatalogDeployment>[] = compatible.map((deployment) => ({
-      label: `${deployment.displayName} (${deployment.inferenceAlias})`,
-      description: `${modelsById.get(deployment.modelId)?.name ?? deployment.modelId} · ${deployment.availability.status}`,
-      value: deployment,
-    }));
-    return picker("Select a model:", items);
+    return resolvePicker(dependencies)(
+      "Select a model:",
+      compatible.map((deployment) => deploymentLabel(deployment, catalog)),
+    );
   }
   throw new CliError({
     code: "DEPLOYMENT_REQUIRED",
@@ -261,12 +334,84 @@ export async function resolveDeployment(
   });
 }
 
+/**
+ * Every model this connection should offer, default first.
+ *
+ * One credential covers the whole set, so choosing several here is what lets the
+ * Agent's own model picker work afterwards without Connect issuing anything new.
+ * The default is asked for separately once more than one is chosen: it is the
+ * model the Agent opens on, and inferring it from the order a checkbox happened
+ * to list things in would be a decision nobody made.
+ *
+ * `--deployment` may be repeated; the first names the default. On a
+ * non-interactive terminal it is the only way in, which is why an unbound
+ * profile there is an error rather than a prompt.
+ */
+export async function resolveDeployments(
+  parsed: ParsedArguments,
+  dependencies: CliDependencies,
+  integration: AgentIntegration,
+  catalog: HubCatalogSnapshot,
+  options: { readonly alreadyBound?: readonly string[] } = {},
+): Promise<readonly HubCatalogDeployment[]> {
+  const references = parsed.deployments ?? (parsed.deployment ? [parsed.deployment] : []);
+  if (references.length > 0) {
+    const selected: HubCatalogDeployment[] = [];
+    for (const reference of references) {
+      const deployment = requireReferencedDeployment(catalog, reference);
+      if (!selected.some((item) => item.id === deployment.id)) selected.push(deployment);
+    }
+    return selected;
+  }
+
+  const bound = options.alreadyBound ?? [];
+  if (bound.length > 0) {
+    const kept = bound
+      .map((id) => catalog.deployments.find((item) => item.id === id))
+      .filter((item): item is HubCatalogDeployment =>
+        item !== undefined &&
+        (item.availability.status === "available" || item.availability.status === "degraded"));
+    if (kept.length > 0) return kept;
+  }
+
+  const compatible = compatibleDeployments(integration, catalog);
+  if (compatible.length === 0) {
+    throw new CliError({ code: "DEPLOYMENT_NOT_FOUND", message: "No compatible deployments are available.", exitCode: EXIT_CODES.unavailable });
+  }
+  const io = dependencies.io ?? defaultIo();
+  if (!io.isInteractive || parsed.nonInteractive || parsed.json) {
+    throw new CliError({
+      code: "DEPLOYMENT_REQUIRED",
+      message: "No deployment is bound yet and the terminal is not interactive; pass --deployment <id> (repeat it for more than one model). Run `apexnova models --json` to list them.",
+      exitCode: EXIT_CODES.usage,
+      details: { compatibleDeploymentIds: compatible.map((deployment) => deployment.id) },
+    });
+  }
+  const items = compatible.map((deployment) => deploymentLabel(deployment, catalog));
+  const chosen = await resolveMultiPicker(dependencies)(
+    "Select the models to configure (space to tick, enter to confirm):",
+    items,
+  );
+  if (chosen.length === 0) {
+    throw new CliError({ code: "DEPLOYMENT_REQUIRED", message: "No model was selected.", exitCode: EXIT_CODES.usage });
+  }
+  if (chosen.length === 1) return chosen;
+  // `resolvePicker` returns a single item without prompting, so this only ever
+  // asks when there is a real choice to make.
+  const preferred = await resolvePicker(dependencies)(
+    "Which one should it start on?",
+    chosen.map((deployment) => deploymentLabel(deployment, catalog)),
+  );
+  return [preferred, ...chosen.filter((deployment) => deployment.id !== preferred.id)];
+}
+
 /** Builds the product-neutral description of the connection to configure. */
 export function connectionIntent(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   integration: AgentIntegration,
-  deployment: HubCatalogDeployment,
+  /** The model set, default first. A single deployment is the one-model case. */
+  deployments: readonly HubCatalogDeployment[],
   protocol: HubCatalogProtocol,
   catalog: HubCatalogSnapshot,
   // A gateway run points the Agent at loopback on purpose, so the plain-HTTP
@@ -278,8 +423,14 @@ export function connectionIntent(
   if (!protocolId || !integration.supportedProtocols.includes(protocolId)) {
     throw protocolNotSupported(integration);
   }
-  if (!deployment.inferenceAlias) {
-    throw new CliError({ code: "INVALID_RESPONSE", message: "The selected deployment has no public inference model alias.", exitCode: EXIT_CODES.runtime });
+  const deployment = deployments[0];
+  if (!deployment) {
+    throw new CliError({ code: "DEPLOYMENT_REQUIRED", message: "A connection needs at least one deployment.", exitCode: EXIT_CODES.usage });
+  }
+  for (const item of deployments) {
+    if (!item.inferenceAlias) {
+      throw new CliError({ code: "INVALID_RESPONSE", message: `Deployment ${item.id} has no public inference model alias.`, exitCode: EXIT_CODES.runtime });
+    }
   }
   const model = catalog.models.find((item) => item.id === deployment.modelId);
   const limits = deployment.limits;
@@ -290,6 +441,17 @@ export function connectionIntent(
     deploymentId: deployment.id,
     inferenceAlias: deployment.inferenceAlias,
     modelName: deployment.displayName || model?.name || deployment.inferenceAlias,
+    models: deployments.map((item) => {
+      const itemModel = catalog.models.find((entry) => entry.id === item.modelId);
+      return {
+        deploymentId: item.id,
+        inferenceAlias: item.inferenceAlias,
+        modelName: item.displayName || itemModel?.name || item.inferenceAlias,
+        ...(item.limits?.contextWindow && item.limits.maxOutputTokens
+          ? { limits: { context: item.limits.contextWindow, output: item.limits.maxOutputTokens } }
+          : {}),
+      };
+    }),
     protocol: protocolId,
     baseUrl: protocol.baseUrl,
     apiKeyEnvironmentVariable: integration.credentialEnvironmentVariable,
@@ -317,13 +479,16 @@ export async function ensureCredential(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   integration: AgentIntegration,
-  deployment: HubCatalogDeployment,
+  /** The model set this credential must cover, default first. */
+  deployments: readonly HubCatalogDeployment[],
   protocol: HubCatalogProtocol,
   mode: CredentialMode = "auto",
 ): Promise<RuntimeCredentialBinding> {
   const agentId = integration.manifest.id;
   const service = hubService(parsed, dependencies);
   const signal = operationSignal(parsed);
+  const deployment = deployments[0]!;
+  const deploymentIds = deployments.map((item) => item.id);
   if (parsed.apiKeyId && mode === "auto") {
     const keyInfo = await service.apiKey(parsed.profile, parsed.apiKeyId, signal);
     const bindings = new RuntimeBindingStore(credentialStore(dependencies));
@@ -350,6 +515,7 @@ export async function ensureCredential(
       secret: SecretValue.from(secret),
       protocol: protocol.protocol,
       deploymentId: deployment.id,
+      deploymentIds,
       kind: "user",
     };
   }
@@ -358,7 +524,7 @@ export async function ensureCredential(
     const created = await service.createRuntimeCredential(parsed.profile, {
       name: credentialName(integration, parsed.profile),
       protocols: [protocol.protocol],
-      publicDeploymentIds: [deployment.id],
+      publicDeploymentIds: deploymentIds,
       expiresIn: parsed.credentialTtlSeconds ?? RUNTIME_CREDENTIAL_TTL_SECONDS,
     }, signal);
     return {
@@ -371,13 +537,55 @@ export async function ensureCredential(
       issuedAt,
       protocol: protocol.protocol,
       deploymentId: deployment.id,
+      deploymentIds,
       kind: "runtime",
     };
   }
+
+  // The permanent key is the one the user is told does not change until logout,
+  // so adding a model widens the key that exists rather than issuing a second
+  // one. Hub's PATCH replaces the allowed set, so it is sent the union: the
+  // models already configured stay usable, and the new one becomes usable, on
+  // the same secret the Agent's configuration already refers to.
+  const bindings = new RuntimeBindingStore(credentialStore(dependencies));
+  const existing = await bindings.load(agentId, parsed.profile).catch(() => null);
+  if (existing?.kind === "user" && existing.protocol === protocol.protocol) {
+    const covered = bindingDeploymentIds(existing);
+    const missing = deploymentIds.filter((id) => !covered.includes(id));
+    const union = [...deploymentIds, ...covered.filter((id) => !deploymentIds.includes(id))];
+    if (missing.length === 0) {
+      return { ...existing, deploymentId: deployment.id, deploymentIds: union };
+    }
+    try {
+      const updated = await service.updateApiKey(parsed.profile, existing.credentialId, {
+        protocols: [protocol.protocol],
+        publicDeploymentIds: union,
+      }, signal);
+      // Hub is the authority on what the key may reach, so the widening is read
+      // back rather than assumed: a key that silently kept its old set would
+      // send the user to a model that fails closed on first use.
+      const stillMissing = union.filter((id) => !updated.publicDeploymentIds.includes(id));
+      if (stillMissing.length > 0) {
+        throw new CliError({
+          code: "VERIFICATION_FAILED",
+          message: `Hub did not widen key ${existing.credentialId} to ${stillMissing.join(", ")}.`,
+          exitCode: EXIT_CODES.verification,
+          details: { credentialId: existing.credentialId, requested: union, granted: updated.publicDeploymentIds },
+        });
+      }
+      return { ...existing, deploymentId: deployment.id, deploymentIds: union };
+    } catch (cause) {
+      // A key Hub no longer has cannot be widened. Issuing its replacement is
+      // the one case where the stable key legitimately changes, and the caller
+      // revokes nothing because there is nothing left to revoke.
+      if (!(cause instanceof HubClientError) || cause.code !== "NOT_FOUND") throw cause;
+    }
+  }
+
   const created = await service.createApiKey(parsed.profile, {
     name: credentialName(integration, parsed.profile),
     protocols: [protocol.protocol],
-    publicDeploymentIds: [deployment.id],
+    publicDeploymentIds: deploymentIds,
     expiresIn: null,
   }, signal);
   return {
@@ -385,6 +593,7 @@ export async function ensureCredential(
     secret: created.secret,
     protocol: protocol.protocol,
     deploymentId: deployment.id,
+    deploymentIds,
     kind: "user",
   };
 }
@@ -419,7 +628,8 @@ export async function configureAgent(
   parsed: ParsedArguments,
   dependencies: CliDependencies,
   integration: AgentIntegration,
-  deployment: HubCatalogDeployment,
+  /** The models this command selected, default first. */
+  selected: readonly HubCatalogDeployment[],
   protocol: HubCatalogProtocol,
   catalog: HubCatalogSnapshot,
   mode: CredentialMode = "auto",
@@ -430,18 +640,63 @@ export async function configureAgent(
   const context = integrationContext(parsed, dependencies);
   const bindings = new RuntimeBindingStore(credentialStore(dependencies));
   const previous = await bindings.load(agentId, parsed.profile);
+  const deployment = selected[0];
+  if (!deployment) {
+    throw new CliError({ code: "DEPLOYMENT_REQUIRED", message: "A connection needs at least one deployment.", exitCode: EXIT_CODES.usage });
+  }
   const detection = requireAvailable(
     await detectForCommand(parsed, dependencies, integration),
     integration,
   );
-  const intent = connectionIntent(parsed, dependencies, integration, deployment, protocol, catalog, viaLoopbackGateway);
+
+  // Switching a model adds it to the set rather than replacing it, wherever the
+  // credential survives the switch: the user was told the key does not change,
+  // and a key that still covers the old models while the configuration has
+  // dropped them would offer less than what was paid for. Where the credential
+  // is replaced anyway -- `connect`, a rotating run, a gateway run that rolls
+  // its own writes back -- the set is exactly what this command selected.
+  const keeps = mode === "auto"
+    && previous?.kind === "user"
+    && previous.protocol === protocol.protocol
+    && parsed.apiKeyId === undefined
+    && !parsed.rotating
+    && parsed.credentialTtlSeconds === undefined;
+  const carried: HubCatalogDeployment[] = [];
+  const dropped: string[] = [];
+  if (keeps && previous) {
+    for (const id of bindingDeploymentIds(previous)) {
+      if (selected.some((item) => item.id === id)) continue;
+      const kept = catalog.deployments.find((item) => item.id === id);
+      // A model that left the catalog, stopped serving this endpoint or went
+      // unavailable cannot be written into the configuration: there is nothing
+      // left to describe it with. It is named rather than dropped in silence.
+      if (kept
+        && (kept.availability.status === "available" || kept.availability.status === "degraded")
+        && kept.protocols.some((item) => item.protocol === protocol.protocol && item.baseUrl === protocol.baseUrl)
+        && kept.inferenceAlias) {
+        carried.push(kept);
+      } else {
+        dropped.push(id);
+      }
+    }
+  }
+  const deployments = [...selected, ...carried];
+
+  const intent = connectionIntent(parsed, dependencies, integration, deployments, protocol, catalog, viaLoopbackGateway);
 
   await mkdir(dirname(detection.configPath), { recursive: true, mode: 0o700 });
   const executor = new FileConfigExecutor({
     allowedRoots: [dirname(detection.configPath)],
     backupRoot: join(localStateRoot(dependencies), "backups"),
   });
-  const binding = await ensureCredential(parsed, dependencies, integration, deployment, protocol, mode);
+  const binding = await ensureCredential(parsed, dependencies, integration, deployments, protocol, mode);
+  // Only a credential this call issued may be revoked when something below
+  // fails. Reusing the profile's permanent key and then revoking it on a failed
+  // write would take away the key every other configured model runs on.
+  const issued = binding.credentialId !== previous?.credentialId;
+  const revokeIfIssued = async () => {
+    if (issued) await revokeBinding(parsed, dependencies, binding).catch(() => {});
+  };
 
   let outcome;
   try {
@@ -454,13 +709,13 @@ export async function configureAgent(
       approve: async () => true,
     });
   } catch (cause) {
-    await revokeBinding(parsed, dependencies, binding).catch(() => {});
+    await revokeIfIssued();
     if (cause instanceof IntegrationChangeError) throw cause.cause ?? cause;
     throw cause;
   }
 
   if (outcome.status === "rolled-back") {
-    await revokeBinding(parsed, dependencies, binding).catch(() => {});
+    await revokeIfIssued();
     throw new CliError({
       code: "VERIFICATION_FAILED",
       message: outcome.verification.reason,
@@ -469,7 +724,7 @@ export async function configureAgent(
     });
   }
   if (outcome.status === "unavailable" || outcome.status === "declined") {
-    await revokeBinding(parsed, dependencies, binding).catch(() => {});
+    await revokeIfIssued();
     throw new CliError({
       code: outcome.status === "declined" ? "APPROVAL_REQUIRED" : "AGENT_NOT_FOUND",
       message: `The ${integration.manifest.displayName} change was not applied.`,
@@ -492,6 +747,7 @@ export async function configureAgent(
       ...(previous ? { restoreTarget: {
         protocol: previous.protocol,
         deploymentId: previous.deploymentId,
+        deploymentIds: bindingDeploymentIds(previous),
         ...(previous.transactionId ? { transactionId: previous.transactionId } : {}),
         ...(previous.restoreTarget ? { restoreTarget: previous.restoreTarget } : {}),
       } } : {}),
@@ -499,7 +755,7 @@ export async function configureAgent(
   } catch (cause) {
     const failures: unknown[] = [cause];
     if (receipt) await executor.rollback(receipt).catch((error: unknown) => failures.push(error));
-    await revokeBinding(parsed, dependencies, binding).catch((error: unknown) => failures.push(error));
+    if (issued) await revokeBinding(parsed, dependencies, binding).catch((error: unknown) => failures.push(error));
     if (failures.length > 1) {
       throw new CliError({ code: "CONNECT_ROLLBACK_INCOMPLETE", message: "Connection failed and cleanup did not fully complete.", exitCode: EXIT_CODES.recovery, cause: new AggregateError(failures) });
     }
@@ -531,6 +787,9 @@ export async function configureAgent(
     ...(transactionId ? { transactionId } : {}),
   });
   if (selection.warning !== undefined) warnings.push(selection.warning);
+  if (dropped.length > 0) {
+    warnings.push(`${dropped.join(", ")} ${dropped.length === 1 ? "is" : "are"} no longer available on this endpoint and ${dropped.length === 1 ? "was" : "were"} removed from the configuration.`);
+  }
 
   return {
     binding,
@@ -715,6 +974,10 @@ export async function runtimeCredentialForLaunch(
     if (!deployment || !protocol || (deployment.availability.status !== "available" && deployment.availability.status !== "degraded")) {
       throw new CliError({ code: "BINDING_MISMATCH", message: "The stored runtime credential cannot be renewed because its deployment or protocol is no longer available.", exitCode: EXIT_CODES.verification });
     }
+    // The replacement covers what the configuration offers, not just the model
+    // in force: the Agent is running, and its own model picker can move to any
+    // of them between one request and the next.
+    const deploymentIds = bindingDeploymentIds(current);
     // The replacement keeps the lifetime the run was started with. Renewing a
     // ten-minute credential into a day-long one would quietly undo the choice.
     const lifetimeSeconds = bindingLifetimeSeconds(current);
@@ -722,7 +985,7 @@ export async function runtimeCredentialForLaunch(
     const created = await service.createRuntimeCredential(parsed.profile, {
       name: credentialName(integration, parsed.profile),
       protocols: [current.protocol],
-      publicDeploymentIds: [current.deploymentId],
+      publicDeploymentIds: deploymentIds,
       expiresIn: lifetimeSeconds,
     }, signal);
     const replacement = {
@@ -732,6 +995,7 @@ export async function runtimeCredentialForLaunch(
       issuedAt,
       protocol: current.protocol,
       deploymentId: current.deploymentId,
+      deploymentIds,
       ...(current.transactionId ? { transactionId: current.transactionId } : {}),
       ...(current.restoreTarget ? { restoreTarget: current.restoreTarget } : {}),
     };
@@ -742,7 +1006,7 @@ export async function runtimeCredentialForLaunch(
         throw new CliError({ code: "INVALID_RESPONSE", message: "Hub issued a runtime credential with an insufficient lifetime.", exitCode: EXIT_CODES.runtime });
       }
       const active = (await service.runtimeCredentials(parsed.profile, signal)).find((item) => item.credentialId === created.credentialId);
-      if (!active || !active.protocols.includes(current.protocol) || !active.publicDeploymentIds.includes(current.deploymentId)) {
+      if (!active || !active.protocols.includes(current.protocol) || !deploymentIds.every((id) => active.publicDeploymentIds.includes(id))) {
         throw new CliError({ code: "VERIFICATION_FAILED", message: "The renewed runtime credential did not pass control-plane verification.", exitCode: EXIT_CODES.verification });
       }
       await bindings.save(agentId, parsed.profile, replacement);

@@ -62,6 +62,7 @@ export type {
   AgentInspection,
   AgentIntegration,
   ConnectionIntent,
+  ConnectionModel,
   DiagnosticCheck,
   InspectionStatus,
   LaunchPlan,
