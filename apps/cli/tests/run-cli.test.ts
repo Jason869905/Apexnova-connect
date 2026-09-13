@@ -1384,6 +1384,25 @@ describe("CLI", () => {
     expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "CONFIG_EXISTS" } });
   });
 
+  it("puts a command's warnings on stderr in human mode, not only in --json", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-human-warnings-"));
+    const capture = captureIo();
+    // No --json: a caveat that only `--json` consumers ever saw is a caveat
+    // that was never delivered to the person who had to act on it.
+    await runCli(
+      ["init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect", "--non-interactive"],
+      {
+        io: capture.io,
+        environment: {},
+        platform: "linux",
+        homeDirectory: home,
+        createRequestId: () => "local_init_human",
+      },
+    );
+    expect(capture.stdout()).toContain("Credentials: credential file");
+    expect(capture.stderr()).toContain("file permissions alone");
+  });
+
   it("keeps credentials in a file on Linux without being asked to", async () => {
     const home = await mkdtemp(join(tmpdir(), "apexnova-credential-default-"));
     const context = { environment: {}, platform: "linux" as const, homeDirectory: home };

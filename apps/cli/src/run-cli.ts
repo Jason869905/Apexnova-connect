@@ -3909,6 +3909,9 @@ async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependenc
   return {
     data: { healthy: !failed, checks },
     warnings,
+    // Every warning here is one of the lines printed below, so the generic
+    // stderr echo would say each of them twice.
+    humanIncludesWarnings: true,
     human: checks.map((check) => `${check.status.toUpperCase()} ${check.id}: ${check.message}`).join("\n"),
   };
 }
@@ -4119,7 +4122,17 @@ export async function runCli(
     // A raw result already wrote exactly what its caller must receive.
     if ("raw" in result && result.raw) return { exitCode: EXIT_CODES.success, requestId };
     if (parsed.json) writeJsonSuccess(io, parsed.command, requestId, result.data, result.warnings);
-    else io.stdout(`${result.human}\n`);
+    else {
+      io.stdout(`${result.human}\n`);
+      // Human mode used to print `human` and drop `warnings` on the floor, so
+      // every caveat a command computed -- an environment variable overriding
+      // the file just written, a credential store with no OS protection behind
+      // it -- was visible only to `--json` consumers. They go to stderr so a
+      // piped stdout keeps carrying just the result.
+      if (!("humanIncludesWarnings" in result && result.humanIncludesWarnings)) {
+        for (const warning of result.warnings) io.stderr(`Warning: ${warning}\n`);
+      }
+    }
     return { exitCode: EXIT_CODES.success, requestId };
   } catch (error) {
     const normalized = normalizeError(error);
