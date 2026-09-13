@@ -552,3 +552,18 @@ Compose 项目 `apexagent` 的真实服务已完成以下验证：
 - `restore` 后 `C:\Users\wakee\.claude\settings.json` 与运行前**逐字节一致**。
 
 `detect` 现在报 **2.1.201**——启动器真正会启动的那一份（修复前报 2.1.233）。据此 **`claude-code` 升为 `stable`**，是第二个。
+
+## 2026-09-13 OpenCode 与 Codex 双平台闭环，四个 Integration 全部 `stable`
+
+[ADR 0034](decisions/0034-opencode-and-codex-stable.md)。四次实跑，均 `attributedRequests: 1`、退出 0、配置还原：
+
+| Integration | 平台 | 备注 |
+| --- | --- | --- |
+| `opencode` | Linux / Windows | — |
+| `codex` | Linux / Windows | Windows 那次是**修好解析器后以普通 npm 安装重跑**的 |
+
+**`codex` 的 Windows 原本走不通**：npm 只把 `codex.cmd` 放上 PATH，而启动器只接受 `.exe`（`.cmd` 无法以 `shell: false` 启动）。真正的二进制在 `@openai/codex-win32-x64/vendor/…/bin/codex.exe`——`opencode` 的解析器早就认识自己的 npm 布局，`codex` 没有。补上后无需任何 PATH 手脚。
+
+**`opencode` 的 README 停在 M1**，写着「尚未通过 CLI 对用户配置开放」「manifest 继续保持 `planned`」，§7 要求的小节一个都没有。已重写。
+
+**M5 的「三个首批 Integration 达到 stable」退出条件因此满足**（四个全部达到）。

@@ -50,6 +50,17 @@ function requireResponses(protocol: ProtocolId): void {
   );
 }
 
+/**
+ * Where `@openai/codex` keeps the real executable, relative to the directory
+ * holding the `codex.cmd` shim. The platform package and target triple are
+ * npm's own naming, so both Windows architectures are listed rather than
+ * guessed at from `process.arch` -- the directory either exists or it does not.
+ */
+const NPM_VENDORED_CODEX: readonly (readonly string[])[] = [
+  ["node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe"],
+  ["node_modules", "@openai", "codex", "node_modules", "@openai", "codex-win32-arm64", "vendor", "aarch64-pc-windows-msvc", "bin", "codex.exe"],
+];
+
 export function resolveCodexExecutable(
   context: IntegrationContext,
   pathExists: (path: string) => boolean = existsSync,
@@ -62,6 +73,16 @@ export function resolveCodexExecutable(
   for (const directory of pathValue.split(";").filter(Boolean)) {
     const executable = win32.join(directory, "codex.exe");
     if (pathExists(executable)) return executable;
+
+    // An npm install puts only `codex.cmd` on PATH and hides the real binary in
+    // a platform package, so without this a Windows user who installed the
+    // normal way could not launch Codex at all -- the Windows claim would be
+    // there with no usable path behind it. OpenCode's resolver already knows
+    // its own npm layout for the same reason.
+    for (const vendored of NPM_VENDORED_CODEX) {
+      const candidate = win32.join(directory, ...vendored);
+      if (pathExists(candidate)) return candidate;
+    }
   }
 
   throw new AgentIntegrationError(

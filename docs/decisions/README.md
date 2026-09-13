@@ -39,3 +39,4 @@
 - [ADR 0031：Hermes 升 `stable`，Claude Code 不升](0031-first-stable-integration.md)
 - [ADR 0032：在 Windows 上原生验证，三条缺口关闭但带出两个缺陷](0032-windows-verification.md)
 - [ADR 0033：探针改为探启动器真正会启动的那一个；Claude Code 升 `stable`](0033-probe-what-the-launcher-starts.md)
+- [ADR 0034：OpenCode 与 Codex 升 `stable`，M5 该条退出条件满足](0034-opencode-and-codex-stable.md)

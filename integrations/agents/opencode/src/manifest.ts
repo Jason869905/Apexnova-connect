@@ -14,7 +14,7 @@ export const openCodeManifest: IntegrationManifest = {
   description:
     "Connect OpenCode provider configuration to models served by Apexnova AI Hub.",
   version: "0.1.0",
-  status: "experimental",
+  status: "stable",
   category: "agent",
   delivery: {
     modes: ["config-adapter", "launcher"],

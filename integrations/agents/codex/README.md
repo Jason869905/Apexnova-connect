@@ -39,6 +39,8 @@ wire_api = "responses"
 - **不接管保留 provider id。** `openai`、`ollama`、`lmstudio` 是 Codex 内置 id，本集成固定使用 `apexnova`。
 - **无法安全编辑的布局会被拒绝。** 如果 `model_providers.apexnova` 是以内联表等形式写的，集成返回 `UNSUPPORTED_LAYOUT` 而不是猜测改写。
 - **直接运行 `codex` 不会带上凭据。** 凭据只在 `apexnova run codex` 启动的子进程环境里存在。
+- **Windows 上启动的是原生 `codex.exe`，不是 npm 的 `.cmd` shim。** `.cmd` 无法以 `shell: false` 启动，本项目不使用 shell。npm 安装把真正的二进制藏在平台子包里（`@openai/codex-win32-x64/vendor/…/bin/codex.exe`），启动器会自动找到它（[ADR 0034](../../../docs/decisions/0034-opencode-and-codex-stable.md)）；两处都没有时报 `AGENT_NOT_FOUND` 并说明出路。
+- **Codex 在非受信目录里会拒绝执行。** 不在 git 仓库中运行 `codex exec` 需要自己加 `--skip-git-repo-check`，这是 Codex 的要求，Connect 不代加。
 
 ## 断开与恢复
 

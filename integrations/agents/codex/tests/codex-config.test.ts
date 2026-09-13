@@ -11,6 +11,7 @@ import {
   detectCodex,
   inspectCodex,
   planCodexConfig,
+  resolveCodexExecutable,
 } from "../src/index.js";
 
 const testRoots: string[] = [];
@@ -212,5 +213,41 @@ env_key = "OTHER_KEY"
     expect(() =>
       planCodexConfig({ ...planBase, configPath: ".codex/config.toml", existingContent: null }),
     ).toThrowError(/must be absolute/);
+  });
+});
+
+describe("resolveCodexExecutable on Windows", () => {
+  const context = (path: string) => ({
+    platform: "windows" as const,
+    workingDirectory: "C:\\work",
+    homeDirectory: "C:\\Users\\someone",
+    environment: { PATH: path } as Record<string, string | undefined>,
+  });
+
+  it("finds the binary an npm install hides in its platform package", () => {
+    // npm puts only `codex.cmd` on PATH, and a `.cmd` cannot be spawned with
+    // `shell:false`. Without this the normal way of installing Codex left
+    // Windows unlaunchable -- a declared platform with no usable path behind it.
+    const npmDir = "C:\\Users\\someone\\AppData\\Roaming\\npm";
+    const vendored = `${npmDir}\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe`;
+
+    expect(resolveCodexExecutable(context(npmDir), (path) => path === vendored)).toBe(vendored);
+  });
+
+  it("prefers a codex.exe sitting directly on PATH", () => {
+    const dir = "C:\\tools";
+    const direct = `${dir}\\codex.exe`;
+
+    expect(resolveCodexExecutable(context(dir), (path) => path === direct)).toBe(direct);
+  });
+
+  it("still refuses when only a shim is installed, and says what to do", () => {
+    let thrown: unknown;
+    try {
+      resolveCodexExecutable(context("C:\\tools"), () => false);
+    } catch (cause) { thrown = cause; }
+
+    expect(thrown).toMatchObject({ code: "AGENT_NOT_FOUND" });
+    expect((thrown as Error).message).toContain("codex.cmd");
   });
 });
