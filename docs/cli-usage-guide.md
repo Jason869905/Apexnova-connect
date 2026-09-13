@@ -1,6 +1,7 @@
 # Apexnova-connect CLI 使用指南（通用部分）
 
-> 适用版本：apexnova-connect v0.5.2
+> 适用版本：apexnova-connect v0.5.2 + main 分支未发布改动
+> 标了「未发布」的功能只在源码构建里有，一行安装脚本装到的 v0.5.2 还没有
 > 平台：Windows、Linux。**macOS 不在支持范围内**——Keychain 后端有实现但从未在真实 macOS 上验收过，按 [ADR 0024](decisions/0024-narrow-platform-claims.md) 不再声称支持
 
 本文是所有 Agent 共用的部分：安装、登录、Hub 地址、Key 模式、通用命令、环境变量和安全说明。**某个 Agent 特有的配置字段、限制和恢复方式在各自的指南里**：
@@ -14,12 +15,47 @@
 
 ## 前置条件
 
-- Node.js 20+（一行安装脚本会在缺失时通过 fnm 自动安装）
-- 目标 Agent 已安装（`apexnova detect` 会告诉你哪些被识别到了）
+- `curl`（Windows 用 PowerShell 自带的 `irm`）
+- Node.js 20+ —— **没有也不用管**，一行安装脚本缺了会通过 fnm 装一份，只供本 CLI 使用
 - 一个 Apexnova AI Hub 账号
-- 可用的操作系统凭证后端（见下方 Linux 一节）
+- **不需要 keyring**：Linux 上凭证默认存进一个 0600 文件（见[凭证存在哪](#凭证存在哪仅-linux-可选)）
+- **目标 Agent 自己装好**：本 CLI 不安装 OpenCode / Codex / Claude Code / Hermes，只发现、配置和启动它们
 
-## 安装
+## 初始化安装流程
+
+从零到跑起来一共三步，全部照抄即可——**不需要装 keyring，不需要 sudo，不需要 D-Bus**。
+
+| # | 命令 | 做了什么 |
+|---|---|---|
+| 1 | `curl -fsSL .../install.sh \| bash` | 定位或安装 Node、校验 sha256、装单文件 CLI、写 `apexnova` 启动器 |
+| 2 | `apexnova login` | 设备码授权，token 存进凭证后端（Linux 默认是 0600 文件，Windows 是 Credential Manager） |
+| 3 | `apexnova run <agent>` | 选模型 + 建 key + 写 Agent 配置 + 启动 |
+
+两件可选的事：**源码构建**没有内置 Hub 地址，`login` 之前要先 `apexnova init --hub-url ...`（[可选：配置 Hub 地址](#可选配置-hub-地址)）；**想让操作系统保管秘密**的机器可以改用 keyring（[凭证存在哪](#凭证存在哪仅-linux-可选)）。
+
+下面各节按同样顺序展开，最后的「[自检：doctor 怎么读](#自检doctor-怎么读)」把 `apexnova doctor` 的每一行对回到对应步骤——它随时可以回答「现在卡在哪一步」。
+
+### 安装后落在哪些路径
+
+| 路径 | 内容 | 谁写的 |
+|---|---|---|
+| `~/.apexnova-connect/apexnova.mjs` | 单文件 CLI（约 1 MB） | 安装脚本 |
+| `~/.local/bin/apexnova` | 启动器，内含 node 绝对路径（Windows 为 `apexnova.cmd`） | 安装脚本 |
+| `~/.fnm/` | 仅当机器上没有 Node 20+ 时才出现 | 安装脚本 |
+| `~/.config/apexnova-connect/config.json` | Hub 地址、client ID、凭证后端选择（Windows 为 `%APPDATA%\Apexnova\connect\config.json`） | `apexnova init` |
+| `~/.local/share/apexnova-connect/credentials.json`（Linux 默认），或系统 keyring / Windows Credential Manager | token、runtime 凭据、key 引用 | `apexnova login` / `run` |
+| `~/.local/state/apexnova-connect/` | 审计日志、事务记录、可恢复备份 | `connect` / `switch` / `run` |
+| 各 Agent 自己的配置文件 | 只有 `provider.apexnova` 这类受管理字段 | `connect` / `switch` / `run` |
+
+卸载顺序：先 `apexnova logout`（撤销服务端 token），需要的话在 Hub 控制台撤销还在用的 `sk-` key，再删掉上面这些路径。Agent 自己的配置可以先用 `apexnova restore --list` 查事务、`apexnova restore <id> --yes` 还原成接入之前的样子。
+
+### Agent 要你自己装
+
+`run` 要求 `detect` 结果是 `installed`，找不到可执行文件时返回 `AGENT_NOT_FOUND`，**不会替你安装**。各 Agent 的安装方式见它们自己的文档（[OpenCode](https://opencode.ai/docs/)、[Codex](https://learn.chatgpt.com/docs/config-file/config-reference)、[Claude Code](https://code.claude.com/docs/en/llm-gateway-connect)、[Hermes](https://hermes-agent.nousresearch.com/docs/)），装完用 `apexnova detect` 确认。
+
+> **WSL 里要装 Linux 原生的那一份**。WSL 的 `$PATH` 带着 Windows 的 npm 目录，`opencode`/`codex` 很容易解析到 `/mnt/c/.../AppData/Roaming/npm` 下的 Windows 安装——那份读的是 Windows 用户的配置文件。发现到这种情况时启动器会**拒绝启动**并说明原因，而不是配置一份、启动另一份。
+
+## 第 1 步：安装 CLI
 
 ### 一行安装（推荐）
 
@@ -35,6 +71,17 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 
 钉定版本：`APEXNOVA_VERSION=v0.5.2`。其他可覆盖变量：`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
 
+脚本按顺序做六件事，任何一件失败都会停下并说明原因：
+
+1. **找 Node**：`node -v` ≥ 20 就用它（记下绝对路径）；否则下载 fnm 到 `~/.fnm` 并装一份 Node 20。
+2. **下载**：从 GitHub release 取 `apexnova.mjs`（默认 `latest`）。
+3. **校验**：比对同名 `.sha256`；机器上没有 `sha256sum`/`shasum` 时跳过并**告警**（不会假装校验过）。
+4. **安装**：放到 `~/.apexnova-connect/apexnova.mjs`。
+5. **写启动器**：`~/.local/bin/apexnova`，里面钉死第 1 步那个 node 的绝对路径——所以新开的终端、没有 fnm 环境的 shell 也能直接跑；`APEXNOVA_NODE` 可覆盖。随后跑一次 `apexnova --version` 自检。
+6. **提示**：`~/.local/bin` 不在 `PATH` 时打印 `export PATH=...`。
+
+脚本不装 keyring、不动系统包、不需要 sudo——凭证默认走文件后端，本来就不需要这些。
+
 ### 从源码构建
 
 ```bash
@@ -44,40 +91,17 @@ node apps/cli/dist/main.js --version
 
 源码构建**不含**内置 Hub 地址（避免开发版本误连生产），必须先 `apexnova init` 或设置环境变量。
 
-### Linux 凭证后端（仅 Linux 需要）
+## 可选：配置 Hub 地址
+
+发布产物已内置生产 Hub 地址，可以跳过本节直接 `apexnova login`；源码构建**不含**内置地址，必须先做这一步。
+
+`apexnova init` 写的是 `~/.config/apexnova-connect/config.json`。[凭证后端](#凭证存在哪仅-linux-可选)也记在同一个文件里（`credentialStore` 字段），所以要改的话可以一条命令做完：
 
 ```bash
-sudo apt-get install -y libsecret-1-0 libsecret-tools gnome-keyring
+apexnova init --hub-url https://api.apexnova-consulting.com --client-id apexnova-connect --credential-store system
 ```
 
-无桌面环境（headless WSL/SSH）需要启动 D-Bus 和 gnome-keyring：
-
-```bash
-eval "$(dbus-launch --sh-syntax)"
-gnome-keyring-daemon --start --components=secrets
-echo -n "" | gnome-keyring-daemon --unlock
-```
-
-`apexnova doctor` 的 `credential-backend` 检查会真实写入探针值再读回删除，所以它报 `PASS` 就是后端确实可用，不只是「这个平台理论上支持」。
-
-后端不可用最常见的两种情况：
-
-- **没有任何 keyring 在跑**：`secret-tool` 等到超时后非零退出，CLI 报 `BACKEND_UNAVAILABLE` 并提示启动命令。
-- **keyring 在跑，但挂在另一条会话总线上**：`org.freedesktop.secrets` 在当前总线上无人应答，表现同样是超时。先确认 daemon 实际用的是哪条总线，再让命令指向它：
-
-  ```bash
-  pgrep -af gnome-keyring
-  tr '\0' '\n' < /proc/<pid>/environ | grep DBUS_SESSION_BUS_ADDRESS
-  export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-XXXXXX   # 用上一行的输出
-  ```
-
-  这条总线跟着那个 daemon 进程存活，机器重启后要重新确认。
-
-Apexnova-connect **不会**在凭证后端不可用时把密钥降级写进明文文件，因此这一步没通过之前 `login` 无法完成。
-
-## 配置 Hub 地址
-
-发布产物已内置生产 Hub 地址，可以跳过本节直接 `apexnova login`。
+只改地址：
 
 ```bash
 apexnova init --hub-url https://api.apexnova-consulting.com --client-id apexnova-connect
@@ -90,7 +114,9 @@ export APEXNOVA_HUB_BASE_URL=https://api.apexnova-consulting.com
 export APEXNOVA_OAUTH_CLIENT_ID=apexnova-connect
 ```
 
-## 登录
+改已有配置只传要改的那个 flag 即可；一个 flag 都不传又是非交互（`--json`、`--non-interactive`、CI）时会报 `CONFIG_EXISTS`，此时用 `--force` 表示确实要整份覆盖。
+
+## 第 2 步：登录
 
 ```bash
 apexnova login
@@ -104,11 +130,11 @@ Enter code: ABCD-EFGH
 Expires: 2026-09-06T12:00:00Z
 ```
 
-在浏览器打开 URL、输入代码、批准授权。token 存进操作系统凭证后端。
+在浏览器打开 URL、输入代码、批准授权。token 存进当前凭证后端（Linux 默认是 `~/.local/share/apexnova-connect/credentials.json`，Windows 是 Credential Manager），不写进任何 Agent 的配置文件。
 
 > **scope 一次性定死**：登录申请的 scope 包括 `api-keys:read/write/revoke`。用旧版 CLI 登录过的 token 没有这些 scope，连接时会收到 `INSUFFICIENT_SCOPE`——重新 `apexnova login` 即可。
 
-## 一行启动
+## 第 3 步：一行启动 Agent
 
 ```bash
 apexnova run <agent>            # 自动选模型 + 创建 key + 写配置 + 启动
@@ -118,6 +144,86 @@ apexnova run <agent> -- <args>  # -- 之后的参数透传给 Agent
 首次运行会选模型并写配置；之后直接启动。非交互环境（`--json`、`--non-interactive`、CI）没有已绑定的 deployment 时**不会**替你挑一个，而是返回 `DEPLOYMENT_REQUIRED`（退出码 2）——先用 `apexnova models --json` 列出候选，再传 `--deployment`。
 
 启动器要求 `detect` 结果为 `installed`：只有配置文件、没有可执行文件时返回 `AGENT_NOT_FOUND`。
+
+## 凭证存在哪（仅 Linux 可选）
+
+> **未发布**：文件后端及其成为 Linux 默认，都是 v0.5.2 之后的改动，目前只在源码构建里生效。用一行安装脚本装到的 v0.5.2 仍然强制要求 keyring。
+
+Linux 上**默认就绪，不用做任何事**：token、runtime 凭据和 key 引用写进 `~/.local/share/apexnova-connect/credentials.json`，目录 0700、文件 0600。不需要 `secret-tool`、不需要 D-Bus、不需要 sudo。Windows 默认用 Credential Manager，同样不用准备。
+
+代价必须说清楚：**这个文件只靠文件权限保护**。任何能以你的身份读到它的东西都能用你的会话。headless 机器上没有可派生密钥的操作系统秘密，所以这里不提供加密的假象——`apexnova doctor` 每次都会为此输出一条 `credential-protection` 警告，那是常驻提醒，不是故障。
+
+为什么默认不是 keyring：Secret Service 在这个工具真正运行的环境里（容器、CI、headless SSH、WSL）基本不存在，强制要求它没换来任何保护，只换来五条命令的绕行，而且失败发生在**用户已经批准设备授权之后**（[ADR 0036](decisions/0036-file-backend-becomes-the-linux-default.md)）。
+
+### 想让操作系统保管秘密
+
+```bash
+sudo apt-get install -y libsecret-1-0 libsecret-tools gnome-keyring
+apexnova init --credential-store system
+apexnova login                                  # 两个后端不共享已存凭证，要重新登录一次
+```
+
+无桌面环境（headless WSL/SSH）还需要先把 D-Bus 和 keyring 起起来：
+
+```bash
+eval "$(dbus-launch --sh-syntax)"
+gnome-keyring-daemon --start --components=secrets
+echo -n "" | gnome-keyring-daemon --unlock
+```
+
+选了 `system` 之后后端不可用最常见的两种情况：
+
+- **没有任何 keyring 在跑**：`secret-tool` 等到超时后非零退出，CLI 报 `BACKEND_UNAVAILABLE`。
+- **keyring 在跑，但挂在另一条会话总线上**：`org.freedesktop.secrets` 在当前总线上无人应答，表现同样是超时。先确认 daemon 实际用的是哪条总线，再让命令指向它：
+
+  ```bash
+  pgrep -af gnome-keyring
+  tr '\0' '\n' < /proc/<pid>/environ | grep DBUS_SESSION_BUS_ADDRESS
+  export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-XXXXXX   # 用上一行的输出
+  ```
+
+  这条总线跟着那个 daemon 进程存活，机器重启后要重新确认。
+
+### 临时切换与切换规则
+
+```bash
+APEXNOVA_CREDENTIAL_STORE=system apexnova whoami   # 只对这条命令/这个 shell 生效，优先级最高
+apexnova init --credential-store file              # 写回配置文件，改成默认的文件后端
+```
+
+**永远不会自动切换后端**：选了 `system` 而 keyring 不应答时，命令报 `BACKEND_UNAVAILABLE` 并停下，不会把秘密改写到文件里——秘密悄悄换了个地方，等于这台机器一半凭证在这边、一半在那边，比一个说明白的错误更难收拾。
+
+> **从 v0.5.2 升上来的 Linux 用户**：旧版本的凭证在 keyring 里，新默认读的是文件，所以升级后会表现为"没登录"。重新 `apexnova login` 即可；想继续用 keyring 就 `apexnova init --credential-store system`。keyring 里的旧条目不会被自动删除，`apexnova logout`（切回 system 后执行）可以清掉。
+
+## 自检：doctor 怎么读
+
+```bash
+apexnova doctor
+```
+
+```
+PASS     claude-code.discovery: Claude Code: installed 2.1.261
+FAIL     opencode.discovery: OpenCode: not-found
+PASS     credential-backend: credential file (permissions only, no OS keyring) (~/.local/share/apexnova-connect/credentials.json)
+WARNING  credential-protection: credentials are protected by file permissions alone (the default on this platform)
+PASS     state-root: ~/.local/state/apexnova-connect
+PASS     hub-endpoint: https://api.apexnova-consulting.com (config-file)
+PASS     hub-session: acct_...
+```
+
+对着上面的五步读这份输出：
+
+| 检查 | 对应的事 | FAIL 时怎么办 |
+|---|---|---|
+| `<agent>.discovery` | 第 3 步 | 那个 Agent 没装或不在 PATH 上；CLI 不会替你装 |
+| `credential-backend` | 凭证后端 | 默认的文件后端几乎不会失败（除非目录不可写或权限被改坏）；选了 `system` 又没有 keyring 应答时报这条 |
+| `credential-protection` | 凭证后端 | 这是常驻警告，不是故障：文件后端只有文件权限保护 |
+| `hub-endpoint` | 可选 init | 跑 `apexnova init`，或设 `APEXNOVA_HUB_BASE_URL` |
+| `hub-session` | 第 2 步 | 跑 `apexnova login`；`INSUFFICIENT_SCOPE` 也重新登录一次 |
+
+非 `--json` 模式下，命令的 warnings 会打到 **stderr**（`Warning: ...`），stdout 只留结果，方便 `apexnova ... | jq` 之类的管道。
+
+`credential-backend` 是**真跑**出来的：写入一个探针值、读回、删除。报 `PASS` 就是这台机器上的后端确实能用，不是「这个平台理论上支持」。
 
 ## 通用命令
 
@@ -303,10 +409,11 @@ Hub 地址解析顺序：环境变量 > `apexnova init` 写入的配置文件 > 
 | `APEXNOVA_HUB_ALLOW_INSECURE_LOOPBACK` | 否 | 设为 `1` 时允许 localhost HTTP（仅开发用） |
 | `APEXNOVA_HUB_PATH_PREFIX` | 否 | API 路径前缀，如 dev 环境设为 `/api`（仅开发用） |
 | `APEXNOVA_ACCESS_TOKEN` | 否 | 直接传入 access token，跳过 credential store（仅测试用） |
+| `APEXNOVA_CREDENTIAL_STORE` | 否 | `file`（0600 凭证文件，Linux 默认）或 `system`（操作系统凭证服务，Windows 默认）；优先级高于配置文件里的 `credentialStore` |
 
 ## 安全说明
 
-- **密钥不落盘**：secret 只存在操作系统凭证后端，不写入任何 Agent 的配置文件、日志或命令行参数
+- **密钥不进 Agent 配置**：secret 只存在凭证后端，不写入任何 Agent 的配置文件、日志或命令行参数。Linux 默认的后端是 0600 凭证文件，**只受文件权限保护**（`doctor` 会一直提醒）；要让操作系统保管就 `--credential-store system`
 - **OAuth token 自动刷新**：access token 过期后用 refresh token 自动续期
 - **撤销语义**：`logout` 撤销整族 token；撤销 key 后推理返回 401；重复撤销返回 404
 - **组织 TTL 策略**：组织配了 `defaultKeyTtlDays` 时，`expiresIn: null` 建出的 key 仍会带策略过期时间。遇到 `key_ttl_policy` 时改用 `--rotating` 或更短过期时间

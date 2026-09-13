@@ -40,3 +40,5 @@
 - [ADR 0032：在 Windows 上原生验证，三条缺口关闭但带出两个缺陷](0032-windows-verification.md)
 - [ADR 0033：探针改为探启动器真正会启动的那一个；Claude Code 升 `stable`](0033-probe-what-the-launcher-starts.md)
 - [ADR 0034：OpenCode 与 Codex 升 `stable`，M5 该条退出条件满足](0034-opencode-and-codex-stable.md)
+- [ADR 0035：凭证文件后端：显式选择才有，绝不自动降级](0035-explicit-file-credential-backend.md)
+- [ADR 0036：Linux 默认后端改为凭证文件，放弃 keyring 作为前置条件](0036-file-backend-becomes-the-linux-default.md)

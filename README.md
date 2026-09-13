@@ -61,7 +61,21 @@ apexnova init --hub-url https://api.example.com --client-id apexnova-connect
 
 `APEXNOVA_HUB_BASE_URL` / `APEXNOVA_OAUTH_CLIENT_ID` 环境变量的优先级高于该文件。从源码构建的版本不含内置默认值，必须先 `init` 或设置环境变量——这是为了避免开发版本误连生产。
 
-`apexnova doctor` 会显示当前生效的 Hub 地址及其来源。
+`apexnova doctor` 会显示当前生效的 Hub 地址及其来源。完整的初始化安装流程（三步、每步写了哪些文件、doctor 每行怎么读）见 [CLI 使用指南](docs/cli-usage-guide.md#初始化安装流程)。
+
+### 凭证存放在哪
+
+Linux 上默认写进 `~/.local/share/apexnova-connect/credentials.json`（目录 0700、文件 0600）——**不需要 keyring、不需要 D-Bus、不需要 sudo**，装完就能 `login`。Windows 默认用 Credential Manager。
+
+代价说在前面：这个文件**只靠文件权限保护**，没有操作系统加密在背后，`apexnova doctor` 会一直为此输出一条警告。想让操作系统保管秘密的机器可以切回 keyring：
+
+```bash
+sudo apt-get install -y libsecret-tools gnome-keyring   # Linux 上 keyring 得自己装
+apexnova init --credential-store system
+apexnova login                                          # 两个后端不共享已存凭证
+```
+
+切换只发生在你明说的时候：选了 `system` 而 keyring 不应答，命令会报 `BACKEND_UNAVAILABLE` 停下，不会把秘密改写到文件里。（文件后端及其成为 Linux 默认是 v0.5.2 之后的改动，目前只在源码构建里生效。）
 
 > 注：从源码构建请见下方「开发状态」一节。
 
