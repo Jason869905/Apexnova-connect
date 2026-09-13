@@ -25,6 +25,7 @@ import {
 } from "@apexnova-connect/hub-client";
 import {
   createDefaultCredentialStore,
+  type CredentialBackendKind,
   type CredentialStore,
 } from "@apexnova-connect/credential-store";
 
@@ -33,7 +34,7 @@ import {
   type HubCommandService,
 } from "./hub-command-service.js";
 import { defaultAgentIntegrations } from "./integrations.js";
-import { hubConfigPath, readHubConfigFile, resolveHubConfig, type HubConfigContext } from "./hub-config.js";
+import { credentialStoreOptions, hubConfigPath, readHubConfigFile, resolveHubConfig, type HubConfigContext } from "./hub-config.js";
 
 export const EXIT_CODES = {
   success: 0,
@@ -118,6 +119,8 @@ export interface ParsedArguments {
   readonly hubUrl?: string;
   readonly clientId?: string;
   readonly pathPrefix?: string;
+  /** Which credential backend `init` should store: the OS service, or a file. */
+  readonly credentialStoreKind?: CredentialBackendKind;
   readonly force: boolean;
   readonly budget?: string;
   readonly recordPath?: string;
@@ -308,9 +311,8 @@ function withRetryableHub(service: HubCommandService, sleep: (milliseconds: numb
 }
 
 export function credentialStore(dependencies: CliDependencies): CredentialStore {
-  return dependencies.credentialStore ?? createDefaultCredentialStore({
-    ...(dependencies.platform ? { platform: dependencies.platform } : {}),
-  });
+  return dependencies.credentialStore
+    ?? createDefaultCredentialStore(credentialStoreOptions(hubConfigContext(dependencies)));
 }
 
 export function localStateRoot(dependencies: CliDependencies): string {

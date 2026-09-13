@@ -31,7 +31,7 @@ import {
   type UsageListResult,
 } from "@apexnova-connect/hub-client";
 
-import { hubConfigPath, resolveHubConfig } from "./hub-config.js";
+import { credentialStoreOptions, hubConfigPath, resolveHubConfig } from "./hub-config.js";
 
 const CORE_SCOPE = [
   "account:read", "catalog:read", "billing:read", "usage:read",
@@ -98,7 +98,11 @@ export function createDefaultHubCommandService(options: DefaultHubCommandService
   }
   const { baseUrl, clientId } = resolved;
   const apiPrefix = resolved.pathPrefix ?? "";
-  const credentials = createDefaultCredentialStore(options.platform ? { platform: options.platform } : {});
+  const credentials = createDefaultCredentialStore(credentialStoreOptions({
+    ...(options.environment ? { environment: options.environment } : {}),
+    ...(options.platform ? { platform: options.platform } : {}),
+    ...(options.homeDirectory ? { homeDirectory: options.homeDirectory } : {}),
+  }));
   const sessions = new HubSessionStore(credentials);
   const oauth = new HubOAuthClient({
     baseUrl, clientId, scope: CORE_SCOPE, optionalScopes: OPTIONAL_SCOPE,

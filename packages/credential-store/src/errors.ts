@@ -2,6 +2,7 @@ export type CredentialStoreErrorCode =
   | "INVALID_KEY"
   | "INVALID_SECRET"
   | "BACKEND_UNAVAILABLE"
+  | "INVALID_CONFIGURATION"
   | "UNSUPPORTED_PLATFORM"
   | "OPERATION_FAILED";
 

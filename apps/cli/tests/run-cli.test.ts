@@ -1384,6 +1384,132 @@ describe("CLI", () => {
     expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "CONFIG_EXISTS" } });
   });
 
+  it("keeps credentials in a file on Linux without being asked to", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-credential-default-"));
+    const context = { environment: {}, platform: "linux" as const, homeDirectory: home };
+
+    // No --credential-store anywhere: ADR 0036 made this the Linux default,
+    // because the keyring it used to require is absent in most of the sessions
+    // this CLI runs in.
+    const initCapture = captureIo();
+    await runCli(
+      ["init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect", "--json"],
+      { ...context, io: initCapture.io, createRequestId: () => "local_init_default" },
+    );
+    const credentialPath = join(home, ".local", "share", "apexnova-connect", "credentials.json");
+    expect(JSON.parse(initCapture.stdout())).toMatchObject({
+      data: { credentialStore: "file", credentialPath },
+      warnings: [expect.stringContaining("file permissions alone")],
+    });
+
+    const doctorCapture = captureIo();
+    await runCli(["doctor", "--json"], {
+      ...context,
+      io: doctorCapture.io,
+      hubService: mockHub(),
+      registry: registryWith({ detect: async () => installed }),
+      createRequestId: () => "local_doctor_default",
+    });
+    const checks = JSON.parse(doctorCapture.stdout()).data.checks;
+    expect(checks).toContainEqual(
+      expect.objectContaining({ id: "credential-backend", status: "pass", code: "credential-backend.file" }),
+    );
+    // Reached by default rather than by choice, and still said out loud.
+    expect(checks).toContainEqual(
+      expect.objectContaining({ id: "credential-protection", code: "credential-protection.file.built-in" }),
+    );
+  });
+
+  it("stores credentials in a file when asked, and keeps saying that it did", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-credential-file-"));
+    const context = { environment: {}, platform: "linux" as const, homeDirectory: home };
+
+    const initCapture = captureIo();
+    const init = await runCli(
+      [
+        "init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect",
+        "--credential-store", "file", "--json",
+      ],
+      { ...context, io: initCapture.io, createRequestId: () => "local_init_file" },
+    );
+    expect(init.exitCode).toBe(EXIT_CODES.success);
+    const credentialPath = join(home, ".local", "share", "apexnova-connect", "credentials.json");
+    expect(JSON.parse(initCapture.stdout())).toMatchObject({
+      data: { credentialStore: "file", credentialPath },
+      // The trade has to be stated while the choice is being made, not only
+      // after something goes wrong with it.
+      warnings: [expect.stringContaining("file permissions alone")],
+    });
+    expect(JSON.parse(await readFile(join(home, ".config", "apexnova-connect", "config.json"), "utf8")))
+      .toMatchObject({ credentialStore: "file" });
+
+    // No credentialStore dependency: this exercises the real backend the stored
+    // choice selects, on a box whose Secret Service would not have answered.
+    const doctorCapture = captureIo();
+    const doctor = await runCli(["doctor", "--json"], {
+      ...context,
+      io: doctorCapture.io,
+      hubService: mockHub(),
+      registry: registryWith({ detect: async () => installed }),
+      createRequestId: () => "local_doctor_file",
+    });
+    expect(doctor.exitCode).toBe(EXIT_CODES.success);
+    const checks = JSON.parse(doctorCapture.stdout()).data.checks;
+    expect(checks).toContainEqual(
+      expect.objectContaining({
+        id: "credential-backend",
+        status: "pass",
+        code: "credential-backend.file",
+        message: expect.stringContaining(credentialPath),
+      }),
+    );
+    // Passing its probe is not the same as being safe, and the report says so
+    // every time rather than once at setup.
+    expect(checks).toContainEqual(
+      expect.objectContaining({ id: "credential-protection", status: "warning" }),
+    );
+  });
+
+  it("lets the environment pick the credential backend for one shell", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-credential-env-"));
+    await runCli(["init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect", "--json"], {
+      io: captureIo().io,
+      environment: {},
+      platform: "linux",
+      homeDirectory: home,
+      createRequestId: () => "local_init_env",
+    });
+
+    const capture = captureIo();
+    await runCli(["doctor", "--json"], {
+      io: capture.io,
+      environment: { APEXNOVA_CREDENTIAL_STORE: "file" },
+      platform: "linux",
+      homeDirectory: home,
+      hubService: mockHub(),
+      registry: registryWith({ detect: async () => installed }),
+      createRequestId: () => "local_doctor_env",
+    });
+    const checks = JSON.parse(capture.stdout()).data.checks;
+    expect(checks).toContainEqual(
+      expect.objectContaining({ id: "credential-backend", status: "pass", code: "credential-backend.file" }),
+    );
+    expect(checks).toContainEqual(
+      expect.objectContaining({ id: "credential-protection", code: "credential-protection.file.environment" }),
+    );
+  });
+
+  it("rejects a credential backend nobody implements", async () => {
+    const home = await mkdtemp(join(tmpdir(), "apexnova-credential-bad-"));
+    const capture = captureIo();
+    const result = await runCli(
+      ["init", "--hub-url", "https://hub.example.test", "--client-id", "apexnova-connect", "--credential-store", "keyring", "--json"],
+      { io: capture.io, environment: {}, platform: "linux", homeDirectory: home, createRequestId: () => "local_init_bad" },
+    );
+    expect(result.exitCode).toBe(EXIT_CODES.usage);
+    expect(JSON.parse(capture.stdout())).toMatchObject({ error: { code: "INVALID_ARGUMENT" } });
+  });
+
   it("keeps environment variables ahead of the stored config file", async () => {
     const home = await mkdtemp(join(tmpdir(), "apexnova-precedence-"));
     await runCli(["init", "--hub-url", "https://stored.example.test", "--client-id", "stored", "--json"], {

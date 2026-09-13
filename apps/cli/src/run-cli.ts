@@ -58,7 +58,7 @@ import {
   type RecommendationConstraints,
 } from "@apexnova-connect/recommendation";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
-import { CredentialStoreError, SecretValue } from "@apexnova-connect/credential-store";
+import { CredentialStoreError, SecretValue, type CredentialBackendKind } from "@apexnova-connect/credential-store";
 
 import {
   agentOperand,
@@ -106,6 +106,7 @@ import {
 } from "./agent-workflow.js";
 import { RuntimeBindingStore, type RuntimeCredentialBinding } from "./runtime-binding-store.js";
 import {
+  credentialStoreSelection,
   hubConfigDefaults,
   hubConfigPath,
   readHubConfigFile,
@@ -135,6 +136,7 @@ const HELP = `Apexnova-connect CLI
 Usage:
   apexnova run <agent> [--deployment <id>] [--gateway] [--key <id>] [--rotating] [-- <agent args>]
   apexnova init [--hub-url <url>] [--client-id <id>] [--path-prefix <p>]
+                [--credential-store system|file]
   apexnova login | logout | whoami | balance
   apexnova agents
   apexnova audit [agent] [--limit <n>]   Read the routing audit log
@@ -192,6 +194,10 @@ Global options:
   --hub-url <url>        Apexnova AI Hub base URL (init)
   --client-id <id>       OAuth client ID (init)
   --path-prefix <p>      Hub API path prefix (init)
+  --credential-store <k> Where credentials live (init): file (a 0600 file
+                         protected by file permissions alone; the default on
+                         Linux) or system (the OS credential service; the
+                         default elsewhere, and needs a keyring on Linux)
   --force                Overwrite an existing stored value (init)
   --dry-run              Plan without changing local or remote state
   --list                 List restorable transactions
@@ -202,6 +208,12 @@ Global options:
 
 apexnova init stores the Hub endpoint so the other commands work without
 exporting APEXNOVA_HUB_BASE_URL and APEXNOVA_OAUTH_CLIENT_ID in every shell.
+It also records which credential backend to use. Linux keeps credentials in a
+0600 file by default -- no keyring, no D-Bus, no sudo -- and that file is
+protected by its permissions alone; --credential-store system moves them into
+the Secret Service instead, where the OS protects them and a keyring has to be
+installed and running. Windows always uses Credential Manager unless told
+otherwise. APEXNOVA_CREDENTIAL_STORE overrides the stored value for one shell.
 
 apexnova run <agent> is the one-command path: it auto-configures a permanent key,
 writes that Agent's provider configuration, and launches it. Use --rotating for
@@ -227,7 +239,7 @@ const GLOBAL_OPTIONS: ReadonlySet<string> = new Set([
 ]);
 
 const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
-  init: ["--hub-url", "--client-id", "--path-prefix"],
+  init: ["--hub-url", "--client-id", "--path-prefix", "--credential-store", "--force"],
   login: [],
   logout: ["--yes"],
   whoami: [],
@@ -324,6 +336,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let hubUrl: string | undefined;
   let clientId: string | undefined;
   let pathPrefix: string | undefined;
+  let credentialStoreKind: CredentialBackendKind | undefined;
   let force = false;
   let optionsEnded = false;
   const used: string[] = [];
@@ -391,6 +404,10 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         break;
       case "--path-prefix":
         pathPrefix = valueAfter(args, index, arg);
+        index += 1;
+        break;
+      case "--credential-store":
+        credentialStoreKind = credentialBackendKind(valueAfter(args, index, arg));
         index += 1;
         break;
       case "--key":
@@ -596,6 +613,7 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     ...(hubUrl ? { hubUrl } : {}),
     ...(clientId ? { clientId } : {}),
     ...(pathPrefix ? { pathPrefix } : {}),
+    ...(credentialStoreKind ? { credentialStoreKind } : {}),
     force,
   };
 }
@@ -653,6 +671,15 @@ function validateHubBaseUrl(value: string, allowInsecureLoopback: boolean): stri
   return url.origin + (url.pathname === "/" ? "" : url.pathname.replace(/\/$/, ""));
 }
 
+function credentialBackendKind(value: string): CredentialBackendKind {
+  if (value === "system" || value === "file") return value;
+  throw new CliError({
+    code: "INVALID_ARGUMENT",
+    message: `--credential-store must be "system" (the OS credential service) or "file" (a permission-protected file); received ${value}.`,
+    exitCode: EXIT_CODES.usage,
+  });
+}
+
 function validatePathPrefix(value: string): string {
   if (!value.startsWith("/") || value.endsWith("/")) {
     throw new CliError({ code: "INVALID_ARGUMENT", message: "--path-prefix must start with / and must not end with /.", exitCode: EXIT_CODES.usage });
@@ -667,7 +694,10 @@ async function executeInit(parsed: ParsedArguments, dependencies: CliDependencie
   const configPath = hubConfigPath(context);
   const stored = readHubConfigFile(context);
   const defaults = hubConfigDefaults();
-  const overriding = parsed.hubUrl !== undefined || parsed.clientId !== undefined || parsed.pathPrefix !== undefined;
+  const overriding = parsed.hubUrl !== undefined
+    || parsed.clientId !== undefined
+    || parsed.pathPrefix !== undefined
+    || parsed.credentialStoreKind !== undefined;
   const interactive = io.isInteractive && !parsed.nonInteractive && !parsed.json;
 
   if (stored && !parsed.force && !overriding && !interactive) {
@@ -703,25 +733,46 @@ async function executeInit(parsed: ParsedArguments, dependencies: CliDependencie
   const oauthClientId = parsed.clientId ?? await ask("OAuth client ID:", stored?.oauthClientId ?? defaults.clientId, "--client-id");
   const rawPathPrefix = parsed.pathPrefix ?? stored?.pathPrefix;
   const pathPrefix = rawPathPrefix ? validatePathPrefix(rawPathPrefix) : undefined;
+  const credentialStore = parsed.credentialStoreKind ?? stored?.credentialStore;
 
   writeHubConfigFile(context, {
     hubBaseUrl,
     oauthClientId,
     ...(pathPrefix ? { pathPrefix } : {}),
+    ...(credentialStore ? { credentialStore } : {}),
   });
 
+  const selection = credentialStoreSelection(context);
   const warnings: string[] = [];
   if (environment.APEXNOVA_HUB_BASE_URL || environment.APEXNOVA_OAUTH_CLIENT_ID) {
     warnings.push("APEXNOVA_HUB_BASE_URL / APEXNOVA_OAUTH_CLIENT_ID are set in this environment and take precedence over the stored file.");
   }
+  if (environment.APEXNOVA_CREDENTIAL_STORE) {
+    warnings.push(`APEXNOVA_CREDENTIAL_STORE is set in this environment and takes precedence over the stored value; this shell uses the ${selection.kind} backend.`);
+  }
+  // Said on the way in, not only when something later fails: the file backend
+  // protects secrets with file permissions and nothing else, and that is a
+  // sentence the user should read while setting the machine up -- including
+  // when they reached it by taking the platform default rather than choosing.
+  if (selection.kind === "file") {
+    warnings.push(`Credentials will be stored in ${selection.path}, protected by file permissions alone -- no OS keyring stands behind them. Anything able to read that file as this user can use the session. Pass --credential-store system to use the OS credential service instead.`);
+  }
   return {
-    data: { configPath, hubBaseUrl, oauthClientId, ...(pathPrefix ? { pathPrefix } : {}) },
+    data: {
+      configPath,
+      hubBaseUrl,
+      oauthClientId,
+      ...(pathPrefix ? { pathPrefix } : {}),
+      credentialStore: selection.kind,
+      ...(selection.path ? { credentialPath: selection.path } : {}),
+    },
     warnings: warnings as readonly string[],
     human: [
       `Wrote ${configPath}`,
       `Hub: ${hubBaseUrl}`,
       `Client: ${oauthClientId}`,
       ...(pathPrefix ? [`Path prefix: ${pathPrefix}`] : []),
+      `Credentials: ${selection.backendName}${selection.path ? ` (${selection.path})` : ""}`,
       'Next: run "apexnova login".',
     ].join("\n"),
   };
@@ -3722,10 +3773,17 @@ const CREDENTIAL_PROBE_KEY = {
   kind: "backend-probe",
 } as const;
 
+interface ProbedBackend {
+  readonly kind: "system" | "file";
+  readonly backendName: string;
+  readonly path?: string;
+}
+
 async function probeCredentialBackend(
   dependencies: CliDependencies,
-  backendName: string,
+  backend: ProbedBackend,
 ): Promise<DiagnosticCheck> {
+  const backendName = backend.path ? `${backend.backendName} (${backend.path})` : backend.backendName;
   const identity = { id: "credential-backend", severity: "error" } as const;
   let store;
   try {
@@ -3758,7 +3816,7 @@ async function probeCredentialBackend(
     return {
       id: "credential-backend",
       status: "pass",
-      code: `credential-backend.${platformCode(dependencies)}`,
+      code: `credential-backend.${backend.kind === "file" ? "file" : platformCode(dependencies)}`,
       severity: "info",
       message: backendName,
     };
@@ -3774,6 +3832,12 @@ async function probeCredentialBackend(
       remediation: normalized.message,
     };
   }
+}
+
+function credentialChoiceSource(configured: "environment" | "config-file" | "built-in"): string {
+  if (configured === "environment") return "chosen in APEXNOVA_CREDENTIAL_STORE";
+  if (configured === "config-file") return "chosen in the config file";
+  return "the default on this platform";
 }
 
 function platformCode(dependencies: CliDependencies): string {
@@ -3792,19 +3856,31 @@ async function executeDoctor(parsed: ParsedArguments, dependencies: CliDependenc
     checks.push(...(await integration.diagnose(context)));
   }
 
-  const platform = dependencies.platform ?? process.platform;
-  const backendName = platform === "win32"
-    ? "Windows Credential Manager"
-    : platform === "linux"
-      ? "Secret Service"
-      : platform === "darwin"
-        ? "macOS Keychain"
-        : `unsupported on ${platform}`;
+  const selection = credentialStoreSelection(hubConfigContext(dependencies));
   // Naming the backend is not evidence it works: a headless Linux or WSL
   // session has secret-tool installed and no keyring answering behind it, and
   // the first sign used to be `login` failing after the user had approved the
   // device. Write, read back and delete a probe value instead.
-  checks.push(await probeCredentialBackend(dependencies, backendName));
+  checks.push(await probeCredentialBackend(dependencies, {
+    kind: selection.kind,
+    backendName: selection.backendName,
+    ...(selection.path ? { path: selection.path } : {}),
+  }));
+  // A file backend that works is still a machine where the secrets are one
+  // `cat` away for anything running as this user. It passes its probe, so
+  // without this the report would read as though nothing had been given up --
+  // and since Linux now reaches it by default, saying so every run is the only
+  // place most users will ever hear it.
+  if (selection.kind === "file") {
+    checks.push({
+      id: "credential-protection",
+      status: "warning",
+      code: `credential-protection.file.${selection.configured}`,
+      severity: "warning",
+      message: `credentials are protected by file permissions alone (${credentialChoiceSource(selection.configured)})`,
+      remediation: "Run `apexnova init --credential-store system` to keep them in the OS credential service instead; on Linux that needs secret-tool and a running Secret Service provider.",
+    });
+  }
   checks.push({
     id: "state-root",
     status: "pass",
@@ -3917,12 +3993,16 @@ function normalizeError(error: unknown): CliError {
     const exitCode =
       error.code === "BACKEND_UNAVAILABLE" || error.code === "UNSUPPORTED_PLATFORM"
         ? EXIT_CODES.unavailable
-        : error.code === "INVALID_KEY" || error.code === "INVALID_SECRET"
+        : error.code === "INVALID_KEY" || error.code === "INVALID_SECRET" || error.code === "INVALID_CONFIGURATION"
           ? EXIT_CODES.usage
           : EXIT_CODES.runtime;
+    // Reaching this means the OS credential service was asked for -- by this
+    // platform's default, by the config file, or by the environment -- and did
+    // not answer. Nothing switches stores on its own: a session whose secrets
+    // silently moved to a different backend is a session nobody can find again.
     const message =
-      error.code === "BACKEND_UNAVAILABLE"
-        ? `${error.message} Apexnova-connect stores sessions and credentials in the OS credential service and will not fall back to a plaintext file. On a headless Linux or WSL session, start a Secret Service provider (for example \`gnome-keyring-daemon --start --components=secrets\`) and try again.`
+      error.code === "BACKEND_UNAVAILABLE" || error.code === "UNSUPPORTED_PLATFORM"
+        ? `${error.message} Apexnova-connect will not move credentials to another backend on its own. Either start a Secret Service provider (for example \`gnome-keyring-daemon --start --components=secrets\`), or switch with \`apexnova init --credential-store file\` -- that keeps credentials in a 0600 file protected by file permissions alone, and is the default on Linux.`
         : error.message;
     return new CliError({ code: error.code, message, exitCode, cause: error });
   }

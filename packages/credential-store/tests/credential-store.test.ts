@@ -1,8 +1,14 @@
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   CommandRunnerError,
   CredentialStoreError,
+  FileCredentialBackend,
   LinuxSecretServiceBackend,
   MacOsKeychainBackend,
   MemoryCredentialBackend,
@@ -11,6 +17,7 @@ import {
   WindowsCredentialManagerBackend,
   createDefaultCredentialStore,
   credentialAccountName,
+  resolveCredentialBackendSelection,
   type CommandRequest,
   type CommandResult,
   type CommandRunner,
@@ -345,5 +352,142 @@ describe("system backends", () => {
     // verified, and the message above says so.
     expect(createDefaultCredentialStore({ platform: "darwin", commandRunner: runner, allowUnverifiedMacOs: true }))
       .toBeInstanceOf(SystemCredentialStore);
+  });
+});
+
+describe("file backend", () => {
+  async function temporaryFile(prefix: string): Promise<string> {
+    const directory = await mkdtemp(join(tmpdir(), prefix));
+    return join(directory, "store", "credentials.json");
+  }
+
+  it("stores, reads back and deletes without any credential service", async () => {
+    const path = await temporaryFile("apexnova-file-");
+    const store = new SystemCredentialStore(new FileCredentialBackend(path, { platform: "linux" }));
+
+    expect(await store.get(key)).toBeNull();
+    await store.set(key, SecretValue.from("first"));
+    expect((await store.get(key))?.reveal()).toBe("first");
+    await store.set(key, SecretValue.from("second"));
+    expect((await store.get(key))?.reveal()).toBe("second");
+
+    // A second backend over the same path is what a second `apexnova` process
+    // is: the value has to be on disk, not in the first instance's memory.
+    const reopened = new SystemCredentialStore(new FileCredentialBackend(path, { platform: "linux" }));
+    expect((await reopened.get(key))?.reveal()).toBe("second");
+
+    await store.delete(key);
+    expect(await reopened.get(key)).toBeNull();
+    // Deleting the last secret of a service must not take the others with it.
+    await store.delete(key);
+  });
+
+  it("keeps the directory and file private to the user", async () => {
+    const path = await temporaryFile("apexnova-file-mode-");
+    const store = new SystemCredentialStore(new FileCredentialBackend(path, { platform: "linux" }));
+    await store.set(key, SecretValue.from("private"));
+
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
+  });
+
+  it("refuses a credential file other users can read instead of repairing it", async () => {
+    const path = await temporaryFile("apexnova-file-exposed-");
+    const backend = new FileCredentialBackend(path, { platform: "linux" });
+    const store = new SystemCredentialStore(backend);
+    await store.set(key, SecretValue.from("exposed"));
+    chmodSync(path, 0o644);
+
+    // Widening happened outside this process, so the secret has already been
+    // readable by every account on the machine. chmod here would hide that;
+    // the error names the rotation the user now has to do.
+    await expect(store.get(key)).rejects.toMatchObject({ code: "BACKEND_UNAVAILABLE" });
+    await expect(store.get(key)).rejects.toThrowError(/revoke them/);
+  });
+
+  it("never overwrites a credential file it cannot parse", async () => {
+    const path = await temporaryFile("apexnova-file-corrupt-");
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    writeFileSync(path, "not json at all", { mode: 0o600 });
+    const store = new SystemCredentialStore(new FileCredentialBackend(path, { platform: "linux" }));
+
+    await expect(store.get(key)).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+    await expect(store.set(key, SecretValue.from("new"))).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+    expect(readFileSync(path, "utf8")).toBe("not json at all");
+  });
+
+  it("is what Linux gets by default, and what Windows does not", () => {
+    const runner = new FakeCommandRunner(() => ({ exitCode: 1, stdout: "", stderr: "" }));
+    const environment = { HOME: "/home/tester" } satisfies NodeJS.ProcessEnv;
+
+    // ADR 0036: the Secret Service is absent in most of the Linux sessions this
+    // runs in, so Linux starts here rather than at a keyring nobody installed.
+    expect(
+      resolveCredentialBackendSelection({ platform: "linux", environment }),
+    ).toMatchObject({
+      kind: "file",
+      source: "default",
+      path: "/home/tester/.local/share/apexnova-connect/credentials.json",
+    });
+
+    // Windows Credential Manager is present and verified, so nothing there
+    // trades OS protection away for a convenience Windows already has.
+    expect(
+      resolveCredentialBackendSelection({ platform: "win32", environment }),
+    ).toMatchObject({ kind: "system", source: "default" });
+
+    // Both directions are selectable: the default is a starting point, not a
+    // ceiling.
+    expect(
+      resolveCredentialBackendSelection({ platform: "linux", environment, backend: "system" }),
+    ).toMatchObject({ kind: "system", source: "option" });
+    expect(
+      resolveCredentialBackendSelection({
+        platform: "linux",
+        environment: { ...environment, APEXNOVA_CREDENTIAL_STORE: "system" },
+      }),
+    ).toMatchObject({ kind: "system", source: "environment" });
+
+    expect(createDefaultCredentialStore({ platform: "linux", environment, commandRunner: runner }))
+      .toBeInstanceOf(SystemCredentialStore);
+  });
+
+  it("still fails rather than switching stores when a chosen keyring is missing", async () => {
+    // The default moved; the rule did not. Asking for the OS service and
+    // finding nothing there is an error, because secrets that quietly relocate
+    // are secrets nobody can find again.
+    const runner = new FakeCommandRunner(() => {
+      throw new CommandRunnerError("not-found", "secret-tool is not installed");
+    });
+    const store = createDefaultCredentialStore({
+      platform: "linux",
+      environment: { HOME: "/home/tester" },
+      backend: "system",
+      commandRunner: runner,
+    });
+
+    await expect(store.get(key)).rejects.toMatchObject({ code: "BACKEND_UNAVAILABLE" });
+  });
+
+  it("refuses a misspelled backend rather than guessing which one was meant", () => {
+    expect(() =>
+      resolveCredentialBackendSelection({
+        platform: "linux",
+        environment: { HOME: "/home/tester", APEXNOVA_CREDENTIAL_STORE: "keyring" },
+      }),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_CONFIGURATION" }));
+  });
+
+  it("serves an unsupported platform, where no system backend exists", () => {
+    const store = createDefaultCredentialStore({
+      platform: "freebsd",
+      environment: { HOME: "/home/tester", APEXNOVA_CREDENTIAL_STORE: "file" },
+    });
+    expect(store).toBeInstanceOf(SystemCredentialStore);
+
+    // Unsupported platforms are not quietly handed the file backend either:
+    // the refusal names it, and the user takes it or not.
+    expect(() => createDefaultCredentialStore({ platform: "freebsd", environment: { HOME: "/home/tester" } }))
+      .toThrowError(expect.objectContaining({ code: "UNSUPPORTED_PLATFORM" }));
   });
 });

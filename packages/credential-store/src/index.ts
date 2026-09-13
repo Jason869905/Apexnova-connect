@@ -8,8 +8,16 @@ export {
 } from "./command-runner.js";
 export {
   createDefaultCredentialStore,
+  resolveCredentialBackendSelection,
+  type CredentialBackendKind,
+  type CredentialBackendSelection,
   type DefaultCredentialStoreOptions,
 } from "./factory.js";
+export {
+  FileCredentialBackend,
+  defaultCredentialFilePath,
+  type FileCredentialBackendOptions,
+} from "./file-store.js";
 export { LinuxSecretServiceBackend } from "./linux-secret-service.js";
 export { MacOsKeychainBackend } from "./macos-keychain.js";
 export { MemoryCredentialBackend } from "./memory.js";

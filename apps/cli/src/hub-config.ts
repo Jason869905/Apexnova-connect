@@ -1,6 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import {
+  resolveCredentialBackendSelection,
+  type CredentialBackendKind,
+  type CredentialBackendSelection,
+  type DefaultCredentialStoreOptions,
+} from "@apexnova-connect/credential-store";
+
 // Release bundles inject the production Hub endpoint here. Source builds leave
 // these undefined on purpose: a development checkout must never reach production
 // implicitly, so it keeps requiring an explicit environment or config file value.
@@ -26,6 +33,7 @@ export interface StoredHubConfig {
   readonly hubBaseUrl?: string;
   readonly oauthClientId?: string;
   readonly pathPrefix?: string;
+  readonly credentialStore?: CredentialBackendKind;
 }
 
 function builtIn(value: string | undefined): string | undefined {
@@ -78,10 +86,12 @@ export function readHubConfigFile(context: HubConfigContext = {}): StoredHubConf
   const hubBaseUrl = optionalString(item.hubBaseUrl);
   const oauthClientId = optionalString(item.oauthClientId);
   const pathPrefix = optionalString(item.pathPrefix);
+  const credentialStore = credentialBackendKind(optionalString(item.credentialStore));
   return {
     ...(hubBaseUrl ? { hubBaseUrl } : {}),
     ...(oauthClientId ? { oauthClientId } : {}),
     ...(pathPrefix ? { pathPrefix } : {}),
+    ...(credentialStore ? { credentialStore } : {}),
   };
 }
 
@@ -125,7 +135,50 @@ export function writeHubConfigFile(context: HubConfigContext, config: StoredHubC
     ...(config.hubBaseUrl ? { hubBaseUrl: config.hubBaseUrl } : {}),
     ...(config.oauthClientId ? { oauthClientId: config.oauthClientId } : {}),
     ...(config.pathPrefix ? { pathPrefix: config.pathPrefix } : {}),
+    ...(config.credentialStore ? { credentialStore: config.credentialStore } : {}),
   };
   writeFileSync(path, `${JSON.stringify(body, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   return path;
+}
+
+function credentialBackendKind(value: string | undefined): CredentialBackendKind | undefined {
+  return value === "system" || value === "file" ? value : undefined;
+}
+
+/**
+ * Credential backend options for a context, with the same precedence every
+ * other setting here uses: environment, then the config file, then the default.
+ *
+ * The environment variable is read by the credential package itself, so it is
+ * left alone here; passing the stored value as an option would silently promote
+ * the file over an `APEXNOVA_CREDENTIAL_STORE` the user exported for this one
+ * shell.
+ */
+export function credentialStoreOptions(
+  context: HubConfigContext = {},
+): DefaultCredentialStoreOptions {
+  const environment = context.environment ?? process.env;
+  const stored = environment.APEXNOVA_CREDENTIAL_STORE ? undefined : readHubConfigFile(context)?.credentialStore;
+  return {
+    ...(context.platform ? { platform: context.platform } : {}),
+    ...(context.homeDirectory ? { homeDirectory: context.homeDirectory } : {}),
+    environment,
+    ...(stored ? { backend: stored } : {}),
+  };
+}
+
+/** What `doctor` reports, and what the error path names when a keyring is missing. */
+export function credentialStoreSelection(
+  context: HubConfigContext = {},
+): CredentialBackendSelection & { readonly configured: HubConfigSource } {
+  const options = credentialStoreOptions(context);
+  const selection = resolveCredentialBackendSelection(options);
+  return {
+    ...selection,
+    configured: selection.source === "environment"
+      ? "environment"
+      : selection.source === "option"
+        ? "config-file"
+        : "built-in",
+  };
 }
