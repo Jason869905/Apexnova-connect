@@ -127,14 +127,49 @@ describe("recommend", () => {
     expect(result.candidates[0]?.modelId).toBe("model.cheap");
   });
 
-  it("refuses to answer for a platform it has no evidence for", () => {
-    const result = recommend(options({ platform: "win32-x64" }));
+  it("falls back to Hub's catalog order on a platform it has no evidence for", () => {
+    const result = recommend(options({
+      platform: "win32-x64",
+      candidates: [candidate("model.second"), candidate("model.first")],
+    }));
 
-    const only = result.candidates[0]!;
-    expect(only.eligible).toBe(false);
-    expect(only.reasons.join(" ")).toContain("win32-x64");
-    expect(only.reasons.join(" ")).toContain("does not carry over");
-    expect(result.summary).toContain("No model can be recommended");
+    // The first cut made "nobody has tested this here yet" an exclusion, so a
+    // platform with no evidence got an empty ranking -- the honest answer to a
+    // question nobody asked. "Which of these should I use" is answerable from
+    // the catalog alone; what is missing is how much the answer is worth, and
+    // `basis` says so per model rather than withholding the list.
+    expect(result.candidates.map((entry) => entry.modelId)).toEqual(["model.second", "model.first"]);
+    expect(result.candidates.every((entry) => entry.eligible)).toBe(true);
+    expect(result.candidates.every((entry) => entry.basis === "catalog-order")).toBe(true);
+    expect(result.candidates.every((entry) => entry.score === undefined)).toBe(true);
+    const first = result.candidates[0]!;
+    expect(first.reasons.join(" ")).toContain("win32-x64");
+    expect(first.reasons.join(" ")).toContain("does not carry over");
+    expect(result.summary).toContain("catalog order");
+  });
+
+  it("ranks a scored model above one holding catalog order, whatever the catalog said", () => {
+    const result = recommend(options({
+      // Hub put the untested one first; evidence is the one thing that reorders.
+      candidates: [candidate("model.untested"), candidate("model.tested")],
+      evidence: [evidenceFor("model.tested")],
+    }));
+
+    expect(result.candidates.map((entry) => entry.modelId)).toEqual(["model.tested", "model.untested"]);
+    expect(result.candidates[0]?.basis).toBe("evidence");
+    expect(result.candidates[1]?.basis).toBe("catalog-order");
+    expect(result.candidates[1]?.score).toBeUndefined();
+  });
+
+  it("keeps Hub's order among the models it cannot score", () => {
+    const result = recommend(options({
+      candidates: [candidate("model.c"), candidate("model.a"), candidate("model.b")],
+      evidence: [],
+    }));
+
+    // Not alphabetical and not by price: the fallback is the order Hub returned,
+    // which is the one the model gallery shows.
+    expect(result.candidates.map((entry) => entry.modelId)).toEqual(["model.c", "model.a", "model.b"]);
   });
 
   it("does not treat evidence from a different implementation as current", () => {
@@ -143,7 +178,10 @@ describe("recommend", () => {
       evidence: [evidenceFor("model.cheap", {}, { implementationFingerprint: "impl-a1b2c3d4e5f6" })],
     }));
 
-    expect(result.candidates[0]?.eligible).toBe(false);
+    // Records made against another implementation are not this model's records,
+    // so it scores on none of them -- it is ranked, but on catalog order.
+    expect(result.candidates[0]?.basis).toBe("catalog-order");
+    expect(result.candidates[0]?.score).toBeUndefined();
     expect(result.candidates[0]?.reasons.join(" ")).toContain("No compatibility evidence");
   });
 
@@ -285,7 +323,7 @@ describe("recommend", () => {
     // The summary used to say "none with live evidence for every required
     // capability" however they were excluded, so a ceiling that removed
     // everything was reported as an evidence problem.
-    expect(result.summary).toContain("none eligible");
+    expect(result.summary).toContain("all excluded");
     expect(result.summary).toContain("no usable price");
     expect(result.summary).not.toContain("live evidence");
   });
@@ -306,44 +344,32 @@ describe("recommend", () => {
     expect(result.unmeasured.map((entry) => entry.priority)).not.toContain("context");
   });
 
-  it("excludes a publisher the run refuses, and says which", () => {
+  it("carries who publishes a model and what it costs, so the ranking reads on its own", () => {
     const result = recommend(options({
       candidates: [
-        candidate("model.cheap", { publisher: "Zhipu AI" }),
-        candidate("model.other", { publisher: "DeepSeek" }),
+        candidate("model.cheap", { publisher: "MiniMax" }),
+        candidate("model.other", { publisher: "DeepSeek", pricing: undefined }),
       ],
       evidence: [evidenceFor("model.cheap"), evidenceFor("model.other")],
-      constraints: { excludePublishers: ["zhipu ai"] },
     }));
 
     const byId = new Map(result.candidates.map((entry) => [entry.modelId, entry]));
-    // Matched case-insensitively: nobody should have to guess the catalog's
-    // capitalisation to keep their code away from a publisher.
-    expect(byId.get("model.cheap")?.eligible).toBe(false);
-    expect(byId.get("model.cheap")?.reasons[0]).toContain("Published by Zhipu AI");
-    expect(byId.get("model.other")?.eligible).toBe(true);
+    expect(byId.get("model.cheap")).toMatchObject({ publisher: "MiniMax", currency: "USD" });
+    expect(byId.get("model.cheap")!.pricePerMillion).toBeCloseTo(1, 6);
+    // A model the catalog prices at nothing carries no price, rather than a
+    // zero that reads as free.
+    expect(byId.get("model.other")).toMatchObject({ publisher: "DeepSeek" });
+    expect(byId.get("model.other")!.pricePerMillion).toBeUndefined();
   });
 
-  it("will not pass a model whose publisher the catalog does not name", () => {
-    const result = recommend(options({
-      candidates: [candidate("model.cheap", { publisher: undefined })],
-      evidence: [evidenceFor("model.cheap")],
-      constraints: { excludePublishers: ["Anthropic"] },
-    }));
-
-    // Same rule as the price ceiling: it cannot be shown not to be the excluded
-    // publisher, and a constraint that lets the unprovable through is not one.
-    expect(result.candidates[0]?.eligible).toBe(false);
-    expect(result.candidates[0]?.reasons[0]).toContain("does not name a publisher");
-  });
-
-  it("leaves an unnamed publisher alone when no publisher was excluded", () => {
+  it("ranks a model whose publisher the catalog does not name", () => {
     const result = recommend(options({
       candidates: [candidate("model.cheap", { publisher: undefined })],
       evidence: [evidenceFor("model.cheap")],
     }));
 
     expect(result.candidates[0]?.eligible).toBe(true);
+    expect(result.candidates[0]?.publisher).toBeUndefined();
   });
 
   it("considers only the models an allowlist names", () => {
@@ -371,13 +397,16 @@ describe("recommend", () => {
       evidence: [evidenceFor("model.a"), evidenceFor("model.b"), evidenceFor("model.c")],
     });
 
-    // Same score for all three, so only the tiebreak keeps the order stable.
     const first = JSON.stringify(recommend(input));
-    const second = JSON.stringify(recommend({ ...input, candidates: [...input.candidates].reverse() }));
+    const second = JSON.stringify(recommend(input));
 
     expect(first).toBe(second);
+    // Same score for all three, so only the tiebreak decides -- and the
+    // tiebreak is the catalog's own order, everywhere. It used to be the model
+    // id, which made a ranking that ignored Hub's order even where it had
+    // nothing better to go on.
     expect(JSON.parse(first).candidates.map((entry: { modelId: string }) => entry.modelId))
-      .toEqual(["model.a", "model.b", "model.c"]);
+      .toEqual(["model.b", "model.a", "model.c"]);
   });
 
   it("keeps sponsorship out of the ranking", () => {
@@ -400,7 +429,6 @@ describe("recommend", () => {
       "availability",
       "latency",
       "quality",
-      "privacy",
     ]);
     expect(result.unmeasured.every((entry) => entry.why.length > 0)).toBe(true);
   });

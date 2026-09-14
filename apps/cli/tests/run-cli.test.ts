@@ -3454,7 +3454,7 @@ describe("CLI", () => {
     expect(capture.stdout()).toContain("not considered at all");
   });
 
-  it("recommends nothing for a platform it has no evidence for, and says to collect some", async () => {
+  it("still ranks on a platform it has no evidence for, and says the order is Hub's", async () => {
     // Evidence collected on Linux, recommendation asked for on Windows.
     const { root } = await withEvidence({}, { ...evidenceSubject, platform: "linux-x64" });
     const capture = captureIo();
@@ -3467,9 +3467,36 @@ describe("CLI", () => {
 
     expect(result.exitCode).toBe(EXIT_CODES.success);
     const output = JSON.parse(capture.stdout());
-    expect(output.data.candidates.every((entry: { eligible: boolean }) => !entry.eligible)).toBe(true);
+    // There is always a ranked list. Without evidence it is Hub's own order,
+    // and every candidate says so rather than the command answering nothing.
+    expect(output.data.candidates.every((entry: { eligible: boolean }) => entry.eligible)).toBe(true);
+    expect(output.data.candidates.every((entry: { basis: string }) => entry.basis === "catalog-order")).toBe(true);
+    expect(output.data.candidates.every((entry: { score?: number }) => entry.score === undefined)).toBe(true);
     expect(output.warnings.join(" ")).toContain("compatibility run opencode");
     expect(output.data.candidates[0].reasons.join(" ")).toContain("does not carry over");
+  });
+
+  it("shows a ranked model's provider, price and score in one row", async () => {
+    const { root } = await withEvidence();
+    const capture = captureIo();
+
+    const result = await runCli(["recommend", "opencode"], {
+      ...explainDependencies(root, "2026-09-20T10:00:00.000Z"),
+      io: capture.io,
+      hubService: mockHub(),
+    });
+
+    expect(result.exitCode).toBe(EXIT_CODES.success);
+    const output = capture.stdout();
+    expect(output).toContain("#  MODEL");
+    expect(output).toContain("PROVIDER");
+    expect(output).toContain("PRICE/1M");
+    expect(output).toContain("SCORE");
+    // The alias is what `--model` takes, so that is what the column shows.
+    expect(output).toMatch(/^ *1 {2}nova +apexnova/m);
+    // Every dimension with its number and weight used to be printed under each
+    // model, four lines deep; it lives in the --json document now.
+    expect(output).not.toContain("×0.");
   });
 
   it("refuses to recommend for an Agent that is not installed, and says that is why", async () => {

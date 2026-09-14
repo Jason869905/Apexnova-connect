@@ -14,7 +14,6 @@ export type ScenarioPriority =
   | "cost"
   | "latency"
   | "availability"
-  | "privacy"
   | "context";
 
 export interface ScenarioRequirement {
@@ -84,10 +83,10 @@ export const CODING_GENERAL: ScenarioProfile = {
   // The list is everything this Scenario cares about, not the subset something
   // can score today. `weightsFor` drops the ones nothing measures before it
   // computes any weight, so naming them here costs no weight and buys the thing
-  // ADR 0007 asked for: the Recommendation says out loud that quality, latency
-  // and privacy went unmeasured, and that availability filtered candidates
-  // without scoring them. Leaving them out scored them at zero silently, which
-  // reads as "this Scenario does not care" rather than "nobody measured it".
+  // ADR 0007 asked for: the Recommendation says out loud that quality and
+  // latency went unmeasured, and that availability filtered candidates without
+  // scoring them. Leaving them out scored them at zero silently, which reads as
+  // "this Scenario does not care" rather than "nobody measured it".
   //
   // Their position after the scored three is not yet a ranking and must not be
   // read as one -- it carries no weight while they stay unmeasured. Where each
@@ -100,7 +99,6 @@ export const CODING_GENERAL: ScenarioProfile = {
     "availability",
     "latency",
     "quality",
-    "privacy",
   ],
   applicability: "Text-generation models reachable over a protocol the Agent speaks.",
   scoringRuleVersion: SCORING_RULE_VERSION,
@@ -120,7 +118,6 @@ export function scenario(id: string): ScenarioProfile | undefined {
 export const UNMEASURED_PRIORITIES: Readonly<Record<string, string>> = {
   quality: "no scenario quality pack exists yet; output quality is not measured",
   latency: "no operational evidence has been collected; first-token latency is not measured",
-  privacy: "the public catalog reduces the upstream to an irreversible fingerprint, so providers cannot be told apart",
   availability: "the catalog's availability is a Hub declaration, not a measurement; it filters candidates but does not score them",
 };
 

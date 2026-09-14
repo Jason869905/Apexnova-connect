@@ -3,7 +3,7 @@ import recommendationSchema from "@apexnova-connect/schemas/recommendation" with
 import commonDefinitions from "@apexnova-connect/schemas/common-definitions" with { type: "json" };
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 
-import type { RecommendationConstraints, RecommendationResult } from "./recommend.js";
+import type { RankingBasis, RecommendationConstraints, RecommendationResult } from "./recommend.js";
 
 /**
  * The published Recommendation, exactly as `recommendation.schema.json` freezes
@@ -17,8 +17,13 @@ import type { RecommendationConstraints, RecommendationResult } from "./recommen
  */
 export interface RecommendationRecordCandidate {
   readonly modelId: string;
+  readonly displayName?: string;
   readonly rank: number;
   readonly eligible: boolean;
+  readonly basis?: RankingBasis;
+  readonly publisher?: string;
+  readonly pricePerMillion?: number;
+  readonly currency?: string;
   readonly score?: number;
   readonly confidence?: number;
   readonly reasons: readonly string[];
@@ -27,11 +32,17 @@ export interface RecommendationRecordCandidate {
 }
 
 /**
- * Bumped from 0.1 when `profileVersion` became required. A document that must
- * name the profile behind it is not the same contract as one that need not, and
- * this field is how a reader tells which one they are holding.
+ * 0.1 -> 0.2 when `profileVersion` became required. 0.2 -> 0.3 when a candidate
+ * started carrying what a reader actually asks of a ranking -- who publishes the
+ * model, what it costs, and whether its position came from evidence or from
+ * Hub's catalog order -- and `unmeasured` moved to the top level, where it
+ * belongs, instead of being repeated into every candidate's `reasons`.
+ *
+ * A document that names the profile behind it, or that says per model how much
+ * its position is worth, is not the same contract as one that need not; this
+ * field is how a reader tells which one they are holding.
  */
-export const RECOMMENDATION_SCHEMA_VERSION = "0.2";
+export const RECOMMENDATION_SCHEMA_VERSION = "0.3";
 
 export interface RecommendationRecord {
   readonly schemaVersion: string;
@@ -43,6 +54,7 @@ export interface RecommendationRecord {
   readonly ruleVersion: string;
   readonly constraints?: Readonly<Record<string, unknown>>;
   readonly priorities?: readonly string[];
+  readonly unmeasured?: readonly { readonly priority: string; readonly why: string }[];
   readonly candidates: readonly RecommendationRecordCandidate[];
   readonly summary?: string;
   readonly createdAt: string;
@@ -125,14 +137,15 @@ function candidateReasons(
     `${candidate.displayName} on ${result.platform}`,
     ...(candidate.protocol === undefined ? [] : [`over ${candidate.protocol}`]),
   ].join(", ");
+  // What is not measured is a property of the ranking, not of one candidate,
+  // and `unmeasured` now carries it at the top level. It used to be copied into
+  // every candidate here because `reasons` was the only field that survived
+  // `additionalProperties: false` -- forty-six models each repeating the same
+  // four sentences.
   return [
     heading,
     ...dimensionLines(candidate),
     ...candidate.reasons,
-    // Not measured is a property of the ranking, not of one candidate, but the
-    // schema has nowhere else that survives `additionalProperties: false`, and
-    // a priority nothing measures has to reach whoever reads a candidate.
-    ...result.unmeasured.map((entry) => `Not measured — ${entry.priority}: ${entry.why}`),
   ].map((reason) => (reason.length <= 500 ? reason : `${reason.slice(0, 497)}...`));
 }
 
@@ -168,10 +181,17 @@ export function recommendationRecord(
       ? {}
       : { constraints: { ...constraints } }),
     priorities: [...result.priorities],
+    ...(result.unmeasured.length === 0 ? {} : { unmeasured: result.unmeasured.map((entry) => ({ ...entry })) }),
     candidates: result.candidates.map((candidate) => ({
       modelId: candidate.modelId,
+      displayName: candidate.displayName,
       rank: candidate.rank,
       eligible: candidate.eligible,
+      ...(candidate.basis === undefined ? {} : { basis: candidate.basis }),
+      ...(candidate.publisher === undefined ? {} : { publisher: candidate.publisher }),
+      ...(candidate.pricePerMillion === undefined
+        ? {}
+        : { pricePerMillion: candidate.pricePerMillion, currency: candidate.currency }),
       ...(candidate.score === undefined ? {} : { score: candidate.score }),
       ...(candidate.confidence === undefined ? {} : { confidence: candidate.confidence }),
       reasons: candidateReasons(result, candidate),

@@ -130,15 +130,40 @@ describe("recommendationRecord", () => {
     expect(reasons).toContain("compatibility scored 1.00 at weight");
   });
 
-  it("carries an unmeasured priority into reasons rather than losing it", () => {
+  it("carries an unmeasured priority at the top level, once, not once per model", () => {
     const scenario = { ...CODING_GENERAL, priorities: ["compatibility", "quality", "cost"] as const };
     const result = recommend(options({ scenario: { ...scenario, priorities: [...scenario.priorities] } }));
 
     expect(result.unmeasured.map((entry) => entry.priority)).toContain("quality");
-    // Top-level `unmeasured` has nowhere to live under the frozen schema, so it
-    // reaches the reader through the field ADR 0007 named: `reasons`.
+    // It is a property of the ranking, and schemaVersion 0.3 gave it a field of
+    // its own. It used to be copied into every candidate's `reasons`, the only
+    // field that survived `additionalProperties: false` -- forty-six models each
+    // repeating the same sentences.
     const record = recommendationRecord(result);
-    expect(record.candidates[0]!.reasons.join("\n")).toContain("Not measured — quality");
+    expect(record.unmeasured?.map((entry) => entry.priority)).toContain("quality");
+    expect(record.unmeasured?.every((entry) => entry.why.length > 0)).toBe(true);
+    expect(record.candidates[0]!.reasons.join("\n")).not.toContain("Not measured");
+  });
+
+  it("puts what a reader asks of a ranking on the candidate itself", () => {
+    const published = {
+      ...candidate("model.cheap"),
+      publisher: "DeepSeek",
+    };
+    const record = recommendationRecord(recommend(options({ candidates: [published] })));
+
+    // Rank, model, who publishes it, what it costs, what it scored: the five
+    // things the ranking is read for used to need the catalog beside it.
+    expect(record.candidates[0]).toMatchObject({
+      rank: 1,
+      modelId: "model.cheap",
+      publisher: "DeepSeek",
+      basis: "evidence",
+      currency: "USD",
+    });
+    expect(record.candidates[0]!.pricePerMillion).toBeCloseTo(1, 6);
+    expect(record.candidates[0]!.score).toBeGreaterThan(0);
+    expect(validateRecommendation(record)).toMatchObject({ valid: true });
   });
 
   it("expires with the first evidence it rests on", () => {
@@ -193,12 +218,14 @@ describe("recommendationRecord", () => {
   });
 
   it("expires where it was created when it rests on nothing", () => {
-    // No evidence, so every candidate is ineligible and nothing is cited. A
-    // window it cannot support would be a claim about records that do not exist.
+    // No evidence, so nothing is cited. A window it cannot support would be a
+    // claim about records that do not exist. The models are still ranked --
+    // on Hub's catalog order, which is what `basis` says.
     const record = recommendationRecord(recommend(options({ evidence: [] })));
 
     expect(record.expiresAt).toBe(record.createdAt);
-    expect(record.candidates.every((entry) => !entry.eligible)).toBe(true);
+    expect(record.candidates.every((entry) => entry.evidenceRefs.length === 0)).toBe(true);
+    expect(record.candidates.every((entry) => entry.basis === "catalog-order")).toBe(true);
   });
 
   it("gives the same ranking the same id, and a changed one a different id", () => {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.apexnova.dev/connect/recommendation.schema.json",
-  "title": "Model Deployment Recommendation",
+  "title": "Model Ranking",
   "type": "object",
   "required": ["schemaVersion", "id", "agentId", "scenarioId", "profileVersion", "catalogVersion", "ruleVersion", "candidates", "createdAt", "expiresAt"],
   "properties": {
@@ -19,6 +19,19 @@
     "ruleVersion": { "type": "string", "minLength": 1, "maxLength": 160 },
     "constraints": { "type": "object" },
     "priorities": { "type": "array", "items": { "type": "string", "maxLength": 80 } },
+    "unmeasured": {
+      "description": "Priorities this Scenario asks for that nothing measures yet, each with why. A property of the ranking, not of one model. Added in schemaVersion 0.3: before it existed these sentences were repeated into every candidate's `reasons`, which is the only field that survived `additionalProperties: false`.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["priority", "why"],
+        "properties": {
+          "priority": { "type": "string", "maxLength": 80 },
+          "why": { "type": "string", "maxLength": 500 }
+        },
+        "additionalProperties": false
+      }
+    },
     "candidates": {
       "type": "array",
       "minItems": 1,
@@ -27,8 +40,24 @@
         "required": ["modelId", "rank", "eligible", "reasons", "evidenceRefs", "sponsored"],
         "properties": {
           "modelId": { "$ref": "common-definitions.schema.json#/$defs/stableId" },
+          "displayName": { "type": "string", "maxLength": 200 },
           "rank": { "type": "integer", "minimum": 1 },
           "eligible": { "type": "boolean" },
+          "basis": {
+            "description": "What put this model where it is. `evidence`: it was scored, because live evidence covers what the Scenario requires of it. `catalog-order`: nothing has been measured against it yet, so it holds the position Hub gave it and carries no score. Absent on an excluded model, which nothing ranked. Added in schemaVersion 0.3.",
+            "enum": ["evidence", "catalog-order"]
+          },
+          "publisher": {
+            "description": "Who publishes the model, as the catalog names it -- DeepSeek, MiniMax, Zhipu AI. Not who operates it: the public catalog reports one platform Provider for everything. Added in schemaVersion 0.3.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "pricePerMillion": {
+            "description": "Blended price per million tokens under the scoring rule's input/output mix, absent when the catalog publishes no usable price. Added in schemaVersion 0.3.",
+            "type": "number",
+            "minimum": 0
+          },
+          "currency": { "type": "string", "maxLength": 16 },
           "score": { "type": "number", "minimum": 0, "maximum": 1 },
           "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
           "reasons": { "type": "array", "items": { "type": "string", "maxLength": 500 } },

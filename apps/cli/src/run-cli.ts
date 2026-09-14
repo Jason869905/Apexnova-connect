@@ -56,6 +56,7 @@ import {
   recommendationRecord,
   scenario as scenarioProfile,
   type RecommendationCandidate,
+  type RecommendationCandidateResult,
   type RecommendationConstraints,
 } from "@apexnova-connect/recommendation";
 import { ConfigExecutionError, FileConfigExecutor } from "@apexnova-connect/config-engine";
@@ -166,7 +167,7 @@ Usage:
   apexnova compatibility explain [agent] [--model <id>] [--protocol <id>]
   apexnova compatibility matrix [--agent <id>] [--model <id>] [--protocol <id>]
   apexnova recommend <agent> [--scenario <id>] [--model <id>] [--max-price <per-1M>]
-                             [--model-allowlist <ref,...>] [--exclude-publisher <name,...>]
+                             [--model-allowlist <ref,...>]
   apexnova credential print <agent>
   apexnova detect [agent] [--config <path>]
   apexnova inspect <agent> [--config <path>]
@@ -196,7 +197,6 @@ Global options:
   --scenario <id>        Scenario to rank for (default coding-general)
   --max-price <amount>   Blended price ceiling per million tokens for recommend
   --model-allowlist <refs>  Consider only these models (id, alias; comma-separated)
-  --exclude-publisher <names>  Never recommend models from these publishers
   --request-id <id>      Reconcile one request by its Hub request ID
   --key <id>             Use an existing API key instead of creating one
   --rotating             Use a short-lived rotating credential (24h) instead of a permanent key
@@ -272,16 +272,16 @@ const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   detect: ["--config"],
   inspect: ["--config"],
   doctor: ["--config"],
-  connect: ["--model", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--credential-ttl", "--api-key-helper", "--dry-run", "--yes"],
+  connect: ["--model", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--config", "--credential-ttl", "--api-key-helper", "--dry-run", "--yes"],
   // No `--credential-ttl` and no `--rotating`: both mean "issue a new credential",
   // which is the one thing a switch promises not to do. `connect` owns those.
-  switch: ["--model", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--exclude-publisher", "--config", "--api-key-helper", "--dry-run", "--yes"],
+  switch: ["--model", "--protocol", "--best", "--scenario", "--max-price", "--model-allowlist", "--config", "--api-key-helper", "--dry-run", "--yes"],
   verify: ["--live", "--config", "--yes"],
   restore: ["--list", "--dry-run", "--yes", "--discard-local-changes", "--config"],
   run: ["--model", "--gateway", "--key", "--rotating", "--credential-ttl", "--api-key-helper", "--config"],
   opencode: ["--model", "--gateway", "--key", "--rotating", "--credential-ttl", "--api-key-helper", "--config"],
   credential: ["--key", "--rotating", "--api-key-helper"],
-  recommend: ["--scenario", "--model", "--max-price", "--model-allowlist", "--exclude-publisher"],
+  recommend: ["--scenario", "--model", "--max-price", "--model-allowlist"],
   compatibility: [
     "--agent", "--model", "--protocol", "--budget", "--record", "--within",
     "--reason", "--yes", "--force", "--config",
@@ -346,7 +346,6 @@ function parseArguments(args: readonly string[]): ParsedArguments {
   let discardLocalChanges = false;
   let limit: number | undefined;
   let modelAllowlist: readonly string[] | undefined;
-  let excludePublishers: readonly string[] | undefined;
   let maxPrice: string | undefined;
   let dryRun = false;
   let list = false;
@@ -528,10 +527,6 @@ function parseArguments(args: readonly string[]): ParsedArguments {
         modelAllowlist = splitList(valueAfter(args, index, arg));
         index += 1;
         break;
-      case "--exclude-publisher":
-        excludePublishers = splitList(valueAfter(args, index, arg));
-        index += 1;
-        break;
       case "--scenario":
         scenarioId = valueAfter(args, index, arg);
         index += 1;
@@ -629,7 +624,6 @@ function parseArguments(args: readonly string[]): ParsedArguments {
     discardLocalChanges,
     ...(limit === undefined ? {} : { limit }),
     ...(modelAllowlist ? { modelAllowlist } : {}),
-    ...(excludePublishers ? { excludePublishers } : {}),
     ...(maxPrice ? { maxPrice } : {}),
     dryRun,
     list,
@@ -2116,7 +2110,6 @@ async function rankModels(
     ...(parsed.model === undefined ? {} : { modelIds: [parsed.model] }),
     ...(allowlist === undefined ? {} : { modelIds: allowlist }),
     ...(parsed.maxPrice === undefined ? {} : { maxBlendedPricePerMillion: parsed.maxPrice }),
-    ...(parsed.excludePublishers === undefined ? {} : { excludePublishers: parsed.excludePublishers }),
   };
   const result = recommend({
     scenario: profile,
@@ -2137,50 +2130,108 @@ async function rankModels(
   return { result, profile, agentVersion, constraints, catalog };
 }
 
+/**
+ * Lays out fixed columns without a table library: every cell is padded to the
+ * widest in its column, and the last one is never padded so nothing trails.
+ */
+function columns(rows: readonly (readonly string[])[], align: readonly ("left" | "right")[]): readonly string[] {
+  const widths = rows.reduce<number[]>(
+    (widest, row) => row.map((cell, index) => Math.max(widest[index] ?? 0, cell.length)),
+    [],
+  );
+  return rows.map((row) =>
+    row
+      .map((cell, index) =>
+        index === row.length - 1
+          ? cell
+          : align[index] === "right"
+            ? cell.padStart(widths[index]!)
+            : cell.padEnd(widths[index]!),
+      )
+      .join("  ")
+      .trimEnd(),
+  );
+}
+
+/** Enough decimals to tell two models apart, and no more. */
+function priceCell(candidate: RecommendationCandidateResult): string {
+  if (candidate.pricePerMillion === undefined) return "—";
+  const amount = candidate.pricePerMillion;
+  return `${amount >= 1 ? amount.toFixed(2) : amount.toFixed(4)} ${candidate.currency}`;
+}
+
+/**
+ * Ranks the catalog for one Agent and one Scenario.
+ *
+ * Six columns and one line each: where it ranked, what to pass to `--model`,
+ * who publishes it, what it costs, what it scored, and why it is there. The
+ * long form -- every dimension with its number and weight, the evidence behind
+ * each one -- stays in the `--json` document, which is the thing anyone
+ * recomputing the ranking reads; a wall of it on the terminal made the ranking
+ * itself hard to see.
+ */
 async function executeRecommend(parsed: ParsedArguments, dependencies: CliDependencies) {
   const requested = agentOperand(parsed, dependencies, { optional: false, command: "recommend" });
   const integration = resolveIntegration(requested!, dependencies);
-  const { result, profile, agentVersion, constraints } = await rankModels(parsed, dependencies, integration);
+  const { result, profile, agentVersion, constraints, catalog } = await rankModels(parsed, dependencies, integration);
 
-  const eligible = result.candidates.filter((candidate) => candidate.eligible);
+  const ranked = result.candidates.filter((candidate) => candidate.eligible);
   const excluded = result.candidates.filter((candidate) => !candidate.eligible);
+  const scored = ranked.filter((candidate) => candidate.basis === "evidence");
+  // What the user would type to select it. The model id is in the JSON; the
+  // alias is the one that fits in a column and that `--model` takes.
+  const handle = (modelId: string): string =>
+    catalog.models.find((model) => model.id === modelId)?.inferenceAlias ?? modelId;
+
   const warnings: string[] = [];
-  if (result.unmeasured.length > 0) {
+  if (scored.length < ranked.length) {
     warnings.push(
-      `${result.unmeasured.map((entry) => entry.priority).join(", ")} ${result.unmeasured.length === 1 ? "is a priority" : "are priorities"} this Scenario asks for that nothing measures yet; the ranking rests on ${result.candidates[0]?.dimensions?.map((dimension) => dimension.priority).join(", ") ?? "the remaining dimensions"}.`,
+      `${ranked.length - scored.length} of ${ranked.length} ranked models carry no compatibility evidence for ${integration.manifest.displayName} ${agentVersion} on ${result.platform}, so they hold Hub's catalog order rather than a score. Collect evidence with "apexnova compatibility run ${integration.manifest.id} --model <id>".`,
     );
   }
-  if (eligible.length === 0) {
+  if (ranked.length === 0) {
     warnings.push(
-      `Nothing is recommendable for ${integration.manifest.displayName} ${agentVersion} on ${result.platform}. Collect evidence with "apexnova compatibility run ${integration.manifest.id} --model <id>".`,
+      `Every model the catalog offers was excluded for ${integration.manifest.displayName} ${agentVersion} on ${result.platform}. ${result.summary}`,
     );
   }
 
   const human = [
-    `${integration.manifest.displayName} ${agentVersion} · ${profile.id} ${profile.profileVersion} · ${result.platform} · rule ${result.ruleVersion}`,
-    `Catalog ${result.catalogVersion}; ${eligible.length} eligible of ${result.candidates.length} considered.`,
+    `${integration.manifest.displayName} ${agentVersion} · ${profile.id} ${profile.profileVersion} · ${result.platform} · rule ${result.ruleVersion} · catalog ${result.catalogVersion}`,
+    `${ranked.length} of ${result.candidates.length} ${result.candidates.length === 1 ? "model" : "models"} ranked: ${scored.length} scored from compatibility evidence${
+      ranked.length === scored.length ? "" : `, ${ranked.length - scored.length} in Hub's catalog order`
+    }.`,
     // A ranking of four Apexnova models reads as "the best four there are"
     // unless the boundary is on the page. ADR 0008 moved the second candidate
     // source to M5; until it lands, the scope is stated on every run rather
     // than left in a document.
     "Candidates come from the Apexnova catalog only. A Provider outside it is not ranked lower here; it is not considered at all.",
-    ...result.unmeasured.map((entry) => `Not measured — ${entry.priority}: ${entry.why}`),
+    ...(result.unmeasured.length === 0
+      ? []
+      : [`Not measured: ${result.unmeasured.map((entry) => entry.priority).join(", ")}. Run with --json for why.`]),
     "",
-    // The summary names what actually excluded them; asserting a cause here as
-    // well is how the ceiling case came to be reported as an evidence problem.
-    ...(eligible.length === 0 ? [result.summary] : []),
-    ...eligible.flatMap((candidate) => [
-      `${candidate.rank}. ${candidate.displayName}  score ${candidate.score?.toFixed(3)}  confidence ${candidate.confidence?.toFixed(2)}  ${candidate.protocol}`,
-      `     ${candidate.modelId}`,
-      ...(candidate.dimensions ?? []).map(
-        (dimension) =>
-          `     ${dimension.priority.padEnd(14)} ${dimension.score.toFixed(2)} ×${dimension.weight.toFixed(2)}  ${dimension.detail}`,
-      ),
-      `     Evidence: ${candidate.evidenceRefs.join(", ") || "none"}`,
-    ]),
+    ...(ranked.length === 0
+      ? [result.summary]
+      : columns(
+          [
+            ["#", "MODEL", "PROVIDER", "PRICE/1M", "SCORE", "WHY"],
+            ...ranked.map((candidate) => [
+              `${candidate.rank}`,
+              handle(candidate.modelId),
+              candidate.publisher ?? "—",
+              priceCell(candidate),
+              candidate.score === undefined ? "—" : candidate.score.toFixed(3),
+              candidate.headline,
+            ]),
+          ],
+          ["right", "left", "left", "right", "right", "left"],
+        )),
     ...(excluded.length === 0
       ? []
-      : ["", "Excluded:", ...excluded.map((candidate) => `  ${candidate.displayName} — ${candidate.reasons[0] ?? "no reason recorded"}`)]),
+      : [
+          "",
+          `Excluded (${excluded.length}):`,
+          ...excluded.map((candidate) => `  ${handle(candidate.modelId)} — ${candidate.headline}`),
+        ]),
   ].join("\n");
 
   // `data` is the Recommendation itself, so it is the shape
@@ -2977,20 +3028,27 @@ async function chooseBestModel(
   const ranked = await rankModels(parsed, dependencies, integration, catalog);
   const chosen = ranked.result.candidates.find((candidate) => candidate.eligible);
   if (chosen === undefined) {
+    // Only reachable when everything was filtered out -- no protocol in common,
+    // nothing serving, or a ceiling nothing fits under. A catalog with no
+    // evidence against it still ranks, so "nobody has tested this yet" no
+    // longer lands here.
     throw new CliError({
-      code: "NO_ELIGIBLE_DEPLOYMENT",
-      message: `Nothing is recommendable for ${integration.manifest.displayName} on ${ranked.result.platform}: ${ranked.result.summary}`,
+      code: "NO_ELIGIBLE_MODEL",
+      message: `No model is left to choose for ${integration.manifest.displayName} on ${ranked.result.platform}: ${ranked.result.summary}`,
       exitCode: EXIT_CODES.unavailable,
     });
   }
+  const rankedCount = ranked.result.candidates.filter((candidate) => candidate.eligible).length;
   return {
     model: catalog.models.find((item) => item.id === chosen.modelId)!,
     recommendationId: recommendationRecord(ranked.result, ranked.constraints).id,
-    // The dimensions and their weights, not the candidate's caveats: the
-    // question this answers is why this Model ranked first, and a note
-    // about a preferred capability falling short does not answer it.
+    // Why this Model ranked first, and on what -- a choice made from Hub's
+    // catalog order because nothing has been measured yet is a weaker claim
+    // than a scored one, and the audit entry has to be able to tell them apart.
     reasons: [
-      `Chosen by ${ranked.profile.id} ${ranked.profile.profileVersion} (rule ${ranked.result.ruleVersion}), score ${chosen.score?.toFixed(3)} of ${ranked.result.candidates.filter((candidate) => candidate.eligible).length} eligible`,
+      chosen.basis === "evidence"
+        ? `Chosen by ${ranked.profile.id} ${ranked.profile.profileVersion} (rule ${ranked.result.ruleVersion}), scoring ${chosen.score?.toFixed(3)} of ${rankedCount} ranked`
+        : `Chosen by ${ranked.profile.id} ${ranked.profile.profileVersion} from Hub's catalog order, of ${rankedCount} ranked: ${chosen.headline}`,
       ...(chosen.dimensions ?? []).map(
         (dimension) => `  ${dimension.priority.padEnd(14)} ${dimension.score.toFixed(2)} ×${dimension.weight.toFixed(2)}  ${dimension.detail}`,
       ),

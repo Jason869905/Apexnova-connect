@@ -157,8 +157,6 @@ export interface ParsedArguments {
   /** How many routes `audit` prints, newest first. */
   readonly limit?: number;
   readonly modelAllowlist?: readonly string[];
-  /** Model publishers whose models must not be recommended. */
-  readonly excludePublishers?: readonly string[];
   readonly maxPrice?: string;
 }
 

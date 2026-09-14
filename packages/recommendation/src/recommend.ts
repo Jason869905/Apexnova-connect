@@ -31,9 +31,12 @@ export interface RecommendationCandidate {
   /** The implementation at recommendation time; part of the evidence subject. */
   readonly implementationFingerprint?: string;
   /**
-   * Who publishes the model, as the catalog names it. Not who operates it: the
-   * public catalog reports one platform Provider for everything, so this
-   * answers "whose model is this" and cannot answer "who sees the request".
+   * Who publishes the model, as the catalog names it -- DeepSeek, MiniMax,
+   * Zhipu AI. This is the "provider" a reader means when they ask whose model
+   * they are about to use, and it is what the ranking shows in that column.
+   *
+   * It is not who operates it: the public catalog reports one platform Provider
+   * for everything, so this cannot answer "who sees the request".
    */
   readonly publisher?: string;
 }
@@ -49,6 +52,7 @@ export interface RecommendOptions {
   /** Protocols this Agent speaks; a model offering none of them is out. */
   readonly agentProtocols: readonly string[];
   readonly catalogVersion: string;
+  /** In the order Hub returned them: that order is the fallback ranking. */
   readonly candidates: readonly RecommendationCandidate[];
   readonly evidence: readonly CompatibilityEvidence[];
   readonly now: Date;
@@ -60,8 +64,6 @@ export interface RecommendationConstraints {
   readonly modelIds?: readonly string[];
   /** Blended price ceiling per million tokens, as a decimal string. */
   readonly maxBlendedPricePerMillion?: string;
-  /** Publishers whose models must not be recommended, matched case-insensitively. */
-  readonly excludePublishers?: readonly string[];
 }
 
 export interface ScoredDimension {
@@ -71,12 +73,34 @@ export interface ScoredDimension {
   readonly detail: string;
 }
 
+/**
+ * What put a candidate where it is.
+ *
+ * `evidence` -- it was scored, because live evidence covers what this Scenario
+ * requires of it. `catalog-order` -- nothing has been measured against it yet,
+ * so it holds the position Hub gave it and carries no score.
+ */
+export type RankingBasis = "evidence" | "catalog-order";
+
 export interface RecommendationCandidateResult {
   readonly modelId: string;
   readonly displayName: string;
   readonly rank: number;
   readonly eligible: boolean;
+  /** Absent on an excluded candidate: nothing ranked it. */
+  readonly basis?: RankingBasis;
+  /** The catalog's publisher, shown as the provider column. */
+  readonly publisher?: string;
   readonly protocol?: string;
+  /**
+   * One line saying what put this model where it is, for a renderer that has
+   * one column to say it in. The long form stays in `reasons`.
+   */
+  readonly headline: string;
+  /** Blended price per million tokens, when the catalog publishes one. */
+  readonly pricePerMillion?: number;
+  readonly currency?: string;
+  readonly contextWindow?: number;
   readonly score?: number;
   readonly confidence?: number;
   readonly dimensions?: readonly ScoredDimension[];
@@ -120,13 +144,6 @@ function clamp01(value: number): number {
  * Blended price per million tokens under the rule's input/output mix, or
  * undefined when the catalog does not actually publish one.
  *
- * A published zero is treated as absent, not as free. The public catalog
- * currently reports `0` for every model while the estimate endpoint quotes
- * real amounts for the same models and usage bills real money -- so a zero here
- * means the price is not in this projection, and scoring it as the cheapest
- * possible option would rank on a number that contradicts the bill.
- */
-/**
  * Zero is a price now. It was not always: requirement 12H was raised because the
  * catalog published `0` for every model, where it was indistinguishable
  * from "we do not publish one" and would have ranked the dearest model first.
@@ -206,7 +223,11 @@ function assess(options: RecommendOptions, candidate: RecommendationCandidate, p
 /** One candidate as it moves through the two passes: filter, then score. */
 interface AssessedCandidate {
   readonly candidate: RecommendationCandidate;
+  /** Its position in the catalog Hub returned, which is the fallback order. */
+  readonly catalogIndex: number;
   readonly eligible: boolean;
+  readonly basis?: RankingBasis;
+  readonly headline: string;
   readonly protocol?: string;
   readonly compatibility?: number;
   readonly compatibilityDetail?: string;
@@ -245,77 +266,63 @@ function weightsFor(
 }
 
 /**
- * Ranks models for one Scenario, on one platform, from the evidence on
- * hand.
+ * Ranks models for one Scenario, on one platform.
  *
- * Hard requirements filter rather than deduct: a required capability that
- * failed, or that has no live evidence, makes a candidate ineligible with a
- * reason. A total score that can outweigh a failed requirement is how a
- * recommendation starts lying, and M3's rule -- never show untested as
- * supported -- has to survive being turned into a number.
+ * There is always a ranked list. Three things can take a model out of it, and
+ * each one is something the catalog or the evidence positively says: the Agent
+ * speaks none of its protocols, the catalog reports it as not serving, or it
+ * sits outside a price ceiling the run asked for. Evidence removes a model only
+ * when it *failed* a required capability -- a measured incompatibility, not a
+ * gap in what has been measured.
  *
- * Evidence is matched on the full subject, platform included. A conclusion
- * reached on Linux says nothing about Windows, so on a platform with no
- * evidence every candidate is ineligible and says so.
+ * What evidence does otherwise is decide the order:
+ *
+ * - a model with live evidence covering this Scenario's requirements is scored,
+ *   and the scored models come first, best first;
+ * - a model nothing has been measured against keeps the position Hub gave it in
+ *   the catalog, and carries no score.
+ *
+ * That fallback is the whole difference from the first cut of this function,
+ * which made "nobody has tested this yet" an exclusion and so answered an empty
+ * ranking on any platform with no evidence -- the honest answer to a question
+ * nobody asked. "Which of these should I use" is still answerable from the
+ * catalog alone; what changes without evidence is how much the answer is worth,
+ * and `basis` says which one a reader is holding, per model.
  */
 export function recommend(options: RecommendOptions): RecommendationResult {
-  const considered = options.constraints?.modelIds
+  const considered = (options.constraints?.modelIds
     ? options.candidates.filter((candidate) => options.constraints!.modelIds!.includes(candidate.modelId))
-    : options.candidates;
+    : options.candidates
+  ).map((candidate, catalogIndex) => ({ candidate, catalogIndex }));
 
   const ceiling = options.constraints?.maxBlendedPricePerMillion === undefined
     ? undefined
     : Number(options.constraints.maxBlendedPricePerMillion);
-  const excluded = new Set(
-    (options.constraints?.excludePublishers ?? []).map((publisher) => publisher.toLowerCase()),
-  );
   // Every price this ranking actually read, so the result can say how long the
   // reading stays true. A price that was never consulted cannot invalidate it.
   const pricesUsed: string[] = [];
 
-  const assessed: readonly AssessedCandidate[] = considered.map((candidate): AssessedCandidate => {
-    const reasons: string[] = [];
+  const assessed: readonly AssessedCandidate[] = considered.map(({ candidate, catalogIndex }): AssessedCandidate => {
+    const excludedFor = (reasons: readonly string[], extra: Partial<AssessedCandidate> = {}): AssessedCandidate => ({
+      candidate,
+      catalogIndex,
+      eligible: false,
+      // The first reason is the exclusion; a renderer with one column shows it
+      // rather than inventing a shorter one that says something else.
+      headline: reasons[0] ?? "excluded",
+      reasons,
+      evidenceRefs: [] as readonly string[],
+      ...extra,
+    });
+
     const usable = candidate.protocols.filter((protocol) => options.agentProtocols.includes(protocol)).sort();
     if (usable.length === 0) {
-      return {
-        candidate,
-        eligible: false,
-        reasons: [`The model offers ${candidate.protocols.join(", ") || "no protocol"}, and this Agent speaks ${options.agentProtocols.join(", ")}.`],
-        evidenceRefs: [] as readonly string[],
-      };
+      return excludedFor([
+        `The model offers ${candidate.protocols.join(", ") || "no protocol"}, and this Agent speaks ${options.agentProtocols.join(", ")}.`,
+      ]);
     }
     if (candidate.availability !== "available" && candidate.availability !== "degraded") {
-      return {
-        candidate,
-        eligible: false,
-        reasons: [`The catalog reports the model as ${candidate.availability}.`],
-        evidenceRefs: [] as readonly string[],
-      };
-    }
-    if (excluded.size > 0) {
-      const publisher = candidate.publisher?.toLowerCase();
-      if (publisher === undefined) {
-        // Same rule as the price ceiling and as a required capability: a
-        // model whose publisher the catalog does not name cannot be shown
-        // not to be one of the excluded ones, and a constraint that lets the
-        // unprovable through is not a constraint.
-        return {
-          candidate,
-          eligible: false,
-          reasons: [
-            `The catalog does not name a publisher, so this model cannot be shown not to be published by ${[...excluded].sort().join(", ")}.`,
-          ],
-          evidenceRefs: [] as readonly string[],
-        };
-      }
-      if (excluded.has(publisher)) {
-        return {
-          candidate,
-          eligible: false,
-          reasons: [`Published by ${candidate.publisher}, which this run excludes.`],
-          evidenceRefs: [] as readonly string[],
-        };
-      }
+      return excludedFor([`The catalog reports the model as ${candidate.availability}.`]);
     }
     const blended = blendedPricePerMillion(candidate.pricing);
     if (blended !== undefined && candidate.pricing?.priceValidUntil !== undefined) {
@@ -325,26 +332,15 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       // A ceiling asks to be shown the model fits in it, and a model
       // the catalog prices at nothing shows no such thing. Letting it through
       // made `--max-price` silently match everything while reading as "filtered
-      // to your budget" -- the same rule required capabilities already follow:
-      // unknown is not a pass.
-      return {
-        candidate,
-        eligible: false,
-        reasons: [
-          `The catalog publishes no usable price, so this model cannot be shown to be within the ${ceiling} ceiling. Unknown is not within budget.`,
-        ],
-        evidenceRefs: [] as readonly string[],
-      };
+      // to your budget": unknown is not a pass.
+      return excludedFor([
+        `The catalog publishes no usable price, so this model cannot be shown to be within the ${ceiling} ceiling. Unknown is not within budget.`,
+      ]);
     }
     if (ceiling !== undefined && blended !== undefined && blended > ceiling) {
-      return {
-        candidate,
-        eligible: false,
-        reasons: [
-          `Blended price ${blended.toFixed(4)} ${candidate.pricing!.currency} per million is above the ${ceiling} ceiling.`,
-        ],
-        evidenceRefs: [] as readonly string[],
-      };
+      return excludedFor([
+        `Blended price ${blended.toFixed(4)} ${candidate.pricing!.currency} per million is above the ${ceiling} ceiling.`,
+      ]);
     }
 
     // Every protocol the Agent can use is assessed; the best answer wins, ties
@@ -357,66 +353,79 @@ export function recommend(options: RecommendOptions): RecommendationResult {
         left.protocol.localeCompare(right.protocol),
     )[0]!;
 
-    if (best.tested === 0) {
+    if (best.verdict.verdict === "incompatible") {
+      // The one thing evidence still removes a model for: it was tried, and a
+      // capability this Scenario requires did not work. The verdict already
+      // names which one, which is the whole point of the exclusion.
+      return excludedFor(best.verdict.reasons.map((reason) => `${best.protocol}: ${reason}`), {
+        protocol: best.protocol,
+        evidenceRefs: best.evidenceRefs,
+      });
+    }
+    if (best.tested === 0 || best.verdict.verdict === "unknown") {
+      // Untested, or tested incompletely. Not a defect of the model and not a
+      // reason to hide it -- it keeps Hub's position and says what it is.
       return {
         candidate,
-        eligible: false,
+        catalogIndex,
+        eligible: true,
+        basis: "catalog-order",
+        headline: best.tested === 0
+          ? "not tested yet, so it holds Hub's catalog order"
+          : `tested on ${best.tested} of ${options.scenario.requirements.length} requirements, so it holds Hub's catalog order`,
         protocol: best.protocol,
         reasons: [
-          `No compatibility evidence has been collected for ${options.agentId} ${options.agentVersion} on ${options.platform} against this model. Evidence from another platform does not carry over.`,
+          best.tested === 0
+            ? `No compatibility evidence for ${options.agentId} ${options.agentVersion} on ${options.platform} yet, so this keeps the catalog position Hub gave it. Evidence from another platform does not carry over.`
+            : `Evidence covers ${best.tested} of ${options.scenario.requirements.length} requirements on ${best.protocol}, not all of them, so this keeps the catalog position Hub gave it.`,
         ],
-        evidenceRefs: [] as readonly string[],
-      };
-    }
-    if (best.verdict.verdict === "incompatible" || best.verdict.verdict === "unknown") {
-      return {
-        candidate,
-        eligible: false,
-        protocol: best.protocol,
-        // The verdict already names which required capability failed or has no
-        // live evidence; repeating it here is the whole point of the exclusion.
-        reasons: best.verdict.reasons.map((reason) => `${best.protocol}: ${reason}`),
         evidenceRefs: best.evidenceRefs,
       };
     }
 
-    reasons.push(...best.verdict.reasons.map((reason) => `${best.protocol}: ${reason}`));
     return {
       candidate,
+      catalogIndex,
       eligible: true,
+      basis: "evidence",
+      headline: `every required capability passed on ${best.protocol}; ${best.supportedPreferred} of ${best.totalPreferred} preferred supported`,
       protocol: best.protocol,
       compatibility: best.totalPreferred === 0 ? 1 : best.supportedPreferred / best.totalPreferred,
       compatibilityDetail: `${best.supportedPreferred}/${best.totalPreferred} preferred capabilities supported on ${best.protocol}; every required one passed`,
       confidence: best.tested / options.scenario.requirements.length,
-      reasons,
+      reasons: best.verdict.reasons.map((reason) => `${best.protocol}: ${reason}`),
       evidenceRefs: best.evidenceRefs,
     };
   });
 
-  // A dimension nothing in the eligible set has data for is dropped for this
+  // A dimension nothing in the scored set has data for is dropped for this
   // run and reported, exactly like a priority nothing measures. Scoring every
   // candidate zero would keep the weight while carrying no information; scoring
   // them all one would rank on a number the bill contradicts.
-  const eligibleEntries = assessed.filter((entry) => entry.eligible);
-  // With nothing eligible there is no set to look in, and "no eligible
-  // model has a price" would report every dimension as unmeasured on the
-  // strength of an empty set. Nothing was measured because nothing got that
-  // far, which is a different statement and belongs to the exclusion reasons.
-  const anyEligible = eligibleEntries.length > 0;
+  //
+  // The set looked in is the scored one, not everything eligible: a model
+  // ranked by catalog order is not scored on any dimension, so whether it
+  // carries a price says nothing about whether `cost` can order the rest.
+  const scoredEntries = assessed.filter((entry) => entry.basis === "evidence");
+  // With nothing scored there is no set to look in, and "no scored model has a
+  // price" would report every dimension as unmeasured on the strength of an
+  // empty set. Nothing was measured because nothing was scored, which is a
+  // different statement and is what `basis` already says.
+  const anyScored = scoredEntries.length > 0;
   const unavailable = new Set<ScenarioPriority>();
   const runtimeUnmeasured: { readonly priority: string; readonly why: string }[] = [];
-  if (anyEligible && !eligibleEntries.some((entry) => blendedPricePerMillion(entry.candidate.pricing) !== undefined)) {
+  if (anyScored && !scoredEntries.some((entry) => blendedPricePerMillion(entry.candidate.pricing) !== undefined)) {
     unavailable.add("cost");
     runtimeUnmeasured.push({
       priority: "cost",
-      why: "the catalog publishes no usable price for any eligible model; ranking on a published zero would contradict what the estimate and the bill say",
+      why: "the catalog publishes no usable price for any scored model",
     });
   }
-  if (anyEligible && !eligibleEntries.some((entry) => entry.candidate.contextWindow !== undefined)) {
+  if (anyScored && !scoredEntries.some((entry) => entry.candidate.contextWindow !== undefined)) {
     unavailable.add("context");
     runtimeUnmeasured.push({
       priority: "context",
-      why: "the catalog publishes no context window for any eligible model",
+      why: "the catalog publishes no context window for any scored model",
     });
   }
 
@@ -429,7 +438,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
   ];
 
   const scored: readonly AssessedCandidate[] = assessed.map((entry): AssessedCandidate => {
-    if (!entry.eligible) return entry;
+    if (entry.basis !== "evidence") return entry;
     const dimensions: ScoredDimension[] = [];
     if (weights.has("compatibility")) {
       dimensions.push({
@@ -468,36 +477,43 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     };
   });
 
-  // Deterministic order: eligible first, then score, then model ID. Two
-  // runs over the same input have to produce the same bytes, which is what the
-  // repeatability exit condition means in practice.
+  // Scored first, then the ones holding Hub's order, then what was excluded.
+  // Inside each group the catalog's own order breaks every tie, so the only
+  // thing that reorders a model is a score -- and two runs over the same
+  // catalog produce the same bytes, which is what the repeatability exit
+  // condition means in practice.
   const ordered = [...scored].sort(
     (left, right) =>
-      Number(right.eligible) - Number(left.eligible) ||
+      groupOf(left) - groupOf(right) ||
       (right.score ?? 0) - (left.score ?? 0) ||
-      left.candidate.modelId.localeCompare(right.candidate.modelId),
+      left.catalogIndex - right.catalogIndex,
   );
 
-  const candidates: RecommendationCandidateResult[] = ordered.map((entry, index) => ({
-    modelId: entry.candidate.modelId,
-    displayName: entry.candidate.displayName,
-    rank: index + 1,
-    eligible: entry.eligible,
-    ...(entry.protocol === undefined ? {} : { protocol: entry.protocol }),
-    ...(entry.score === undefined ? {} : { score: Number(entry.score.toFixed(6)) }),
-    ...(entry.confidence === undefined ? {} : { confidence: Number(entry.confidence.toFixed(6)) }),
-    ...(entry.dimensions === undefined ? {} : { dimensions: entry.dimensions }),
-    reasons: entry.reasons,
-    evidenceRefs: entry.evidenceRefs,
-    // Never an input to the score above: the exit condition "no hidden
-    // commercial scoring" is held by there being nothing to hide.
-    sponsored: false,
-  }));
-
-  const eligible = candidates.filter((candidate) => candidate.eligible);
-  const summary = eligible.length === 0
-    ? `No model can be recommended for ${options.scenario.id} on ${options.platform}: ${candidates.length} considered, none eligible.${commonestExclusion(candidates)}`
-    : `${eligible[0]!.displayName} ranks first for ${options.scenario.id} on ${options.platform}, from ${eligible.length} eligible of ${candidates.length} considered.`;
+  const candidates: RecommendationCandidateResult[] = ordered.map((entry, index) => {
+    const blended = blendedPricePerMillion(entry.candidate.pricing);
+    return {
+      modelId: entry.candidate.modelId,
+      displayName: entry.candidate.displayName,
+      rank: index + 1,
+      eligible: entry.eligible,
+      headline: entry.headline,
+      ...(entry.basis === undefined ? {} : { basis: entry.basis }),
+      ...(entry.candidate.publisher === undefined ? {} : { publisher: entry.candidate.publisher }),
+      ...(entry.protocol === undefined ? {} : { protocol: entry.protocol }),
+      ...(blended === undefined
+        ? {}
+        : { pricePerMillion: Number(blended.toFixed(6)), currency: entry.candidate.pricing!.currency }),
+      ...(entry.candidate.contextWindow === undefined ? {} : { contextWindow: entry.candidate.contextWindow }),
+      ...(entry.score === undefined ? {} : { score: Number(entry.score.toFixed(6)) }),
+      ...(entry.confidence === undefined ? {} : { confidence: Number(entry.confidence.toFixed(6)) }),
+      ...(entry.dimensions === undefined ? {} : { dimensions: entry.dimensions }),
+      reasons: entry.reasons,
+      evidenceRefs: entry.evidenceRefs,
+      // Never an input to the score above: the exit condition "no hidden
+      // commercial scoring" is held by there being nothing to hide.
+      sponsored: false,
+    };
+  });
 
   return {
     schemaVersion: "0.1",
@@ -511,22 +527,51 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     priorities: [...options.scenario.priorities],
     unmeasured,
     candidates,
-    summary,
+    summary: summarise(candidates, options),
     createdAt: options.now.toISOString(),
     expiresAt: horizon(earliestExpiry(options.evidence, candidates), pricesUsed, options.now),
   };
 }
 
+/** Scored, then catalog order, then excluded. */
+function groupOf(entry: AssessedCandidate): number {
+  return entry.basis === "evidence" ? 0 : entry.eligible ? 1 : 2;
+}
+
 /**
+ * One sentence: how many models are ranked, what put the top one there, and --
+ * only when something was dropped -- how many and what the commonest cause was.
+ *
  * Naming one cause was wrong as soon as there was more than one: the summary
  * said "none with live evidence" however they were excluded, so a price ceiling
  * that removed everything was reported as an evidence problem. The reasons are
  * templated, so the identical ones group, and the largest group is named with
  * its count rather than presented as the only cause.
  */
-function commonestExclusion(candidates: readonly RecommendationCandidateResult[]): string {
+function summarise(
+  candidates: readonly RecommendationCandidateResult[],
+  options: RecommendOptions,
+): string {
+  const ranked = candidates.filter((candidate) => candidate.eligible);
+  const excluded = candidates.filter((candidate) => !candidate.eligible);
+  const scored = ranked.filter((candidate) => candidate.basis === "evidence").length;
+  if (ranked.length === 0) {
+    return `No model is left for ${options.scenario.id} on ${options.platform}: ${candidates.length} considered, all excluded.${commonestExclusion(excluded)}`;
+  }
+  const top = ranked[0]!;
+  const how = top.basis === "evidence"
+    ? `on compatibility evidence, scoring ${top.score?.toFixed(3)}`
+    : "on Hub's catalog order, because nothing has been measured against it yet";
+  return [
+    `${top.displayName} ranks first for ${options.scenario.id} on ${options.platform} ${how}.`,
+    ` ${ranked.length} of ${candidates.length} models ranked, ${scored} of them scored from evidence.`,
+    excluded.length === 0 ? "" : ` ${excluded.length} excluded.${commonestExclusion(excluded)}`,
+  ].join("");
+}
+
+function commonestExclusion(excluded: readonly RecommendationCandidateResult[]): string {
   const counts = new Map<string, number>();
-  for (const candidate of candidates) {
+  for (const candidate of excluded) {
     const reason = candidate.reasons[0];
     if (reason !== undefined) counts.set(reason, (counts.get(reason) ?? 0) + 1);
   }
@@ -535,7 +580,7 @@ function commonestExclusion(candidates: readonly RecommendationCandidateResult[]
   if (top === undefined) return "";
   return counts.size === 1
     ? ` Every one: ${top[0]}`
-    : ` Most common (${top[1]} of ${candidates.length}): ${top[0]}`;
+    : ` Most common (${top[1]} of ${excluded.length}): ${top[0]}`;
 }
 
 /**
