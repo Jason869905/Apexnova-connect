@@ -1096,12 +1096,12 @@ M5 已关闭（[ADR 0041](decisions/0041-m5-closure.md)）。本节把本文散�
 
 ### 18.3 仍需 Hub 处理（按优先级）
 
-**1. 目录的 Model ↔ 可调用条目一对一，写进契约（新增，高）。** Connect 自 [ADR 0039](decisions/0039-connect-only-has-models.md) 起把 `models[]` 与 `deployments[]` 按一对一合并；同一 Model 下出现两条可调用条目时，`packages/hub-client` 拒绝的是**整份目录**，不是那一个 Model——`models`、`recommend`、`connect`、`run` 会同时失败，与 §12H 当年「一个 `null` 让整份目录解析失败」同形。今天现网是一一对应的，所以这是一条**尚未触发的**依赖。请 Hub：
+**1. 目录的 Model ↔ 可调用条目一对一，写进契约（新增，高）。** Connect 自 [ADR 0039](decisions/0039-connect-only-has-models.md) 起把 `models[]` 与 `deployments[]` 按一对一合并；同一 Model 下出现两条可调用条目时，`packages/hub-client` 原本拒绝的是**整份目录**，不是那一个 Model——`models`、`recommend`、`connect`、`run` 会同时失败，与 §12H 当年「一个 `null` 让整份目录解析失败」同形。今天现网是一一对应的，所以这是一条**尚未触发的**依赖。请 Hub：
 
 - 在 OpenAPI 与 contract test 里写明：同一份权重在多个区域或多条线路提供时，**作为多个 Model 发布**（`glm-5.2-ap`、`glm-5.2-eu`），而不是一个 Model 下挂多条可调用条目；
 - 若 Hub 认为将来必须一对多，请**在上线之前**告知，双方先定呈现方式。
 
-Connect 这侧可以把拒绝范围收窄到出问题的那个 Model（跳过并在警告中点名，**尚未做**），但那只是降级，不能代替契约——被跳过的 Model 对用户同样是消失了。
+Connect 这侧已把拒绝范围收窄到出问题的那个 Model（2026-09-28）：它从目录里被扣下，其余 Model 照常可用，每条读目录的命令都以警告点名它和那几条可调用条目。但那只是降级，不能代替契约——被跳过的 Model 对用户同样是消失了。
 
 **2. `PATCH /v1/api-keys/{id}` 的语义钉进 contract test（新增，中）。** Connect 在请求体的 `publicDeploymentIds` 里发送的是**并集**，并以响应读回校验授权是否真的扩大。这依赖两条目前只在实现里、不在契约里的性质：该字段是整体替换而不是追加；响应体反映的是生效后的集合。任何一条改变，用户新加的模型会在第一次调用时 fail closed。请把这两条写进 OpenAPI 描述与双方 CI 的 contract test。
 

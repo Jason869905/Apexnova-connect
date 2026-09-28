@@ -77,6 +77,8 @@ import {
   localStateRoot,
   noOperands,
   operationSignal,
+  resetCatalogNotices,
+  takeCatalogNotices,
   resolveConfirm,
   resolveIntegration,
   resolvePicker,
@@ -4346,6 +4348,7 @@ export async function runCli(
   const io = dependencies.io ?? defaultIo();
   const requestId = (dependencies.createRequestId ?? (() => `local_${randomUUID()}`))();
   let parsed: ParsedArguments | undefined;
+  resetCatalogNotices(dependencies);
 
   try {
     parsed = parseArguments(args);
@@ -4440,7 +4443,8 @@ export async function runCli(
 
     // A raw result already wrote exactly what its caller must receive.
     if ("raw" in result && result.raw) return { exitCode: EXIT_CODES.success, requestId };
-    if (parsed.json) writeJsonSuccess(io, parsed.command, requestId, result.data, result.warnings);
+    const catalogNotices = takeCatalogNotices(dependencies).filter((notice) => !result.warnings.includes(notice));
+    if (parsed.json) writeJsonSuccess(io, parsed.command, requestId, result.data, [...result.warnings, ...catalogNotices]);
     else {
       io.stdout(`${result.human}\n`);
       // Human mode used to print `human` and drop `warnings` on the floor, so
@@ -4451,6 +4455,7 @@ export async function runCli(
       if (!("humanIncludesWarnings" in result && result.humanIncludesWarnings)) {
         for (const warning of result.warnings) io.stderr(`Warning: ${warning}\n`);
       }
+      for (const notice of catalogNotices) io.stderr(`Warning: ${notice}\n`);
     }
     return { exitCode: EXIT_CODES.success, requestId };
   } catch (error) {
@@ -4464,7 +4469,10 @@ export async function runCli(
       ...(normalized.details ? { details: normalized.details } : {}),
     };
     if (parsed?.json ?? args.includes("--json")) writeJsonFailure(io, command, requestId, shape);
-    else io.stderr(`Error [${shape.code}]: ${shape.message}\n`);
+    else {
+      for (const notice of takeCatalogNotices(dependencies)) io.stderr(`Warning: ${notice}\n`);
+      io.stderr(`Error [${shape.code}]: ${shape.message}\n`);
+    }
     return { exitCode: normalized.exitCode, requestId };
   }
 }

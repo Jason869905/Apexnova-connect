@@ -20,6 +20,7 @@ import {
 } from "@apexnova-connect/core";
 import {
   HubClientError,
+  type HubCatalogSnapshot,
   type HubInferenceVerification,
   type VerifyHubInferenceOptions,
 } from "@apexnova-connect/hub-client";
@@ -282,7 +283,34 @@ export function hubService(parsed: ParsedArguments, dependencies: CliDependencie
     ...hubConfigContext(dependencies),
     requestTimeoutMs: parsed.timeoutSeconds * 1_000,
   });
-  return withRetryableHub(base, dependencies.sleep ?? defaultSleep);
+  return withRetryableHub(base, dependencies.sleep ?? defaultSleep, (catalog) => recordCatalogNotices(catalog, dependencies));
+}
+
+// A model the catalog withheld is missing from every list, picker and ranking
+// that reads the catalog, so each command would otherwise have to remember to
+// say so. Notices are collected once per invocation, keyed on the dependencies
+// object `runCli` was given, and `runCli` attaches them to whatever the command
+// returns -- or prints them before its error, since a withheld model is the
+// likeliest reason `--model <it>` just failed.
+const catalogNotices = new WeakMap<CliDependencies, Map<string, string>>();
+
+export function resetCatalogNotices(dependencies: CliDependencies): void {
+  catalogNotices.delete(dependencies);
+}
+
+export function takeCatalogNotices(dependencies: CliDependencies): readonly string[] {
+  const notices = [...(catalogNotices.get(dependencies)?.values() ?? [])];
+  catalogNotices.delete(dependencies);
+  return notices;
+}
+
+function recordCatalogNotices(catalog: HubCatalogSnapshot, dependencies: CliDependencies): void {
+  if (!catalog.withheld || catalog.withheld.length === 0) return;
+  const notices = catalogNotices.get(dependencies) ?? new Map<string, string>();
+  for (const model of catalog.withheld) {
+    notices.set(model.modelId, `${model.displayName} (${model.modelId}) is not offered: Apexnova AI Hub published ${model.callableIds.length} callable entries for it (${model.callableIds.join(", ")}), and Connect cannot choose which one to bill.`);
+  }
+  catalogNotices.set(dependencies, notices);
 }
 
 
@@ -335,14 +363,22 @@ export async function withRetry<T>(
   }
 }
 
-function withRetryableHub(service: HubCommandService, sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>): HubCommandService {
+function withRetryableHub(
+  service: HubCommandService,
+  sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>,
+  onCatalog: (catalog: HubCatalogSnapshot) => void,
+): HubCommandService {
   const retry = <T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> => withRetry(operation, { sleep, ...(signal ? { signal } : {}) });
   return {
     login: (profileId, onVerificationRequired, signal) => service.login(profileId, onVerificationRequired, signal),
     logout: (profileId) => service.logout(profileId),
     whoami: (profileId, signal) => retry(() => service.whoami(profileId, signal), signal),
     balance: (profileId, signal) => retry(() => service.balance(profileId, signal), signal),
-    catalog: (profileId, signal) => retry(() => service.catalog(profileId, signal), signal),
+    catalog: async (profileId, signal) => {
+      const catalog = await retry(() => service.catalog(profileId, signal), signal);
+      onCatalog(catalog);
+      return catalog;
+    },
     estimatePricing: (profileId, modelId, usage, signal) => retry(() => service.estimatePricing(profileId, modelId, usage, signal), signal),
     usage: (profileId, requestId, signal) => retry(() => service.usage(profileId, requestId, signal), signal),
     usageQuery: (profileId, query, signal) => retry(() => service.usageQuery(profileId, query, signal), signal),

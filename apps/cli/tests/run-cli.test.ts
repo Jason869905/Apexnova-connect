@@ -755,6 +755,42 @@ describe("CLI", () => {
     expect(capture.stdout()).toContain("model.aux");
   });
 
+  it("names a model the catalog withheld, in both output modes, and still lists the rest", async () => {
+    const withheld = async () => ({
+      ...twoModelCatalog(),
+      withheld: [{ modelId: "model.glm", displayName: "GLM 5.2", callableIds: ["glm.ap", "glm.eu"] }],
+    });
+
+    const human = captureIo();
+    const humanResult = await runCli(["models"], { io: human.io, hubService: mockHub({ catalog: withheld }), createRequestId: () => "local_withheld" });
+    expect(humanResult.exitCode).toBe(EXIT_CODES.success);
+    expect(human.stdout()).toContain("model.nova");
+    expect(human.stdout()).not.toContain("model.glm");
+    expect(human.stderr()).toContain("Warning: GLM 5.2 (model.glm) is not offered");
+    expect(human.stderr()).toContain("glm.ap, glm.eu");
+
+    const json = captureIo();
+    await runCli(["models", "--json"], { io: json.io, hubService: mockHub({ catalog: withheld }), createRequestId: () => "local_withheld_json" });
+    const envelope = JSON.parse(json.stdout()) as { warnings: string[] };
+    expect(envelope.warnings.filter((warning) => warning.includes("model.glm"))).toHaveLength(1);
+  });
+
+  it("names a withheld model before the error it most likely caused", async () => {
+    const capture = captureIo();
+    const result = await runCli(["switch", "opencode", "--model", "model.glm", "--yes"], {
+      io: capture.io,
+      registry: registryWith(),
+      credentialStore: memoryCredentials(),
+      hubService: mockHub({ catalog: async () => ({ ...twoModelCatalog(), withheld: [{ modelId: "model.glm", displayName: "GLM 5.2", callableIds: ["glm.ap", "glm.eu"] }] }) }),
+      createRequestId: () => "local_withheld_error",
+    });
+
+    expect(result.exitCode).not.toBe(EXIT_CODES.success);
+    const stderr = capture.stderr();
+    expect(stderr.indexOf("Warning: GLM 5.2 (model.glm) is not offered")).toBeGreaterThanOrEqual(0);
+    expect(stderr.indexOf("Warning: GLM 5.2")).toBeLessThan(stderr.indexOf("Error ["));
+  });
+
   it("refuses a named switch target on a terminal that cannot be asked", async () => {
     const root = await mkdtemp(join(tmpdir(), "apexnova-cli-switch-approve-"));
     const configPath = join(root, "opencode.jsonc");

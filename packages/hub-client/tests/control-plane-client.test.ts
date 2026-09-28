@@ -68,23 +68,31 @@ describe("HubControlPlaneClient", () => {
     expect(result.models[0]).toMatchObject({ displayName: "GLM 5.2 EU", publisher: "zhipu", modelType: "chat", inferenceAlias: "eu" });
   });
 
-  it("refuses a model with two callable entries rather than choosing one", async () => {
-    const line = (id: string) => ({
-      id, providerId: "provider.apexnova-ai-hub", modelId: "model.glm", displayName: "GLM 5.2", inferenceAlias: id,
+  it("withholds a model with two callable entries, and only that model", async () => {
+    const line = (id: string, modelId: string) => ({
+      id, providerId: "provider.apexnova-ai-hub", modelId, displayName: id, inferenceAlias: id,
       protocols: [{ protocol: "openai-responses", baseUrl: "https://api.example.test/v1/responses" }],
       capabilities: [], availability: { status: "available" },
     });
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(json({
       schemaVersion: "0.1", catalogVersion: "cat_1", generatedAt: "2026-09-03T12:00:00Z", expiresAt: "2026-09-03T12:15:00Z",
       providers: [],
-      models: [{ id: "model.glm", name: "GLM 5.2", publisher: "zhipu", modelType: "chat", capabilities: [], deploymentIds: ["a", "b"] }],
+      models: [
+        { id: "model.glm", name: "GLM 5.2", publisher: "zhipu", modelType: "chat", capabilities: [], deploymentIds: ["a", "b"] },
+        { id: "model.north", name: "North", publisher: "cohere", modelType: "chat", capabilities: [], deploymentIds: ["c"] },
+      ],
       // A model served from two regions is two models in Hub's catalog. Two
       // callable entries under one model is a shape Connect cannot present, and
       // picking one would bill the user on a line nobody chose.
-      deployments: [line("a"), line("b")],
+      deployments: [line("a", "model.glm"), line("b", "model.glm"), line("c", "model.north")],
     }));
 
-    await expect(client(fetch).catalog()).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    const result = await client(fetch).catalog();
+
+    // The rest of the catalog survives; failing it whole is the 12H shape.
+    expect(result.models.map((model) => model.id)).toEqual(["c"]);
+    // Neither entry comes back through the orphan path one at a time.
+    expect(result.withheld).toEqual([{ modelId: "model.glm", displayName: "GLM 5.2", callableIds: ["a", "b"] }]);
   });
 
   it("keeps a callable entry Hub published without its model row", async () => {

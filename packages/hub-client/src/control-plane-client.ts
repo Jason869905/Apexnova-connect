@@ -15,6 +15,7 @@ import type {
   HubCatalogProtocol,
   HubCatalogProvider,
   HubCatalogSnapshot,
+  HubCatalogWithheldModel,
   HubPricingEstimate,
   HubPricingUsage,
   HubEvidenceListResult,
@@ -224,15 +225,21 @@ function parseWireDeployment(value: unknown, allowInsecureLoopback: boolean): Wi
  * The join is one-to-one on purpose. Hub publishes a model served from two
  * regions as two models -- `glm-5.2-ap` and `glm-5.2-eu`, two ids, two aliases,
  * two prices -- so a `models[]` entry pointing at two callable entries is not a
- * shape Connect knows how to present. **It is refused rather than resolved**:
- * picking one would put the axis back, silently, and the user would be billed on
- * a line nobody chose.
+ * shape Connect knows how to present. **That model is withheld rather than
+ * resolved**: picking one would put the axis back, silently, and the user would
+ * be billed on a line nobody chose. Only that model is withheld -- failing the
+ * whole catalog would take every other model down with it, the shape of the
+ * `null` price that once broke `models`, `recommend` and `run` at once (Hub
+ * requirement 12H). The caller is told which model and why.
  *
  * The callable entry leads, because its id is the one Hub authorises and bills.
  * The order Hub sent its `models[]` in is kept -- that is the ordering a reader
  * has already seen in the model plaza.
  */
-function joinCatalog(models: readonly WireModel[], deployments: readonly WireDeployment[]): readonly HubCatalogModel[] {
+function joinCatalog(
+  models: readonly WireModel[],
+  deployments: readonly WireDeployment[],
+): { readonly models: readonly HubCatalogModel[]; readonly withheld: readonly HubCatalogWithheldModel[] } {
   const byModelId = new Map<string, WireDeployment[]>();
   for (const deployment of deployments) {
     const bucket = byModelId.get(deployment.modelId);
@@ -240,14 +247,15 @@ function joinCatalog(models: readonly WireModel[], deployments: readonly WireDep
     else byModelId.set(deployment.modelId, [deployment]);
   }
   const joined: HubCatalogModel[] = [];
+  const withheld: HubCatalogWithheldModel[] = [];
   const placed = new Set<string>();
   for (const model of models) {
     const callable = byModelId.get(model.id) ?? [];
     if (callable.length > 1) {
-      throw new HubClientError(
-        "INVALID_RESPONSE",
-        `Apexnova AI Hub published ${callable.length} callable entries for model ${model.id} (${callable.map((item) => item.id).join(", ")}). Connect selects models, and cannot choose between them.`,
-      );
+      // Marked placed so the orphan pass below does not offer them one by one.
+      for (const item of callable) placed.add(item.id);
+      withheld.push({ modelId: model.id, displayName: model.name, callableIds: callable.map((item) => item.id) });
+      continue;
     }
     const only = callable[0];
     // A `models[]` row with nothing callable behind it cannot be selected,
@@ -265,7 +273,7 @@ function joinCatalog(models: readonly WireModel[], deployments: readonly WireDep
     if (placed.has(only.id)) continue;
     joined.push(withModel(only, undefined));
   }
-  return joined;
+  return { models: joined, withheld };
 }
 
 function withModel(callable: WireDeployment, model: WireModel | undefined): HubCatalogModel {
@@ -735,7 +743,7 @@ export class HubControlPlaneClient {
       schemaVersion: string(item.schemaVersion, "catalog.schemaVersion", 32), catalogVersion: string(item.catalogVersion, "catalog.catalogVersion", 256),
       generatedAt: timestamp(item.generatedAt, "catalog.generatedAt"), expiresAt: timestamp(item.expiresAt, "catalog.expiresAt"),
       providers: array(item.providers, "catalog.providers", parseProvider),
-      models: joinCatalog(
+      ...joinCatalog(
         array(item.models, "catalog.models", parseWireModel),
         array(item.deployments, "catalog.deployments", (deployment) => parseWireDeployment(deployment, this.#allowInsecureLoopback)),
       ),

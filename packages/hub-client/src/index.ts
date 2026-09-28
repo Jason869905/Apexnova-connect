@@ -28,6 +28,7 @@ export type {
   HubAccountSummary,
   HubBalance,
   HubCatalogCapabilityStatement,
+  HubCatalogWithheldModel,
 
   HubCatalogModel,
   HubCatalogPricing,

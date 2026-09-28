@@ -233,6 +233,19 @@ export interface HubCatalogSnapshot {
   readonly expiresAt: string;
   readonly providers: readonly HubCatalogProvider[];
   readonly models: readonly HubCatalogModel[];
+  /**
+   * Models Hub published with more than one callable entry, left out of
+   * `models` because Connect cannot choose between them. Absent or empty when
+   * the catalog is one-to-one, which is what Hub publishes today.
+   */
+  readonly withheld?: readonly HubCatalogWithheldModel[];
+}
+
+/** A `models[]` row with several callable entries behind it. */
+export interface HubCatalogWithheldModel {
+  readonly modelId: string;
+  readonly displayName: string;
+  readonly callableIds: readonly string[];
 }
 
 export interface CreateRuntimeCredentialInput {
