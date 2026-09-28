@@ -5,7 +5,9 @@
 M0 包含两组职责不同的契约：
 
 - `integration-manifest.schema.json`：Integration 身份、状态、交付方式、兼容性、协议、capability 和权限声明；
-- 领域契约：`agent-profile`、`provider-profile`、`model-profile`、`model-model`、`scenario-profile`、`compatibility-evidence`、`recommendation`、`connection-profile` 和 `diagnostic-result`。
+- 领域契约：`agent-profile`、`provider-profile`、`model`、`scenario-profile`、`compatibility-evidence`、`recommendation`、`connection-profile` 和 `diagnostic-result`。
+
+> `connection-profile.schema.json` **无实现**：CLI 不接受 `--connection-profile`，没有任何代码读写该文档。M5 收口时 Connection Profile 已移出范围（[ADR 0041](../docs/decisions/0041-m5-closure.md) 第 3 节），schema 保留仅作设计记录，不是已支持的契约。
 
 M2 增加 Agent Discovery Contract 的两个只读契约：
 

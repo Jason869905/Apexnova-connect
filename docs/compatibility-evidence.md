@@ -11,7 +11,7 @@
 兼容性不是静态标签，而是特定版本组合在特定时间和测试条件下的可重复结论。
 
 ```text
-Agent + Integration + Model Model + Platform + Test Suite + Time
+Agent + Integration + Model + Platform + Test Suite + Time
 ```
 
 任何公开的 `compatible` 或 `incompatible` 都必须能够追溯到 Evidence。证据不足时返回 `unverified`。
@@ -132,7 +132,7 @@ M4 后引入，用于比较任务效果，**不与技术兼容性混合**——�
 - `createdAt`、`observedAt`、`expiresAt`；
 - Agent ID 和版本；
 - Integration ID 和版本；
-- Model Model ID 和服务端模型 ID；
+- Model ID 和服务端模型 ID；
 - Provider 和区域；
 - 平台和运行环境摘要；
 - Test Suite ID、版本和用例 ID；
@@ -183,7 +183,7 @@ Evidence 创建后不可修改。纠错通过新 Evidence 指向 `supersedes`，
 
 - Agent 主版本或相关协议实现变化；
 - Integration 解析或 Gateway 实现变化；
-- Model Model 的模型版本、Endpoint 或 Provider 实现变化——判据是目录的 `implementationFingerprint` 与 `implementationChangedAt`：指纹进 `subject`（[需求 12B.4](apexnova-ai-hub-requirements.md)），因此换了实现就是另一个 subject，旧记录不会被读成新实现的结论；指纹回退到旧值时用 `implementationChangedAt` 判断（同一个值可能再次出现，但变更时间是新的）；
+- Model 的模型版本、Endpoint 或 Provider 实现变化——判据是目录的 `implementationFingerprint` 与 `implementationChangedAt`：指纹进 `subject`（[需求 12B.4](apexnova-ai-hub-requirements.md)），因此换了实现就是另一个 subject，旧记录不会被读成新实现的结论；指纹回退到旧值时用 `implementationChangedAt` 判断（同一个值可能再次出现，但变更时间是新的）；
 - Test Suite 的破坏性变化；
 - 到达 Evidence 类型的 TTL；
 - Provider 通知弃用或能力回退。
