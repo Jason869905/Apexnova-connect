@@ -229,6 +229,13 @@ interface AssessedCandidate {
   readonly basis?: RankingBasis;
   readonly headline: string;
   readonly protocol?: string;
+  /**
+   * Set only where the price was actually read. A candidate dropped before the
+   * price mattered does not quote one: `expiresAt` bounds the prices this
+   * ranking read, so quoting an unread one would put a number in the document
+   * that nothing keeps current.
+   */
+  readonly pricePerMillion?: number;
   readonly compatibility?: number;
   readonly compatibilityDetail?: string;
   readonly confidence?: number;
@@ -324,7 +331,11 @@ export function recommend(options: RecommendOptions): RecommendationResult {
     if (candidate.availability !== "available" && candidate.availability !== "degraded") {
       return excludedFor([`The catalog reports the model as ${candidate.availability}.`]);
     }
+    // From here on the price is part of the answer -- it is scored, quoted in
+    // the output, or used to apply a ceiling -- so its validity bounds the
+    // ranking's. Candidates dropped above never got this far.
     const blended = blendedPricePerMillion(candidate.pricing);
+    const priced = blended === undefined ? {} : { pricePerMillion: Number(blended.toFixed(6)) };
     if (blended !== undefined && candidate.pricing?.priceValidUntil !== undefined) {
       pricesUsed.push(candidate.pricing.priceValidUntil);
     }
@@ -335,12 +346,12 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       // to your budget": unknown is not a pass.
       return excludedFor([
         `The catalog publishes no usable price, so this model cannot be shown to be within the ${ceiling} ceiling. Unknown is not within budget.`,
-      ]);
+      ], priced);
     }
     if (ceiling !== undefined && blended !== undefined && blended > ceiling) {
       return excludedFor([
         `Blended price ${blended.toFixed(4)} ${candidate.pricing!.currency} per million is above the ${ceiling} ceiling.`,
-      ]);
+      ], priced);
     }
 
     // Every protocol the Agent can use is assessed; the best answer wins, ties
@@ -358,6 +369,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       // capability this Scenario requires did not work. The verdict already
       // names which one, which is the whole point of the exclusion.
       return excludedFor(best.verdict.reasons.map((reason) => `${best.protocol}: ${reason}`), {
+        ...priced,
         protocol: best.protocol,
         evidenceRefs: best.evidenceRefs,
       });
@@ -370,6 +382,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
         catalogIndex,
         eligible: true,
         basis: "catalog-order",
+        ...priced,
         headline: best.tested === 0
           ? "not tested yet, so it holds Hub's catalog order"
           : `tested on ${best.tested} of ${options.scenario.requirements.length} requirements, so it holds Hub's catalog order`,
@@ -388,6 +401,7 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       catalogIndex,
       eligible: true,
       basis: "evidence",
+      ...priced,
       headline: `every required capability passed on ${best.protocol}; ${best.supportedPreferred} of ${best.totalPreferred} preferred supported`,
       protocol: best.protocol,
       compatibility: best.totalPreferred === 0 ? 1 : best.supportedPreferred / best.totalPreferred,
@@ -490,7 +504,6 @@ export function recommend(options: RecommendOptions): RecommendationResult {
   );
 
   const candidates: RecommendationCandidateResult[] = ordered.map((entry, index) => {
-    const blended = blendedPricePerMillion(entry.candidate.pricing);
     return {
       modelId: entry.candidate.modelId,
       displayName: entry.candidate.displayName,
@@ -500,9 +513,9 @@ export function recommend(options: RecommendOptions): RecommendationResult {
       ...(entry.basis === undefined ? {} : { basis: entry.basis }),
       ...(entry.candidate.publisher === undefined ? {} : { publisher: entry.candidate.publisher }),
       ...(entry.protocol === undefined ? {} : { protocol: entry.protocol }),
-      ...(blended === undefined
+      ...(entry.pricePerMillion === undefined
         ? {}
-        : { pricePerMillion: Number(blended.toFixed(6)), currency: entry.candidate.pricing!.currency }),
+        : { pricePerMillion: entry.pricePerMillion, currency: entry.candidate.pricing!.currency }),
       ...(entry.candidate.contextWindow === undefined ? {} : { contextWindow: entry.candidate.contextWindow }),
       ...(entry.score === undefined ? {} : { score: Number(entry.score.toFixed(6)) }),
       ...(entry.confidence === undefined ? {} : { confidence: Number(entry.confidence.toFixed(6)) }),

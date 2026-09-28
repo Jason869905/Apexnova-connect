@@ -228,7 +228,6 @@ apexnova connect opencode --best --yes
 --scenario <id>            --best 使用的 Scenario（默认 coding-general）
 --max-price <per-1M>       --best 的混合单价上限
 --model-allowlist <refs>   --best 只考虑这些 Model（逗号分隔）
---exclude-publisher <names> --best 永不选择这些发布方
 --credential-ttl <秒>      运行时凭据有效期，120～86400（默认 86400），蕴含 --rotating
 --api-key-helper           让 Agent 自己取凭据（仅支持该机制的 Agent，如 Claude Code）
 --config <path>            指定要写入的配置文件
@@ -459,23 +458,40 @@ apexnova recommend opencode --scenario coding-general --json
 apexnova recommend claude-code --max-price 2.5
 apexnova recommend opencode --model <id>          # 只看某一个
 apexnova recommend opencode --model-allowlist glm-5.2,glm-5.1   # 只考虑这些（接受 id 与别名）
-apexnova recommend claude-code --exclude-publisher "Zhipu AI"   # 不推荐该发布方的模型
 ```
 
-排序由 M3 采集的 Evidence 加目录数据算出，**全部在本地完成**，因此任何拿着同一批记录的人都能复算。规则见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md)：
+人读的输出是一张表，一行一个 Model，六列：名次、`--model` 认的那个别名、发布方、混合单价、评分、理由。
 
-- **硬约束是过滤不是扣分**：required 能力实测失败、或没有当前平台的实时证据，该 Model 直接 `eligible: false` 并给出排除理由，不参与排序。总分不得掩盖必需能力的失败；
-- **平台是证据 subject 的一部分**：Linux 上的结论不适用于 Windows。当前平台没有证据时，命令**如实报「无证据」并提示去采集**，而不是借用别处的结论；
-- **没有度量来源的分项照样列在 Scenario 的 `priorities` 里**，并在每次输出里逐条说明原因（`quality` 缺 Scenario Quality Pack、`latency` 缺 Operational Evidence、`privacy` 因目录只给不可逆指纹而无法区分、`availability` 是 Hub 声明因而只过滤不计分）。权重在计算前就把它们剔除，**因此列出它们不会稀释任何被计分项的权重**；把它们从列表里删掉才是问题——那等于静默给零分，读起来像「这个 Scenario 不在乎」而不是「没人测过」。**同样不给默认分**——默认分等于让「没测过」以「中等」的身份进入排序；
-- **某个分项在本轮所有候选上都没有数据时整项丢弃**并说明，而不是给所有人打零分却仍占权重。价格的「没有数据」是目录发布的 `null`；**一个发布出来的 `0` 是免费**，按最优计分（需求 12H 交付后语义恢复，此前零与未知不可分辨）；
-- 每个候选列出各分项的分数、权重、依据文字与所引用的 Evidence ID；`sponsored` 恒为 `false` 且不是打分输入；
+```text
+OpenCode 1.18.29 · coding-general 1.0.0 · linux-x64 · rule coding.v1 · catalog cat_9
+4 of 6 models ranked: 2 scored from compatibility evidence, 2 in Hub's catalog order.
+
+ #  MODEL      PROVIDER   PRICE/1M    SCORE  WHY
+ 1  glm-5.2    Zhipu AI   1.00 USD    0.967  every required capability passed on openai-responses; 3 of 3 preferred supported
+ 2  deepseek   DeepSeek   2.10 USD    0.763  every required capability passed on openai-responses; 2 of 3 preferred supported
+ 3  north      Apexnova   0.0000 USD      —  not tested yet, so it holds Hub's catalog order
+ 4  qwen       Alibaba           —        —  not tested yet, so it holds Hub's catalog order
+
+Excluded (2):
+  minimax — openai-responses: agent.single-tool-call is required and failed.
+  kimi — The catalog reports the model as maintenance.
+```
+
+排序由 M3 采集的 Evidence 加目录数据算出，**全部在本地完成**，因此任何拿着同一批记录的人都能复算。规则见 [ADR 0007](decisions/0007-m4-scope-and-recommendation-path.md) 与 [ADR 0040](decisions/0040-a-ranking-always-comes-back.md)：
+
+- **无论如何都有一张排序表。** 把 Model 移出这张表的只有三件事，每一件都是目录或证据**正面说出来**的：Agent 不会说它的任何协议、目录报它不在服务、或者它在本轮设定的价格上限之外。证据**只在实测失败时**排除一个 Model——那是被测出来的不兼容，不是没测过；
+- **没有证据不是缺陷，是排序依据弱一点。** 没有当前平台实时证据的 Model 保留 Hub 目录给它的位置，不计分，`basis` 标为 `catalog-order`；有证据且 required 全过的 Model 参与计分，`basis` 为 `evidence`，并排在前面。两段之内都按目录顺序打平；
+- **平台仍然是证据 subject 的一部分**：Linux 上的结论不适用于 Windows，不会被借用。当前平台没有证据时，整张表退化为 Hub 目录顺序，并在警告里说明去哪采集——而不是返回一张空表；
+- **没有度量来源的分项照样列在 Scenario 的 `priorities` 里**，原因写在文档顶层的 `unmeasured` 里（`quality` 缺 Scenario Quality Pack、`latency` 缺 Operational Evidence、`availability` 是 Hub 声明因而只过滤不计分）。权重在计算前就把它们剔除，**因此列出它们不会稀释任何被计分项的权重**；把它们从列表里删掉才是问题——那等于静默给零分，读起来像「这个 Scenario 不在乎」而不是「没人测过」。**同样不给默认分**——默认分等于让「没测过」以「中等」的身份进入排序；
+- **某个分项在本轮所有被计分候选上都没有数据时整项丢弃**并说明，而不是给所有人打零分却仍占权重。看的是被计分的那一段：按目录顺序排的 Model 本来就不在任何分项上计分，它有没有价格说明不了 `cost` 能不能给其余的排序。价格的「没有数据」是目录发布的 `null`；**一个发布出来的 `0` 是免费**，按最优计分（需求 12H 交付后语义恢复，此前零与未知不可分辨）；
+- 每个候选带上发布方、混合单价、评分与一句理由；各分项的分数、权重、依据文字与所引用的 Evidence ID 在 `--json` 文档里，人读的输出不再逐项铺开；`sponsored` 恒为 `false` 且不是打分输入；
 - **候选只来自 Apexnova 目录，并且每次运行都写在输出里**：目录之外的 Provider 不是「排得靠后」，而是根本没有参与。第二候选来源按 [ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md) 属于 M5——它真正缺的不是一份候选列表，而是一条不经 Hub 签发凭据、不经 Hub 计费的证据采集路径。
 
-输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`（后者自 schema `0.2` 起必填，见 [ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)：同一 Scenario 的两个 profile 要求的能力与优先级顺序不同，缺了它两份文档无法区分）；排序确定（同分按 modelId 字典序），同一输入两次运行逐字节相同。
+输出记录 `catalogVersion`、`ruleVersion` 与 Scenario 的 `profileVersion`（后者自 schema `0.2` 起必填，见 [ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)：同一 Scenario 的两个 profile 要求的能力与优先级顺序不同，缺了它两份文档无法区分）；排序确定（**同分按目录顺序**，不是按 modelId 字典序），同一份目录两次运行逐字节相同。
 
 `--json` 的 `data` **就是 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 冻结的那个对象**，由 `recommendationRecord()` 产出并在返回前用 ajv 校验，校验不过就报错而不是发出去。两处后果需要知道：
 
-- schema 的两个对象都是 `additionalProperties: false`，因此**平台、候选显示名、分项的分数与权重没有各自的字段**，它们写进 `reasons` 的文本里（ADR 0007 决策 3 指定的就是这个字段）。人读的输出不受此限，仍然分列显示；
+- schema `0.3` 给候选加了 `publisher`、`pricePerMillion`、`currency`、`displayName` 与 `basis`，并把 `unmeasured` 提到文档顶层——此前它被复制进**每一个**候选的 `reasons`（46 个 Model 各抄一遍同样四句话），因为 `reasons` 是 `additionalProperties: false` 之下唯一活下来的字段。**平台与分项的分数、权重仍然没有各自的字段**，写在 `reasons` 的文本里；
 - `candidates` 是 `minItems: 1`。什么都没纳入考虑时（例如 `--model` 指向目录里没有的 id）**不产出记录而是报错**——空推荐等于宣称一个没人做过的选择。
 
 `id` 形如 `rec.sha256.<64 hex>`，是对记录内容的哈希，与 Evidence 同一套办法：同一份排行算两次是同一份文档。`expiresAt` 取**这份排序所依赖的一切之中最早到期的那个**：所引用 Evidence 的到期时间，以及每一个**实际被读取过的价格**的 `priceValidUntil`（目录对部分 Model 按时段计价，价格一天内会变）。没读过的价格不参与——它没有影响过这次排序。两者都没有时取 `createdAt`，因为它没有任何可以凭借的东西；结果不会早于 `createdAt`，一份出生即过期的文档只会是目录给了过时有效期的产物。
@@ -484,11 +500,11 @@ M0 的规格里为本命令预留过 `--priority`、`--region`、`--provider`、
 
 - `--priority`：优先级由 Scenario 的 `priorities` 顺序决定，不设命令行覆盖；
 - `--region`：**不会实现**（[ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)）。用户想从区域得到的要么是低延迟（直接测量，属 Operational Evidence），要么是数据落在某个司法辖区（属需求 12J 的数据处理属性）；中间那个目录标签不增加信息，且不可校验；
-- `--provider` / 隐私约束：现网 46 个 Model 的 `providerId` 全是 `provider.apexnova-ai-hub`（`kind: platform`），**实际运行模型的上游运营方目录不给**，这一半仍不可实现；按模型发布方过滤的那一半**已实现**为 `--exclude-publisher`（大小写不敏感，现网覆盖 12 个发布方）。目录不给出发布方的 Model 在设了该约束时判为不通过——无法证明它不是被排除的那个发布方，与价格上限同一条规则；
+- `--provider` / 隐私约束：**不会实现**（[ADR 0040](decisions/0040-a-ranking-always-comes-back.md)）。现网 46 个 Model 的 `providerId` 全是 `provider.apexnova-ai-hub`（`kind: platform`），**实际运行模型的上游运营方目录不给**，而 Hub 已经收回了补这个字段的接口（需求 12J）。曾经实现过的那一半——按模型发布方过滤的 `--exclude-publisher`——**已删除**：它回答不了「请求经过谁的手」，留着只会让人以为设了它就满足了合规要求。发布方本身保留，作为排序输出里的 `PROVIDER` 一列；
 - `--model-allowlist`：**已实现**，接受逗号分隔的 model id 或别名，逐个对目录解析；名字不在可见目录里直接报 `MODEL_NOT_FOUND` 而不是静默匹配为空。与 `--model` 互斥（两者都在收窄候选集，同时给会产生歧义）；
-- `--verified-only`：没有意义，因为没有实测证据的 Model 本来就不会被推荐。
+- `--verified-only`：仍未实现。它现在是一个**有意义**的请求了——没有证据的 Model 不再被排除，而是按目录顺序排在有证据的后面，所以「只看测过的」是一个能提的问题。`--json` 里按 `basis: "evidence"` 过滤即可得到同样的集合。
 
-**`--max-price` 对价格未知的 Model 判为不通过**（ADR 0010 决策 2）：约束的语义是「证明得了才通过」，与 required 能力 `unknown` 不算通过是同一条规则。目录当前对全部 Model 发布 `pricing: 0`（需求 12H）并被读作「没有价格」，因此**只要设了 `--max-price`，当前本轮就没有候选**——这是 12H 的实际影响，不是过滤器坏了。零候选时输出会报出最大的一组排除理由及其计数。
+**`--max-price` 对价格未知的 Model 判为不通过**（ADR 0010 决策 2）：约束的语义是「证明得了才通过」，与 required 能力实测失败不算通过是同一条规则。需求 12H 交付后目录给出真实价格，`null` 表示没有，发布出来的 `0` 是免费，因此这条约束现在真的在过滤。一个候选都不剩时输出会报出最大的一组排除理由及其计数。
 
 ### 选项只在被读取的命令上被接受
 

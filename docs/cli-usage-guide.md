@@ -288,7 +288,7 @@ apexnova whoami                                  # 当前账号与套餐
 apexnova detect [agent]                          # 装没装、版本、配置在哪
 apexnova inspect <agent>                         # 当前 Provider、协议、受管理字段
 apexnova models [--agent <id>]                   # 模型目录，只读
-apexnova recommend <agent>                       # 按证据排名，说明为什么
+apexnova recommend <agent>                       # 排序模型：名次、发布方、价格、评分、理由
 apexnova usage --granularity day                 # 用量
 apexnova balance                                 # 余额
 apexnova connect <agent> --model <id> --dry-run   # 预览计划，不写盘不签发凭据

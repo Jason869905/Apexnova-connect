@@ -493,7 +493,7 @@ X-Apexnova-Deployment-Id
 
 `POST /v1/recommendations` 读取 Agent、场景、预算、区域和能力约束，输出候选、排除原因、Evidence、价格版本、置信度和显式商业推广标记。
 
-约束能力目前受目录数据限制：隐私见 12J，预算见 12H——两者都不是 Connect 侧能补的。「区域」已不在约束范围内（12I 已撤回，见 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)）。
+约束能力目前只剩预算（12H，Hub 已交付真实价格）与模型白名单。「隐私」与「区域」都已不在约束范围内：12I 撤回见 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)，12J 撤回见 [ADR 0040](decisions/0040-a-ranking-always-comes-back.md)。
 
 响应形状按 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 的 **`schemaVersion` 0.2**：该版本新增必填的 `profileVersion`（[ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)）。`scenarioId` 与 `ruleVersion` 不足以区分同一 Scenario 的两个 profile——profile 改版会改变 requirements 与 priorities 顺序，因此两份基于不同要求集的推荐在缺这个字段时是无法区分的文档。该接口尚未开工，所以本次变更不产生迁移成本。
 
@@ -931,7 +931,19 @@ Connect 这侧的处置（不等 Hub）：`recommend` **不提供** `--region`�
 
 因此 M4 的退出条件已去掉「区域」，本条撤回，上面的原文保留以记录这个判断是怎么来的。**区域在本项目里保留的唯一位置是延迟证据的测量条件**（客户端在哪测的），不是 Deployment 的属性。
 
-## 12J. 隐私约束只能表达一半：模型发布方有，实际运营方没有（2026-09-10）
+## 12J. 隐私约束只能表达一半：模型发布方有，实际运营方没有（2026-09-10 提出，**2026-09-28 撤回**）
+
+### 12J.0 本条已撤回（2026-09-28）
+
+**Hub 已收回该接口，这个字段不会来了。** 按 [ADR 0040](decisions/0040-a-ranking-always-comes-back.md)，Connect 这侧连同实现一起结清：
+
+- `recommend --exclude-publisher` **删除**。它是「发布方那一半」，回答不了「请求实际经过谁的手」；顶着「隐私约束」的名义留着，等于本条自己反对过的那次合并——会让设过它的人以为合规要求已经满足；
+- Scenario 的 `privacy` 分项删除，`scenario-profile.schema.json` 的枚举同步去掉；
+- **模型发布方本身保留**，作为 `recommend` 输出里的 `PROVIDER` 一列。它回答的是「这是谁的模型」——一个目录答得上、用户也确实在看的问题。
+
+下面的原文保留，以记录这个判断是怎么来的，以及撤回时放弃了什么。
+
+### 12J.1 原文（2026-09-10）
 
 同一条退出条件里的「隐私约束」，目录支持其中一半：
 
@@ -942,7 +954,7 @@ Connect 这侧的处置（不等 Hub）：`recommend` **不提供** `--region`�
 
 **2026-09-11：形状已选定，并记为遗留。** 采纳下面的第 2 个形状——**Hub 为每个 Deployment 发布可比较的数据处理属性**：数据处理所在区域／司法辖区、是否用于训练、是否存在子处理方等。**不要求披露上游运营方身份**，抽象掉上游本来就是这个平台的价值之一；属性可比较就足以让约束针对属性而不是针对名字。
 
-本条**不阻塞 M4**：隐私约束已按 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md) 移到 M5，Connect 侧的过滤路径已由 `--exclude-publisher` 证明成立，缺的只有这个上游字段。Hub 交付后由 Connect 实现属性过滤并实测，属 M5 验收项。
+本条**不阻塞 M4**：隐私约束已按 [ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md) 移到 M5，Connect 侧的过滤路径已由 `--exclude-publisher` 证明成立，缺的只有这个上游字段。Hub 交付后由 Connect 实现属性过滤并实测，属 M5 验收项。（**已不成立，见 12J.0**：Hub 收回接口，该验收项随之撤销。）
 
 仍需强调 `--exclude-publisher` 与本条不是一回事：前者按**模型发布方**过滤，回答不了「请求实际经过谁的手」。两者在文案上不得合并成「隐私」。
 

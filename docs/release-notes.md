@@ -4,9 +4,11 @@
 
 ## 未发布
 
-**统一术语：Connect 只有 Model，没有 Deployment。** 以及 `models` 只读、`switch` 换模型。三条都是破坏性的，趁 1.0 之前一次改净，**不提供兼容层**。
+**统一术语：Connect 只有 Model，没有 Deployment。** 以及 `models` 只读、`switch` 换模型、`recommend` 无论如何给出一张排序表。四条都是破坏性的，趁 1.0 之前一次改净，**不提供兼容层**。
 
 ### 破坏性变更
+
+**0. `recommend` 不再返回空推荐，`--exclude-publisher` 删除。** 详见下面两节。
 
 **1. `--deployment` 不存在了，选模型一律 `--model`。**
 
@@ -56,8 +58,42 @@ Domain Model 原本把模型拆成两层：`ModelProfile` 描述抽象模型版�
 
 见 [ADR 0038](decisions/0038-models-reads-switch-writes.md)。
 
+### `recommend` 无论如何给出一张排序表
+
+之前没有当前平台实时证据的 Model 一律 `eligible: false`。于是 macOS（没有实机、一条证据都没有）拿到的是**空推荐**，刚进目录还没采集的新模型等于不存在，46 个 Model 只排得出个位数。**「谁都别用」不是一个答案**——用户问的是「这些模型里我该用哪个」，而这个问题仅凭目录就能部分回答。
+
+现在只有四件事能把一个 Model 移出排序表，每一件都是目录或证据**正面说出来**的：Agent 不会说它的任何协议、目录报它不在服务、它在 `--max-price` 之外、**某条 required 能力实测失败**。没测过与测得不全改为决定顺序：
+
+- `basis: "evidence"` —— 有证据且 required 全过，按 `coding.v1` 计分，排在前面；
+- `basis: "catalog-order"` —— 没有可用证据，**保留 Hub 目录给它的位置**，`score` 缺席（不是 0，默认分等于让「没测过」以「中等」的身份进排序）。
+
+平台规则不变：Linux 上的结论仍然不适用于 Windows，不会被借用；变的只是借不到的后果——从「排不出来」变成「按目录顺序排，并在警告里说去哪采集」。
+
+**输出也简化了。** 此前每个候选占五到七行，46 个模型就是两百多行，排序本身反而看不见。现在是一张表，一行一个 Model：
+
+```text
+ #  MODEL      PROVIDER   PRICE/1M    SCORE  WHY
+ 1  glm-5.2    Zhipu AI   1.00 USD    0.967  every required capability passed on openai-responses; 3 of 3 preferred supported
+ 3  north      Apexnova   0.0000 USD      —  not tested yet, so it holds Hub's catalog order
+```
+
+逐分项的数字、权重与证据 id 全部留在 `--json` 文档里。该文档 schema 升到 `0.3`：候选新增 `publisher` / `pricePerMillion` / `currency` / `displayName` / `basis`，`unmeasured` 提到顶层（此前被复制进**每一个**候选的 `reasons`）。**同一批输入算出的文档 id 与 `0.2` 不同**；排序的打平键也从 modelId 字典序改为目录顺序。
+
+`connect --best` / `switch --best` 因此不再会因为「没采集过证据」而失败；`NO_ELIGIBLE_DEPLOYMENT` 改名为 `NO_ELIGIBLE_MODEL`，只在四条排除规则把所有 Model 都清空时出现。
+
+见 [ADR 0040](decisions/0040-a-ranking-always-comes-back.md)。
+
+### 隐私合规删除
+
+`recommend --exclude-publisher` 与 Scenario 的 `privacy` 分项**一并删除**，不保留别名、不打提示。
+
+[ADR 0014](decisions/0014-data-handling-attributes-belong-to-m5.md) 把隐私约束移到 M5 时，理由是「缺的只有一个上游字段」——需求 12J 的数据处理属性。**那个字段不会来了：Hub 已经收回该接口。** 留着实现出来的那一半会更糟：ADR 0014 自己写过，按发布方过滤与数据处理约束「在文案上不得合并成隐私」，而一个叫「隐私约束」的功能只做到按发布方过滤，就是那次合并本身。它回答不了「请求经过谁的手」，却会让设过它的人以为合规要求已经满足。
+
+**发布方本身保留**，作为排序输出里的 `PROVIDER` 一列。`scenario-profile.schema.json` 的 `priorities` 枚举同步去掉 `privacy`。
+
 ### 不包含
 
+- **`recommend` 没有引入任何目录之外的候选**。候选仍然只来自 Apexnova 目录，每次运行都在输出里声明这一点（[ADR 0008](decisions/0008-non-apexnova-candidates-belong-to-m5.md)）；
 - **没有改 Hub 的线格式**。`/catalog` 仍返回 `models[]` + `deployments[]`，创建 key 的 body 仍是 `publicDeploymentIds`，响应头仍是 `x-apexnova-deployment-id`。这些只出现在 `packages/hub-client` 这一层，并在边界上合并成 Model；
 - **没有改 Compatibility Evidence 的 `subject.deploymentId`**。这条记录的 ID 是其 canonical JSON 的 sha256，规则与 Hub 双向钉死（`schemas/fixtures/evidence-canonical-vectors.json` 两边各存一份）。改键名会让每条内容相同的记录换一个 ID，而 Hub 算出来的是另一个，提交会被拒。**它装的就是 model id**，类型和 Schema 上都已写明；要真正改掉需要 Hub 侧协同改哈希规则并重新钉 vector；
 - **没有做任何兼容读**。这是刻意的，代价见上。

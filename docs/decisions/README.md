@@ -45,3 +45,4 @@
 - [ADR 0037：一枚永久 key 覆盖一组模型，换模型不换 key](0037-one-key-many-models.md)
 - [ADR 0038：`models` 只读，`switch` 换模型](0038-models-reads-switch-writes.md)
 - [ADR 0039：Connect 只有 Model，没有 Deployment](0039-connect-only-has-models.md)
+- [ADR 0040：推荐永远给出一张排序表，隐私合规随 Hub 收回的接口一起删除](0040-a-ranking-always-comes-back.md)

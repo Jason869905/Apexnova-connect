@@ -362,6 +362,22 @@ describe("recommend", () => {
     expect(byId.get("model.other")!.pricePerMillion).toBeUndefined();
   });
 
+  it("quotes no price for a model it dropped before the price mattered", () => {
+    const result = recommend(options({
+      candidates: [
+        candidate("model.cheap"),
+        candidate("model.elsewhere", { protocols: ["anthropic-messages"] }),
+      ],
+      evidence: [evidenceFor("model.cheap")],
+    }));
+
+    // `expiresAt` bounds the prices this ranking actually read, so a document
+    // that quoted an unread one would carry a number nothing keeps current.
+    const dropped = result.candidates.find((entry) => entry.modelId === "model.elsewhere")!;
+    expect(dropped.eligible).toBe(false);
+    expect(dropped.pricePerMillion).toBeUndefined();
+  });
+
   it("ranks a model whose publisher the catalog does not name", () => {
     const result = recommend(options({
       candidates: [candidate("model.cheap", { publisher: undefined })],
