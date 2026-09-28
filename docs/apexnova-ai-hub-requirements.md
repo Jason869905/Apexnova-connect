@@ -1,6 +1,6 @@
 # Apexnova AI Hub 对接需求与 API 契约
 
-> 状态：M0 跨仓评审稿
+> 状态：M0 跨仓评审稿起草；H1、H2 已交付并在现网使用。**当前待办以 [§18](#18-v10-前的需求盘点2026-09-28) 为准**
 > Hub 实现基线：`C:\D\project\ApeXagent`，审计于 2026-09-03，基线提交 `b996c50`
 > 目标读者：Apexnova AI Hub 产品、后端、计费、安全和 SRE 团队
 > 客户端：Apexnova-connect（独立开源仓库）
@@ -397,7 +397,7 @@ Connect 简化 UX 后，`apexnova opencode` 默认为每个 Agent 创建/复用�
 | POST | `/v1/api-keys` | 为当前账号创建长期 API Key |
 | GET | `/v1/api-keys` | 列当前账号可见的 key 元数据（不含 secret） |
 | GET | `/v1/api-keys/{id}` | 单个 key 元数据 |
-| PATCH | `/v1/api-keys/{id}` | 更新 name / allowedPublicDeployments / allowedProtocols / expiresAt（不改 secret） |
+| PATCH | `/v1/api-keys/{id}` | 更新 `name` / `publicDeploymentIds` / `protocols` / `expiresIn`（不改 secret；`publicDeploymentIds` 整体替换） |
 | DELETE | `/v1/api-keys/{id}` | 立即撤销 |
 
 创建请求：
@@ -495,7 +495,7 @@ X-Apexnova-Deployment-Id
 
 约束能力目前只剩预算（12H，Hub 已交付真实价格）与模型白名单。「隐私」与「区域」都已不在约束范围内：12I 撤回见 [ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)，12J 撤回见 [ADR 0040](decisions/0040-a-ranking-always-comes-back.md)。
 
-响应形状按 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 的 **`schemaVersion` 0.2**：该版本新增必填的 `profileVersion`（[ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)）。`scenarioId` 与 `ruleVersion` 不足以区分同一 Scenario 的两个 profile——profile 改版会改变 requirements 与 priorities 顺序，因此两份基于不同要求集的推荐在缺这个字段时是无法区分的文档。该接口尚未开工，所以本次变更不产生迁移成本。
+响应形状按 [`recommendation.schema.json`](../schemas/recommendation.schema.json) 的 **`schemaVersion` 0.3**（0.3 由 [ADR 0040](decisions/0040-a-ranking-always-comes-back.md) 引入：候选新增 `basis` 等字段，`unmeasured` 提到顶层）。0.2 新增了必填的 `profileVersion`（[ADR 0009](decisions/0009-recommendation-schema-carries-the-profile-version.md)）。`scenarioId` 与 `ruleVersion` 不足以区分同一 Scenario 的两个 profile——profile 改版会改变 requirements 与 priorities 顺序，因此两份基于不同要求集的推荐在缺这个字段时是无法区分的文档。该接口尚未开工，所以本次变更不产生迁移成本。
 
 ### H4：显式路由
 
@@ -1073,3 +1073,52 @@ Connect 的安全策略保持不变：估价使用 OAuth access token；真实�
 - 在 hard spend cap 交付前，CLI 不提供 `--max-cost`，也不得使用“最高费用”“最多扣费”等承诺性文案。
 
 Windows OpenCode 1.18.29 的真实 Agent 调用进一步验证了这个需求：用户消息仅要求返回固定短串，但 Agent 自身系统上下文使 Hub 最终计量达到 6964 input / 7 output tokens，实扣 `0.006978 USD`；同时 OpenCode 因自定义 Provider 没有静态价格元数据而在本地事件中报告 `cost: 0`。因此 Hub 的余额和 `/v1/billing/usage` 必须始终是费用事实来源，后续 Connect UI/CLI 应按 `X-Apexnova-Request-Id` 查询实际用量，不得照抄 Agent 的本地 cost 字段。该现象不要求 H1 新增端点，但会把用量查询与请求 ID 对账列为 M1 staging contract test 的必测项。
+
+## 18. v1.0 前的需求盘点（2026-09-28）
+
+M5 已关闭（[ADR 0041](decisions/0041-m5-closure.md)）。本节把本文散落在 §7–§17 的需求逐条归位，**以本节为当前待办的唯一来源**。§16 的勾选框从 H1 起草后没有维护过，并不代表未交付；H1 的实际验收记录在 [Hub 联调清单](hub-h1-integration-checklist.md)。
+
+### 18.1 已交付并在用
+
+| 需求 | 交付情况 | Connect 的依赖点 |
+| --- | --- | --- |
+| H1：Device Flow、`/v1/me`、余额、目录、用量、估价、runtime credential、推理响应头 | 现网（`api.apexnova-consulting.com`）全链路使用 | `login`／`whoami`／`balance`／`usage`／`models`／`connect`／`verify` |
+| §10A 长期 API Key（含 `PATCH /v1/api-keys/{id}`） | 在用 | `run` 默认路径；一组模型共用一枚 key 依赖 PATCH 的**整体替换**语义与读回（[ADR 0037](decisions/0037-one-key-many-models.md)） |
+| H2／§12A 兼容性证据接口 | 2026-09-09 首次真实同步，此后 Windows／Linux 证据均已发布 | `compatibility sync`、`recommend` |
+| §12H 目录真实价格 | 2026-09-11 交付：46 个中 34 个真实价格、5 个零价、7 个 `null` | `recommend` 的 `cost` 分项与 `--max-price` |
+
+### 18.2 已撤回
+
+| 需求 | 撤回 | 理由 |
+| --- | --- | --- |
+| §12I 区域信息 | 2026-09-11 | 区域是测量条件而不是约束（[ADR 0012](decisions/0012-region-is-the-wrong-requirement.md)） |
+| §12J 数据处理属性 | 2026-09-28 | Hub 收回接口；Connect 侧的隐私约束随之删除（[ADR 0040](decisions/0040-a-ranking-always-comes-back.md)） |
+
+### 18.3 仍需 Hub 处理（按优先级）
+
+**1. 目录的 Model ↔ 可调用条目一对一，写进契约（新增，高）。** Connect 自 [ADR 0039](decisions/0039-connect-only-has-models.md) 起把 `models[]` 与 `deployments[]` 按一对一合并；同一 Model 下出现两条可调用条目时，`packages/hub-client` 拒绝的是**整份目录**，不是那一个 Model——`models`、`recommend`、`connect`、`run` 会同时失败，与 §12H 当年「一个 `null` 让整份目录解析失败」同形。今天现网是一一对应的，所以这是一条**尚未触发的**依赖。请 Hub：
+
+- 在 OpenAPI 与 contract test 里写明：同一份权重在多个区域或多条线路提供时，**作为多个 Model 发布**（`glm-5.2-ap`、`glm-5.2-eu`），而不是一个 Model 下挂多条可调用条目；
+- 若 Hub 认为将来必须一对多，请**在上线之前**告知，双方先定呈现方式。
+
+Connect 这侧可以把拒绝范围收窄到出问题的那个 Model（跳过并在警告中点名，**尚未做**），但那只是降级，不能代替契约——被跳过的 Model 对用户同样是消失了。
+
+**2. `PATCH /v1/api-keys/{id}` 的语义钉进 contract test（新增，中）。** Connect 在请求体的 `publicDeploymentIds` 里发送的是**并集**，并以响应读回校验授权是否真的扩大。这依赖两条目前只在实现里、不在契约里的性质：该字段是整体替换而不是追加；响应体反映的是生效后的集合。任何一条改变，用户新加的模型会在第一次调用时 fail closed。请把这两条写进 OpenAPI 描述与双方 CI 的 contract test。
+
+**3. M1-HUB-01 请求级硬消费上限（原有，中）。** 未交付。**不阻塞 v1.0**：Connect 不提供 `--max-cost`，也不使用任何承诺性费用文案，这一立场不变。它仍是唯一能让「这次最多花 X」成为真话的途径，产品一旦需要费用上限，这条就是前置。
+
+**4. §12K `openai-responses` 的 `text.format.json_schema` 疑似未转发（原有，低）。** 2026-09-13 提出，**尚无答复**。不阻塞：证据如实记为 `unsupported`，`recommend` 据此排序。但它让同一个模型在该协议上的结构化输出被低估，进而影响排序。请 Hub 按证据里的请求 id 回溯，确认是否转发丢参；修复后 Connect 重采即可，不需要改代码。
+
+### 18.4 不再需要，或推迟到 v1.0 之后
+
+| 需求 | 判断 | 理由 |
+| --- | --- | --- |
+| H3 `POST /v1/recommendations` | **v1.0 不需要** | 推荐在本地计算，输入（目录、价格、证据）Hub 都已提供。服务端推荐只在「无 Connect 的调用方也要推荐」时才有需求；若开工，形状按 schema 0.3 |
+| H4 显式路由 | **推迟** | 它服务于「新请求边界上的受控选择」，该项已随 M5 收口移出（[ADR 0041](decisions/0041-m5-closure.md) 第 3 节），前提是 Gateway 先成为默认路径 |
+| H5 托管 Agent | M6 之后单独立项 | 不变 |
+| 证据 `subject.deploymentId` 改名为 `modelId` | **不建议做** | 需要双方同时改 canonical 哈希规则并重钉 vector，每条已发布记录换 ID；收益只是命名一致。字段里装的已经是 model id，类型与 Schema 已注明 |
+| 非 Apexnova 候选的凭据签发、价格来源、计费归属 | 不做 | [ADR 0022](decisions/0022-m5-midpoint-review.md) 第 3.2 节；无真实需求 |
+
+### 18.5 对 Hub 的一句话总结
+
+**v1.0 不被 Hub 阻塞。** 需要 Hub 做的是把两条 Connect 已经依赖、但只存在于现网行为里的性质写进契约（18.3 第 1、2 条），其余两条是改进而不是前置。

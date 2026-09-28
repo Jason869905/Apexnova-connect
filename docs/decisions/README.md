@@ -46,3 +46,4 @@
 - [ADR 0038：`models` 只读，`switch` 换模型](0038-models-reads-switch-writes.md)
 - [ADR 0039：Connect 只有 Model，没有 Deployment](0039-connect-only-has-models.md)
 - [ADR 0040：推荐永远给出一张排序表，隐私合规随 Hub 收回的接口一起删除](0040-a-ranking-always-comes-back.md)
+- [ADR 0041：M5 收口：Gateway 保持默认关闭，未动的四项范围移出](0041-m5-closure.md)

@@ -3,7 +3,7 @@
 面向 AI Agent、编程助手与自动化平台的 Apexnova AI Hub 通用连接层。
 
 > [!IMPORTANT]
-> 本项目处于早期阶段（pre-alpha），已在本机 dev 环境和现网 staging 完成端到端联调。本文描述的是产品目标与当前已实现能力。
+> 本项目尚未发布 1.0，接口仍可能有破坏性变更（见[发布说明](docs/release-notes.md)）。已在本机 dev 环境和现网完成端到端联调。本文描述的是产品目标与当前已实现能力。
 
 ## 快速安装
 
@@ -109,7 +109,7 @@ Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hu
 | 首批目标 | OpenCode、Codex、Claude Code、DeepSeek Harness、n8n、Dify |
 | 目标用户 | 希望在现有 AI 工具中使用 Apexnova AI Hub 模型服务的开发者和团队 |
 | 产品形态 | 桌面伴侣、CLI、原生插件、Provider/Gateway 和配置适配器 |
-| 当前阶段 | Pre-alpha / `v0.7.0`（M1～M4 已关闭，M5 进行中） |
+| 当前阶段 | `v0.7.0`（M1～M5 已关闭） |
 | 开源协议 | Apache License 2.0 |
 | 代码仓库 | [Jason869905/Apexnova-connect](https://github.com/Jason869905/Apexnova-connect) |
 
@@ -261,11 +261,11 @@ Apexnova-connect/
 
 ## 实施路线图
 
-完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M4 均已关闭，M5 进行中**；当前发布为 `v0.7.0`。**本发布不代表 M5 闭环**——不包含 Circuit Breaker、受控选择与 Connection Profile，不支持 macOS，本地 Gateway 默认关闭。四个 Agent Integration 已于 `v0.5.2` 升为 `stable`（Windows、Linux）。逐项见 [发布说明](docs/release-notes.md)。
+完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M5 均已关闭**（M5 收口见 [ADR 0041](docs/decisions/0041-m5-closure.md)），M6 按实际需求推进；当前发布为 `v0.7.0`。M5 关闭时明确**不包含** Circuit Breaker、受控选择、Connection Profile 与 Pro／Team，**本地 Gateway 保持默认关闭**，不支持 macOS。四个 Agent Integration 均为 `stable`（Hermes 仅 Linux，其余 Windows、Linux）。逐项见 [发布说明](docs/release-notes.md)。
 
 - [x] 建立 Integration Manifest 和 capability contract v1 初稿；
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；
-- [x] 建立 Agent、Model、Model、Scenario、Evidence 和 Recommendation 等 M0 Schema 草案；
+- [x] 建立 Agent、Model、Scenario、Evidence 和 Recommendation 等 M0 Schema 草案；
 - [ ] 使用首个真实 integration 验证并冻结 contract v1；
 - [ ] 明确 Apexnova AI Hub 登录、余额、模型元数据和错误语义；
 - [x] 实现 OAuth device flow、刷新与安全会话存储基础模块；
@@ -277,9 +277,9 @@ Apexnova-connect/
 - [x] 在 dev 环境和现网 staging 完成端到端联调；
 - [x] 建立 Agent Discovery Contract、Integration Registry 与公共 Contract Test；
 - [x] 增加 macOS Keychain 后端（尚未在真实 macOS 上验收）；
-- [ ] 完成三平台真实环境验收；
-- [ ] 发布 OpenCode integration MVP；
-- [ ] 发布 Apexnova-connect CLI；
+- [x] ~~完成三平台真实环境验收~~ 完成 Windows 与 Linux 真实环境验收（macOS 退出支持范围，见 [ADR 0024](docs/decisions/0024-narrow-platform-claims.md)）；
+- [x] 发布 OpenCode integration（`stable`）；
+- [x] 发布 Apexnova-connect CLI（单文件 bundle 随 GitHub release 发布）；
 - [x] 增加 Codex 与 Claude Code integrations；
 - [x] 核实 Hermes Agent 配置面并实现其 integration；
 - [ ] 完成 DeepSeek Harness、n8n 和 Dify 的可行性验证；
