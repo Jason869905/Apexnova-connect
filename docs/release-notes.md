@@ -2,9 +2,20 @@
 
 按版本倒序。每条写明**包含什么**与**不包含什么**——后者同样是发布的一部分。
 
-## 未发布
+## v0.7.0 — 2026-09-28
 
-**统一术语：Connect 只有 Model，没有 Deployment。** 以及 `models` 只读、`switch` 换模型、`recommend` 无论如何给出一张排序表。四条都是破坏性的，趁 1.0 之前一次改净，**不提供兼容层**。
+**一枚 key 配一组模型；统一术语：Connect 只有 Model，没有 Deployment。** 以及 `models` 只读、`switch` 换模型、`recommend` 无论如何给出一张排序表。后四条都是破坏性的，趁 1.0 之前一次改净，**不提供兼容层**。
+
+### 新增
+
+- **一枚 key 覆盖一组模型。** `run` 在交互模式下弹出多选框（勾了多个再问「先用哪个」），非交互模式重复传 `--model`，第一个是默认模型。勾选的全部写进 Agent 配置、由同一枚 key 授权，之后在 Agent 自己的模型选择器里切换不再需要回到 Connect。一组模型必须共享同一 protocol 与 baseUrl，做不到时报 `PROTOCOL_NOT_SHARED` 并点名分歧的 model，而不是悄悄少配一个。见 [ADR 0037](decisions/0037-one-key-many-models.md)；
+- **永久 key 在 logout 之前不变。** 加模型走 `PATCH /v1/api-keys/{id}` 扩大授权范围（发送并集）并读回校验，Hub 没有真的放宽时报 `VERIFICATION_FAILED`；只有 key 已被服务端撤销时才重新签发。绑定存储升到 v5，v1–v4 绑定按其单个模型读入；续期与恢复按整组重签；
+- **登录链接自带设备码。** `login` 打印一个已经带上 `user_code` 的链接（优先用 Hub 返回的 `verification_uri_complete`，否则在 `verification_uri` 上补参数），不必再在页面和终端之间来回复制；设备码仍单独打印一行，供核对与链接被截断时手工完成。
+
+### 修复
+
+- **配置写入失败时可能吊销永久 key。** `configureAgent` 在写入失败时吊销「刚拿到的凭据」，而 key 复用之后那可能是 profile 的永久 key。现在只吊销这次调用真正签发的凭据；
+- **Windows CI 上断言了 POSIX 文件权限**，七个与 Windows 无关的测试失败；`defaultCredentialFilePath` 在跨平台询问时用了宿主机的路径分隔符。均已修正。
 
 ### 破坏性变更
 

@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 钉定某个 release：
 
 ```bash
-APEXNOVA_VERSION=v0.6.1 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+APEXNOVA_VERSION=v0.7.0 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 ```
 
 可用环境变量覆盖默认行为：`APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
@@ -48,6 +48,10 @@ apexnova agents             # 看这份构建支持哪些 Agent
 apexnova run opencode       # 选模型 + 建 key + 写配置 + 启动 OpenCode
 apexnova run codex          # 同一条路径，换成 Codex
 apexnova run claude-code    # 同一条路径，换成 Claude Code
+apexnova run opencode --model glm-5.2 --model <id-b>   # 一枚 key 配一组模型
+apexnova models             # 只读：列出 Hub 模型目录
+apexnova switch opencode    # 换默认模型，key 不变
+apexnova recommend opencode # 按兼容性证据与目录顺序给出排序表
 ```
 
 `apexnova opencode` 保留为 `apexnova run opencode` 的别名。
@@ -105,9 +109,9 @@ Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hu
 | 首批目标 | OpenCode、Codex、Claude Code、DeepSeek Harness、n8n、Dify |
 | 目标用户 | 希望在现有 AI 工具中使用 Apexnova AI Hub 模型服务的开发者和团队 |
 | 产品形态 | 桌面伴侣、CLI、原生插件、Provider/Gateway 和配置适配器 |
-| 当前阶段 | Pre-alpha / 架构设计 |
+| 当前阶段 | Pre-alpha / `v0.7.0`（M1～M4 已关闭，M5 进行中） |
 | 开源协议 | Apache License 2.0 |
-| 代码仓库 | 计划公开的 GitHub repository |
+| 代码仓库 | [Jason869905/Apexnova-connect](https://github.com/Jason869905/Apexnova-connect) |
 
 ## 目标能力
 
@@ -150,7 +154,8 @@ Integration Runtime ─── Integration Manifest / Capability Contract
       │     ├── OpenCode
       │     ├── Codex
       │     ├── Claude Code
-      │     └── DeepSeek Harness
+      │     ├── Hermes Agent
+      │     └── DeepSeek Harness（待调研）
       │
       ├── Automation integrations
       │     ├── n8n
@@ -161,6 +166,8 @@ Integration Runtime ─── Integration Manifest / Capability Contract
             ├── Authentication & credential store
             ├── Model catalog & protocol adapters
             ├── Config planning, backup & rollback
+            ├── Compatibility evidence & recommendation
+            ├── Routing audit
             ├── Optional local gateway
             └── Language-neutral schemas & language SDKs
 ```
@@ -180,7 +187,7 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 
 ## M0 设计基线
 
-- [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.5.0`
+- [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.7.0`
 - [CLI 使用指南（通用）](docs/cli-usage-guide.md) —— 安装、登录、Key 模式、通用命令
 - Agent 使用指南：[OpenCode](docs/opencode-usage-guide.md)、[Codex](docs/codex-usage-guide.md)、[Claude Code](docs/claude-code-usage-guide.md)、[Hermes Agent](docs/hermes-usage-guide.md)
 - [产品范围与开源/商业边界](docs/product-scope.md)
@@ -204,7 +211,8 @@ Apexnova-connect/
 │   │   ├── opencode/
 │   │   ├── codex/
 │   │   ├── claude-code/
-│   │   └── deepseek-harness/
+│   │   ├── hermes/
+│   │   └── deepseek-harness/       # 待调研，尚无实现
 │   ├── automation/             # 工作流与自动化平台适配器
 │   │   ├── n8n/
 │   │   └── dify/
@@ -215,8 +223,11 @@ Apexnova-connect/
 │   ├── credential-store/       # 系统安全凭证存储
 │   ├── config-engine/          # 变更计划、备份、原子写入与恢复
 │   ├── capabilities/           # 能力定义、兼容性证据与 Verdict 计算
-│   ├── protocols/              # 模型协议和数据格式转换
-│   └── gateway/                # 可选本地 Gateway
+│   ├── protocols/              # 模型协议和数据格式转换（占位）
+│   ├── recommendation/         # Scenario 评分与推荐排序
+│   ├── routing/                # 路由审计记录
+│   ├── gateway/                # 可选本地 Gateway（默认关闭）
+│   └── integration-testing/    # 公共 Contract Test 套件
 ├── schemas/                    # Manifest、配置与模型元数据 Schema
 ├── sdks/                       # 按语言提供的 Integration SDK
 │   ├── typescript/
@@ -226,7 +237,7 @@ Apexnova-connect/
 └── docs/                       # 架构、集成、安全与决策记录
 ```
 
-目录已经按上述边界建立；技术栈、包管理器和构建工具将在 MVP 设计确定后再加入，避免当前骨架制造无效约束。
+技术栈：TypeScript + pnpm workspace，`tsc` 构建、`vitest` 测试、`esbuild` 打包成单文件 `dist/apexnova.mjs` 随 release 发布。`apps/desktop`、`integrations/automation` 与 `sdks/python` 目前只有目录骨架。
 
 ## 扩展性原则
 
@@ -250,7 +261,7 @@ Apexnova-connect/
 
 ## 实施路线图
 
-完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M4 均已关闭，M5 进行中**；当前发布为 `v0.5.0`，它同时带上 M3、M4 与 M5 至今的成果（M3 的 `v0.3` 与 M4 的 `v0.4` 都没有发过版）。**本发布不代表 M5 闭环**——不包含 Circuit Breaker、受控选择与 Connection Profile，不支持 macOS，本地 Gateway 默认关闭，四个 Integration 均为 `experimental`。逐项见 [发布说明](docs/release-notes.md)。
+完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M4 均已关闭，M5 进行中**；当前发布为 `v0.7.0`。**本发布不代表 M5 闭环**——不包含 Circuit Breaker、受控选择与 Connection Profile，不支持 macOS，本地 Gateway 默认关闭。四个 Agent Integration 已于 `v0.5.2` 升为 `stable`（Windows、Linux）。逐项见 [发布说明](docs/release-notes.md)。
 
 - [x] 建立 Integration Manifest 和 capability contract v1 初稿；
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；
@@ -277,9 +288,33 @@ Apexnova-connect/
 
 ## 开发状态
 
-基础代码已经建立 Integration Manifest v1、TypeScript SDK、生命周期编排器、安全文件执行器、凭证存储和 Apexnova AI Hub OAuth 会话边界。Hub client 已对齐 Hub H1 P6 OpenAPI/fixtures，并新增长期 API Key（`POST /v1/api-keys`、永久 `sk-`）和按 key 聚合用量查询。OpenCode integration 已能生成安全的 v2 JSONC change plan，并提供跨平台发现和脱敏检查。M1 CLI 已实现 `login/logout/whoami/balance/models`、`opencode`（一行命令：自动选模型 + 创建永久 key + 写配置 + 启动）、`usage`（按 key/时间/模型聚合用量）、交互式上下键模型选择器、`connect --dry-run/--yes`、`switch`、安全 launcher、`verify --live`、`doctor` 和事务 `restore`。已在 dev 环境（Next.js + nginx）和现网 staging（`api.apexnova-consulting.com`）完成端到端联调：device flow → 创建 `sk-` key → 真实推理 → 按 key 聚合用量 → 撤销失效。macOS Keychain 后端已基于 `security` 实现，但尚未在真实 macOS 上验收；应用 UI 框架未定。
+截至 `v0.7.0`，已实现的能力如下（完整命令、选项与错误码见 [CLI 命令与输出规范](docs/cli-spec.md)）。
 
-M2 进行中：CLI 已改为由 Integration Registry 驱动，`detect/inspect/connect/switch/verify/run/doctor/restore` 对所有已注册 Agent 通用，产品逻辑全部下沉到各自的 integration。Codex（`~/.codex/config.toml`）、Claude Code（`~/.claude/settings.json`）与 Hermes Agent（`~/.hermes/config.yaml`）已实现并通过公共 Contract Test，尚未做真实环境验收。
+### 已实现的命令
+
+| 类别 | 命令 | 做什么 |
+| --- | --- | --- |
+| 账号 | `init` / `login` / `logout` / `whoami` / `balance` / `usage` | 配置 Hub 地址与凭证后端；OAuth 设备码登录（链接自带 `user_code`）；登出前检查未恢复事务；余额；按 key / 时间 / 模型聚合用量 |
+| 发现 | `agents` / `detect [agent]` / `inspect <agent>` / `doctor [agent]` | 列出已注册 Integration；从 `$PATH` 找 Agent 并探测版本；脱敏查看现有配置；环境与凭证保护自检 |
+| 模型 | `models` / `recommend <agent>` | 只读列出 Hub 目录（与模型广场同序）；按兼容性证据 + 目录顺序给出排序表，`--json` 输出 Recommendation 0.3 文档 |
+| 连接 | `run <agent>` / `connect <agent>` / `switch <agent>` | 一行命令选模型→建 key→写配置→启动；建立绑定并签发 24h runtime credential；在同一枚 key 上换默认模型 |
+| 凭据 | `credential print <agent>` | 供 Agent 的 credential helper 调用，只输出当前绑定的凭据（必要时先续期） |
+| 验证与恢复 | `verify <agent>` / `restore [transaction-id]` / `audit [agent]` | 配置级与显式付费的 `--live` 验证；按事务回滚 Agent 配置并吊销凭据；读取不可变路由审计 |
+| 兼容性证据 | `compatibility run / refresh / sync / revoke / replay / matrix / explain` | 本地采集能力套件证据、到期刷新、与 Hub 双向同步、生成兼容性矩阵 |
+
+### 核心逻辑
+
+- **一枚 key、一组模型**：`run` 可多选模型，全部写进 Agent 配置并由同一枚永久 `sk-` key 授权；加模型走 PATCH 扩大授权并读回校验，key 在 logout 之前不变。`--rotating` / `--gateway` / `--credential-ttl` 改用可续期的短期 credential；
+- **先计划后执行**：所有配置修改先生成 change plan（`--dry-run` 与写入共用同一份计算），再原子写入、持久化备份，可跨进程 `restore`；
+- **只有 Model**：`packages/hub-client` 是唯一认识 Hub 线格式（`models[]` + `deployments[]`）的层，在边界上合并成 Model；CLI、审计和 Integration SDK 只使用 `modelId`；
+- **推荐总能给出答案**：只有四件事把模型移出排序——Agent 不支持其协议、目录报不在服务、超出 `--max-price`、required 能力实测失败；有证据的按 `coding.v1` 计分排前，没证据的保留 Hub 目录顺序且不给默认分；
+- **凭证存储**：Linux 默认 0600 文件后端（无需 keyring），Windows 用 Credential Manager，可用 `init --credential-store` 显式切换，不会静默回退；
+- **路由审计**：每次连接写入 `selected` / `attributed` 两类不可变记录，回答选了哪个 Model、依据是什么、由谁计费；
+- **可选本地 Gateway**（默认关闭）：忠实转发、逐请求归属、运行期凭据续期。
+
+已在本机 dev 环境与现网（`api.apexnova-consulting.com`）完成端到端联调，四个 Agent 在各自声称的平台（Hermes 仅 Linux，其余 Windows 与 Linux）上均有 `connect → run → 归属对账 → restore` 的实跑记录，见 [Hub 联调清单](docs/hub-h1-integration-checklist.md)。macOS Keychain 后端有实现但未在真实 macOS 上验收，默认拒绝。
+
+### 从源码构建
 
 本地要求：Node.js 24+ 与 pnpm 9.15+。
 
