@@ -776,12 +776,18 @@ describe("CLI", () => {
   });
 
   it("names a withheld model before the error it most likely caused", async () => {
+    const root = await mkdtemp(join(tmpdir(), "apexnova-cli-withheld-"));
+    const configPath = join(root, "opencode.jsonc");
+    await writeFile(configPath, "{\n  \"theme\": \"dark\"\n}\n", "utf8");
     const capture = captureIo();
     const result = await runCli(["switch", "opencode", "--model", "model.glm", "--yes"], {
       io: capture.io,
-      registry: registryWith(),
+      registry: registryWith({ detect: async () => ({ ...installed, configPath }) }),
       credentialStore: memoryCredentials(),
       hubService: mockHub({ catalog: async () => ({ ...twoModelCatalog(), withheld: [{ modelId: "model.glm", displayName: "GLM 5.2", callableIds: ["glm.ap", "glm.eu"] }] }) }),
+      platform: "win32",
+      environment: { LOCALAPPDATA: root },
+      homeDirectory: root,
       createRequestId: () => "local_withheld_error",
     });
 
