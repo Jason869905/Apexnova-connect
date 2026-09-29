@@ -2,11 +2,25 @@
 
 按版本倒序。每条写明**包含什么**与**不包含什么**——后者同样是发布的一部分。
 
-## 未发布
+## v0.7.1 — 2026-09-29
+
+**一个无法呈现的 Model 不再拖垮整份目录。** 修复版，没有新功能，没有破坏性变更。同时随附 M5 收口（[ADR 0041](decisions/0041-m5-closure.md)）后的文档。
 
 ### 修复
 
 - **目录里一个无法呈现的 Model 不再拖垮整份目录。** Hub 若在同一个 Model 下发布两条可调用条目，Connect 此前拒绝整份目录，`models`、`recommend`、`connect`、`run` 同时失败。现在只扣下那一个 Model，其余照常，读目录的命令以警告点名它（`--json` 的 `warnings` 里同样有；命令因此失败时，警告打印在错误之前）。**被扣下的 Model 仍然不可选**——Connect 不替用户在两条计费线路之间做选择。现网目录是一一对应的，这条尚未被触发，契约侧见 [Hub 需求 §18.3](apexnova-ai-hub-requirements.md#183-仍需-hub-处理按优先级)。
+
+### 文档
+
+- **M5 已关闭**（[ADR 0041](decisions/0041-m5-closure.md)）：五条有效退出条件全部满足；Gateway 保持默认关闭；Circuit Breaker、受控选择、Connection Profile 与 Pro／Team 移出 M5；
+- **Hub 需求盘点**（[§18](apexnova-ai-hub-requirements.md#18-v10-前的需求盘点2026-09-28)）成为对 Hub 待办的唯一来源：v1.0 不被 Hub 阻塞；
+- 修掉 Deployment 改名遗留的「Model Model」重复词，`schemas/README.md` 的 schema 列表与实际文件对齐，`connection-profile.schema.json` 标为无实现。
+
+### 不包含
+
+- **行为上唯一的变化是上面这条修复。** 现网目录是一一对应的，所以升级前后对现有用户没有可见差别；
+- **Gateway 仍默认关闭**，本版不改变任何默认值；
+- **不含 v1.0**：M5 关闭与 v1.0 发布是两个决定，本版只是前者之后的修复版。
 
 ## v0.7.0 — 2026-09-28
 

@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/
 钉定某个 release：
 
 ```bash
-APEXNOVA_VERSION=v0.7.0 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+APEXNOVA_VERSION=v0.7.1 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 ```
 
 可用环境变量覆盖默认行为：`APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
@@ -109,7 +109,7 @@ Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hu
 | 首批目标 | OpenCode、Codex、Claude Code、DeepSeek Harness、n8n、Dify |
 | 目标用户 | 希望在现有 AI 工具中使用 Apexnova AI Hub 模型服务的开发者和团队 |
 | 产品形态 | 桌面伴侣、CLI、原生插件、Provider/Gateway 和配置适配器 |
-| 当前阶段 | `v0.7.0`（M1～M5 已关闭） |
+| 当前阶段 | `v0.7.1`（M1～M5 已关闭） |
 | 开源协议 | Apache License 2.0 |
 | 代码仓库 | [Jason869905/Apexnova-connect](https://github.com/Jason869905/Apexnova-connect) |
 
@@ -187,7 +187,7 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 
 ## M0 设计基线
 
-- [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.7.0`
+- [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.7.1`
 - [CLI 使用指南（通用）](docs/cli-usage-guide.md) —— 安装、登录、Key 模式、通用命令
 - Agent 使用指南：[OpenCode](docs/opencode-usage-guide.md)、[Codex](docs/codex-usage-guide.md)、[Claude Code](docs/claude-code-usage-guide.md)、[Hermes Agent](docs/hermes-usage-guide.md)
 - [产品范围与开源/商业边界](docs/product-scope.md)
@@ -261,7 +261,7 @@ Apexnova-connect/
 
 ## 实施路线图
 
-完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M5 均已关闭**（M5 收口见 [ADR 0041](docs/decisions/0041-m5-closure.md)），M6 按实际需求推进；当前发布为 `v0.7.0`。M5 关闭时明确**不包含** Circuit Breaker、受控选择、Connection Profile 与 Pro／Team，**本地 Gateway 保持默认关闭**，不支持 macOS。四个 Agent Integration 均为 `stable`（Hermes 仅 Linux，其余 Windows、Linux）。逐项见 [发布说明](docs/release-notes.md)。
+完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M5 均已关闭**（M5 收口见 [ADR 0041](docs/decisions/0041-m5-closure.md)），M6 按实际需求推进；当前发布为 `v0.7.1`。M5 关闭时明确**不包含** Circuit Breaker、受控选择、Connection Profile 与 Pro／Team，**本地 Gateway 保持默认关闭**，不支持 macOS。四个 Agent Integration 均为 `stable`（Hermes 仅 Linux，其余 Windows、Linux）。逐项见 [发布说明](docs/release-notes.md)。
 
 - [x] 建立 Integration Manifest 和 capability contract v1 初稿；
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；
@@ -288,7 +288,7 @@ Apexnova-connect/
 
 ## 开发状态
 
-截至 `v0.7.0`，已实现的能力如下（完整命令、选项与错误码见 [CLI 命令与输出规范](docs/cli-spec.md)）。
+截至 `v0.7.1`，已实现的能力如下（完整命令、选项与错误码见 [CLI 命令与输出规范](docs/cli-spec.md)）。
 
 ### 已实现的命令
 
