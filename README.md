@@ -5,33 +5,70 @@
 > [!IMPORTANT]
 > 本项目尚未发布 1.0，接口仍可能有破坏性变更（见[发布说明](docs/release-notes.md)）。已在本机 dev 环境和现网完成端到端联调。本文描述的是产品目标与当前已实现能力。
 
-## 快速安装
+## 安装指南
 
-一行命令下载预构建的单文件 CLI（约 1 MB）。不需要 git、pnpm，也不在本机编译；只需要 Node.js 20+，没有的话脚本会自动通过 fnm 安装。
+从零到在 Agent 里用上 Apexnova 模型，一共四步：**装 CLI → 装好 Agent → 登录 → 启动**。不需要 git、pnpm、本机编译，不需要 sudo，Linux 上也不需要 keyring。
 
-**Linux / macOS：**
+支持平台：**Linux（含 WSL）与 Windows**。macOS 不在支持范围内——安装脚本能在 macOS 上运行，但凭证后端在该平台默认拒绝，见 [ADR 0024](docs/decisions/0024-narrow-platform-claims.md)。
+
+### 前置条件
+
+- `curl`（Linux）或 PowerShell（Windows，自带 `irm`）；
+- Node.js 20+ —— **没有也不用管**，安装脚本会通过 [fnm](https://github.com/Schniz/fnm) 装一份只供本 CLI 使用的 Node；
+- 一个 Apexnova AI Hub 账号；
+- 要接入的 Agent 自己装好（第 2 步）。
+
+### 第 1 步：安装 CLI
+
+**Linux / WSL：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 ```
 
-**Windows (PowerShell)：**
+**Windows（PowerShell）：**
 
 ```powershell
 irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
 ```
 
-脚本会校验发布产物的 `sha256`，把 CLI 装到 `~/.apexnova-connect`，并在 `~/.local/bin` 生成 `apexnova` 启动器（启动器记录 node 的绝对路径，因此新开终端也能直接运行）。
+脚本按顺序做五件事，任何一件失败都会停下并说明原因：
 
-钉定某个 release：
+1. **找 Node**：已有 Node 20+ 就用它并记下绝对路径；否则下载 fnm 到 `~/.fnm` 并装 Node 20；
+2. **下载**：从 GitHub release 取单文件 CLI `apexnova.mjs`（约 2 MB，默认最新版）；
+3. **校验**：比对同名 `.sha256`。拿不到校验文件、或 Linux 上没有 `sha256sum`/`shasum` 时会**告警并跳过**，不会假装校验过；
+4. **安装**：CLI 放到 `~/.apexnova-connect/apexnova.mjs`，启动器写到 `~/.local/bin/apexnova`（Windows 为 `apexnova.cmd`）。启动器钉死了第 1 步那个 node 的绝对路径，所以新开的终端也能直接运行；设置 `APEXNOVA_NODE` 可以换用别的 node。装完立即跑一次 `apexnova --version` 自检；
+5. **提示 PATH**：`~/.local/bin` 不在 `PATH` 上时打印加入 `PATH` 的命令，**不会替你改 shell 配置**。
+
+装完确认：
 
 ```bash
-APEXNOVA_VERSION=v0.7.1 curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
+apexnova --version
 ```
 
-可用环境变量覆盖默认行为：`APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
+提示 `command not found` 就是第 5 步那条：把 `~/.local/bin` 加进 `PATH`（Linux 写进 `~/.bashrc` 等，Windows 按脚本打印的 `SetEnvironmentVariable` 命令执行），然后重开终端。
 
-### 手动安装
+**钉定某个版本**——环境变量要给**执行脚本的那一端**（`bash` / PowerShell 会话），不是 `curl`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | APEXNOVA_VERSION=v0.7.1 bash
+```
+
+```powershell
+$env:APEXNOVA_VERSION = 'v0.7.1'; irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
+```
+
+脚本可识别的环境变量：
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `APEXNOVA_VERSION` | `latest` | 要安装的 release tag，如 `v0.7.1` |
+| `APEXNOVA_HOME` | `~/.apexnova-connect` | CLI 安装目录 |
+| `APEXNOVA_BIN` | `~/.local/bin` | 启动器目录 |
+| `APEXNOVA_ASSET_URL` | 由版本推出 | 直接指定 `apexnova.mjs` 的下载地址（镜像、内网） |
+| `NODE_MAJOR` | `20` | 要求的最低 Node 主版本 |
+
+**不想运行脚本**，可以手动下载并校验（需要自备 Node 20+）：
 
 ```bash
 curl -fsSLO https://github.com/Jason869905/Apexnova-connect/releases/latest/download/apexnova.mjs
@@ -40,54 +77,146 @@ sha256sum -c apexnova.mjs.sha256
 node apexnova.mjs --version
 ```
 
-### 开始使用
-
-```bash
-apexnova login              # 设备码授权
-apexnova agents             # 看这份构建支持哪些 Agent
-apexnova run opencode       # 选模型 + 建 key + 写配置 + 启动 OpenCode
-apexnova run codex          # 同一条路径，换成 Codex
-apexnova run claude-code    # 同一条路径，换成 Claude Code
-apexnova run opencode --model glm-5.2 --model <id-b>   # 一枚 key 配一组模型
-apexnova models             # 只读：列出 Hub 模型目录
-apexnova switch opencode    # 换默认模型，key 不变
-apexnova recommend opencode # 按兼容性证据与目录顺序给出排序表
+```powershell
+irm https://github.com/Jason869905/Apexnova-connect/releases/latest/download/apexnova.mjs -OutFile apexnova.mjs
+irm https://github.com/Jason869905/Apexnova-connect/releases/latest/download/apexnova.mjs.sha256 -OutFile apexnova.mjs.sha256
+(Get-FileHash apexnova.mjs -Algorithm SHA256).Hash.ToLower() -eq ((Get-Content apexnova.mjs.sha256) -split '\s+')[0]   # 应输出 True
+node apexnova.mjs --version
 ```
 
-`apexnova opencode` 保留为 `apexnova run opencode` 的别名。
+手动安装没有启动器，下文的 `apexnova` 换成 `node /path/to/apexnova.mjs`。
 
-发布产物内置了生产 Hub 地址，装完即可 `login`。要指向其他环境（自建、staging、本机 dev），运行 `apexnova init` 把地址写进
-`~/.config/apexnova-connect/config.json`（Windows 为 `%APPDATA%\Apexnova\connect\config.json`）：
+### 第 2 步：装好要接入的 Agent
+
+本 CLI **只发现、配置和启动** Agent，不安装它们。找不到可执行文件时 `run` 返回 `AGENT_NOT_FOUND`。
+
+| Agent | 平台 | 安装文档 |
+| --- | --- | --- |
+| OpenCode | Windows、Linux | [opencode.ai/docs](https://opencode.ai/docs/) |
+| Codex | Windows、Linux | [Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) |
+| Claude Code | Windows、Linux | [LLM gateway 文档](https://code.claude.com/docs/en/llm-gateway-connect) |
+| Hermes Agent | 仅 Linux | [hermes-agent docs](https://hermes-agent.nousresearch.com/docs/) |
+
+装完确认：
+
+```bash
+apexnova agents              # 这份构建支持哪些 Agent
+apexnova detect              # 哪些已装、版本、配置文件在哪
+```
+
+> **WSL 里要装 Linux 原生的那一份。** WSL 的 `PATH` 带着 Windows 的 npm 目录，`opencode`/`codex` 很容易解析到 `/mnt/c/.../AppData/Roaming/npm` 下的 Windows 安装，而那份读的是 Windows 用户的配置。遇到这种情况启动器会**拒绝启动**并说明原因，而不是配置一份、启动另一份。
+>
+> **Windows 上启动器只启动 `.exe`。** 本 CLI 不经 shell 启动进程，而 npm 放到 `PATH` 上的是 `.cmd` shim。OpenCode 与 Codex 的 npm 安装能被自动找到其中真正的 `.exe`；Claude Code 请用原生安装版，或把 `.exe` 所在目录排在 npm shim 之前。找不到时报错会写明这两条出路。
+
+### 第 3 步：登录
+
+```bash
+apexnova login
+```
+
+CLI 打印一条已经带上验证码的链接，在浏览器打开、确认页面上的码与终端一致、批准即可。发布产物内置了生产 Hub 地址，装完直接登录，不需要先配置。
+
+### 第 4 步：启动
+
+```bash
+apexnova run opencode        # 或 codex / claude-code / hermes
+```
+
+首次运行：选模型（多选框，空格勾选、回车确认；勾多个时再问先用哪个）→ 创建一枚永久 key → 写入 Agent 配置 → 启动。之后再运行直接启动。勾中的模型都写进 Agent 配置、共用同一枚 key，在 Agent 自己的界面里就能切换。
+
+非交互环境（CI、脚本、`--json`）要显式给模型，`--model` 可重复，第一个是默认：
+
+```bash
+apexnova models                                          # 只读，列出可用模型
+apexnova run opencode --model glm-5.2 --model <id-b>
+```
+
+日常使用里还会用到：
+
+```bash
+apexnova switch opencode     # 换默认模型；key 不变，不产生费用
+apexnova recommend opencode  # 按兼容性证据与目录顺序给出排序
+apexnova balance             # 余额
+apexnova usage --granularity day   # 按天聚合的用量
+apexnova restore --list      # 查看可恢复的配置变更
+```
+
+`apexnova opencode` 是 `apexnova run opencode` 的别名。每个 Agent 特有的配置字段、限制和恢复方式见各自的指南：[OpenCode](docs/opencode-usage-guide.md)、[Codex](docs/codex-usage-guide.md)、[Claude Code](docs/claude-code-usage-guide.md)、[Hermes Agent](docs/hermes-usage-guide.md)；全部命令见 [CLI 使用指南](docs/cli-usage-guide.md)。
+
+### 自检
+
+```bash
+apexnova doctor
+```
+
+逐项列出 Agent 是否装好、凭证后端能否读写、Hub 地址及其来源、是否已登录。任何一步卡住，先跑它。每一行的含义见 [doctor 怎么读](docs/cli-usage-guide.md#自检doctor-怎么读)。
+
+### 凭证存放在哪
+
+| 平台 | 默认位置 | 保护方式 |
+| --- | --- | --- |
+| Linux | `~/.local/share/apexnova-connect/credentials.json`（目录 0700、文件 0600） | 只靠文件权限 |
+| Windows | Credential Manager | 操作系统 |
+
+Linux 默认的文件后端**没有操作系统加密在背后**，`apexnova doctor` 会一直为此输出一条警告——这是常驻提醒，不是故障。想让操作系统保管秘密的机器可以切到 keyring：
+
+```bash
+sudo apt-get install -y libsecret-1-0 libsecret-tools gnome-keyring
+apexnova init --credential-store system
+apexnova login                         # 两个后端不共享已存凭证，要重新登录
+```
+
+切换只发生在你明说的时候：选了 `system` 而 keyring 不应答，命令会报 `BACKEND_UNAVAILABLE` 停下，不会把秘密悄悄改写到文件里。headless 机器上启动 keyring 的步骤见 [CLI 使用指南](docs/cli-usage-guide.md#想让操作系统保管秘密)。
+
+### 指向其他 Hub 环境
+
+发布产物默认连生产 Hub。要连自建、staging 或本机 dev 环境：
 
 ```bash
 apexnova init --hub-url https://api.example.com --client-id apexnova-connect
 ```
 
-`APEXNOVA_HUB_BASE_URL` / `APEXNOVA_OAUTH_CLIENT_ID` 环境变量的优先级高于该文件。从源码构建的版本不含内置默认值，必须先 `init` 或设置环境变量——这是为了避免开发版本误连生产。
+这会写入 `~/.config/apexnova-connect/config.json`（Windows 为 `%APPDATA%\Apexnova\connect\config.json`）。`APEXNOVA_HUB_BASE_URL` / `APEXNOVA_OAUTH_CLIENT_ID` 环境变量的优先级高于该文件。改已有配置时只传要改的那个参数；整份覆盖用 `--force`。
 
-`apexnova doctor` 会显示当前生效的 Hub 地址及其来源。完整的初始化安装流程（三步、每步写了哪些文件、doctor 每行怎么读）见 [CLI 使用指南](docs/cli-usage-guide.md#初始化安装流程)。
+### 安装后落在哪些路径
 
-### 凭证存放在哪
+| 路径（Linux） | Windows 对应 | 内容 | 谁写的 |
+| --- | --- | --- | --- |
+| `~/.apexnova-connect/apexnova.mjs` | `%USERPROFILE%\.apexnova-connect\apexnova.mjs` | 单文件 CLI | 安装脚本 |
+| `~/.local/bin/apexnova` | `%USERPROFILE%\.local\bin\apexnova.cmd` | 启动器 | 安装脚本 |
+| `~/.fnm/` | `%USERPROFILE%\.fnm\` | 仅当机器上原本没有 Node 20+ | 安装脚本 |
+| `~/.config/apexnova-connect/config.json` | `%APPDATA%\Apexnova\connect\config.json` | Hub 地址、client ID、凭证后端选择 | `apexnova init` |
+| `~/.local/share/apexnova-connect/credentials.json` | Credential Manager | token、运行凭据、key 引用 | `login` / `run` |
+| `~/.local/state/apexnova-connect/` | `%LOCALAPPDATA%\Apexnova\connect\` | 审计日志、事务记录、可恢复备份 | `connect` / `switch` / `run` |
+| 各 Agent 自己的配置文件 | 同左 | 只改 `provider.apexnova` 这类受管理字段 | `connect` / `switch` / `run` |
 
-Linux 上默认写进 `~/.local/share/apexnova-connect/credentials.json`（目录 0700、文件 0600）——**不需要 keyring、不需要 D-Bus、不需要 sudo**，装完就能 `login`。Windows 默认用 Credential Manager。
+### 升级
 
-代价说在前面：这个文件**只靠文件权限保护**，没有操作系统加密在背后，`apexnova doctor` 会一直为此输出一条警告。想让操作系统保管秘密的机器可以切回 keyring：
+重新运行第 1 步的安装命令即可，CLI 与启动器会被原地替换，登录状态和配置不受影响。升级前先看 [发布说明](docs/release-notes.md) 里的「破坏性变更」：例如从 v0.6.x 升到 v0.7.x 后，已配置的 Agent 会报 `SESSION_CORRUPT`，重新 `apexnova run <agent>` 即可。
 
-```bash
-sudo apt-get install -y libsecret-tools gnome-keyring   # Linux 上 keyring 得自己装
-apexnova init --credential-store system
-apexnova login                                          # 两个后端不共享已存凭证
-```
+### 卸载
 
-切换只发生在你明说的时候：选了 `system` 而 keyring 不应答，命令会报 `BACKEND_UNAVAILABLE` 停下，不会把秘密改写到文件里。（文件后端自 v0.6.0 起成为 Linux 默认；v0.5.2 及更早版本强制要求 keyring。）
+1. 把 Agent 配置还原成接入之前的样子（可选）：`apexnova restore --list` 查事务，`apexnova restore <id> --yes` 还原；
+2. `apexnova logout`：撤销服务端 token。仍在使用的 `sk-` key 需要在 Hub 控制台撤销；
+3. 删除上表中的路径。
 
-> 注：从源码构建请见下方「开发状态」一节。
+### 常见问题
+
+| 现象 | 原因与处理 |
+| --- | --- |
+| `apexnova: command not found` | `~/.local/bin` 不在 `PATH` 上，见第 1 步末尾 |
+| `AGENT_NOT_FOUND` | Agent 没装、不在 `PATH` 上，或 Windows 上只有 npm 的 `.cmd` shim；见第 2 步 |
+| `INSUFFICIENT_SCOPE` | 用旧版 CLI 登录的 token 缺少新 scope，重新 `apexnova login` |
+| `SESSION_CORRUPT` | 升级跨过了不兼容的存储格式，重新 `apexnova run <agent>` |
+| `MODEL_REQUIRED` | 非交互环境没给模型，加 `--model <id>`（`apexnova models` 列出候选） |
+| `BACKEND_UNAVAILABLE` | 选了 `system` 凭证后端但 keyring 不应答，见上文「凭证存放在哪」 |
+| 校验失败 | 下载被中途篡改或截断，重新运行安装命令；持续失败请提 issue |
 
 ## 项目简介
 
-Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hub 的账号、余额、模型目录和模型调用能力接入不同的 AI 工具。
+Apexnova-connect 是一个开源的连接平台，用于把 Apexnova AI Hub 的账号、余额、模型目录和模型调用能力接入不同的 AI 工具。
 
-项目首批关注 OpenCode、Codex、Claude Code 和 DeepSeek Harness 等 Agent 客户端，以及 n8n、Dify 等工作流平台。它不会被设计成只适配少数产品的“一次性插件”，而是由通用内核、协议适配层和独立 integrations 组成：公共能力只实现一次，每个外部产品只维护自己的发现、配置、切换和恢复逻辑。
+目前已接入 OpenCode、Codex、Claude Code 和 Hermes Agent 四个 Agent 客户端；DeepSeek Harness 以及 n8n、Dify 等工作流平台尚在调研。它不会被设计成只适配少数产品的“一次性插件”，而是由通用内核、协议适配层和独立 integrations 组成：公共能力只实现一次，每个外部产品只维护自己的发现、配置、切换和恢复逻辑。
 
 用户应当能够登录 Apexnova AI Hub、查看余额与可用模型，并在明确知情的情况下切换模型服务。所有切换都必须展示当前提供方和计费来源，支持变更预览、配置备份及可靠恢复。
 
@@ -106,10 +235,12 @@ Apexnova-connect 是一个计划开源的连接平台，用于把 Apexnova AI Hu
 | 对接服务 | Apexnova AI Hub |
 | 仓库定位 | Apexnova AI Hub 面向 AI Agent 与自动化生态的开源连接平台 |
 | 集成对象 | Agent 客户端、Coding Harness、工作流自动化平台及未来的 IDE/工具链 |
-| 首批目标 | OpenCode、Codex、Claude Code、DeepSeek Harness、n8n、Dify |
+| 已接入 | OpenCode、Codex、Claude Code、Hermes Agent（均为 `stable`） |
+| 调研中 | DeepSeek Harness、n8n、Dify |
 | 目标用户 | 希望在现有 AI 工具中使用 Apexnova AI Hub 模型服务的开发者和团队 |
-| 产品形态 | 桌面伴侣、CLI、原生插件、Provider/Gateway 和配置适配器 |
-| 当前阶段 | `v0.7.1`（M1～M5 已关闭） |
+| 产品形态 | 当前交付 CLI（单文件，随 GitHub release 发布）与可选本地 Gateway；桌面伴侣与原生插件尚未开始 |
+| 当前版本 | `v0.7.1`（M1～M5 已关闭） |
+| 支持平台 | Linux（含 WSL）、Windows；不支持 macOS |
 | 开源协议 | Apache License 2.0 |
 | 代码仓库 | [Jason869905/Apexnova-connect](https://github.com/Jason869905/Apexnova-connect) |
 
@@ -185,10 +316,11 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 
 宿主应用根据能力组合提供操作入口，不假设每个平台都能热切换或在客户端内展示余额。详细边界见 [架构说明](docs/architecture.md) 和 [新增 Integration 指南](docs/adding-an-integration.md)。
 
-## M0 设计基线
+## 文档导航
 
+- [安装指南](#安装指南) —— 安装、升级、卸载、常见问题
 - [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.7.1`
-- [CLI 使用指南（通用）](docs/cli-usage-guide.md) —— 安装、登录、Key 模式、通用命令
+- [CLI 使用指南（通用）](docs/cli-usage-guide.md) —— 登录、启动、换模型、凭证后端、Key 模式、通用命令
 - Agent 使用指南：[OpenCode](docs/opencode-usage-guide.md)、[Codex](docs/codex-usage-guide.md)、[Claude Code](docs/claude-code-usage-guide.md)、[Hermes Agent](docs/hermes-usage-guide.md)
 - [产品范围与开源/商业边界](docs/product-scope.md)
 - [跨 Agent 领域模型](docs/domain-model.md)
@@ -267,14 +399,14 @@ Apexnova-connect/
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；
 - [x] 建立 Agent、Model、Scenario、Evidence 和 Recommendation 等 M0 Schema 草案；
 - [ ] 使用首个真实 integration 验证并冻结 contract v1；
-- [ ] 明确 Apexnova AI Hub 登录、余额、模型元数据和错误语义；
+- [x] 明确 Apexnova AI Hub 登录、余额、模型元数据和错误语义（H1 已交付，待办见 [Hub 需求 §18](docs/apexnova-ai-hub-requirements.md#18-v10-前的需求盘点2026-09-28)）；
 - [x] 实现 OAuth device flow、刷新与安全会话存储基础模块；
 - [x] 实现配置 change plan、受限文件执行、持久化备份与跨进程恢复基础模块；
 - [x] 实现 Windows/Linux 操作系统凭证存储基础模块；
 - [x] 实现长期 API Key（`POST /v1/api-keys`）和按 key 聚合用量查询；
 - [x] 实现 `apexnova run <agent>` 一行命令（自动选模型 + 创建 key + 写配置 + 启动）；
 - [x] 实现交互式上下键模型选择器；
-- [x] 在 dev 环境和现网 staging 完成端到端联调；
+- [x] 在 dev 环境和现网完成端到端联调；
 - [x] 建立 Agent Discovery Contract、Integration Registry 与公共 Contract Test；
 - [x] 增加 macOS Keychain 后端（尚未在真实 macOS 上验收）；
 - [x] ~~完成三平台真实环境验收~~ 完成 Windows 与 Linux 真实环境验收（macOS 退出支持范围，见 [ADR 0024](docs/decisions/0024-narrow-platform-claims.md)）；
@@ -316,16 +448,18 @@ Apexnova-connect/
 
 ### 从源码构建
 
-本地要求：Node.js 24+ 与 pnpm 9.15+。
+面向开发者；普通用户请用上文的[安装指南](#安装指南)。本地要求：Node.js 20+ 与 pnpm 9.15+（CI 在 Node 20、22、24 上运行）。
 
 ```bash
 pnpm install
-pnpm check
-pnpm cli -- login
-pnpm cli -- opencode
+pnpm check                                            # 类型检查、测试与构建
+pnpm cli init --hub-url https://api.example.com --client-id apexnova-connect
+pnpm cli login
+pnpm cli run opencode
+pnpm bundle                                           # 产出与 release 相同的 dist/apexnova.mjs
 ```
 
-`pnpm check` 会依次执行 TypeScript 类型检查、测试和 SDK 构建。
+源码构建**不含**内置 Hub 地址（避免开发版本误连生产），所以 `login` 之前要先 `init` 或设置 `APEXNOVA_HUB_BASE_URL` / `APEXNOVA_OAUTH_CLIENT_ID`。
 
 欢迎先阅读 [贡献指南](CONTRIBUTING.md)。安全问题请遵循 [安全策略](SECURITY.md)，不要在公开 Issue 中提交真实密钥、账号信息或漏洞细节。
 

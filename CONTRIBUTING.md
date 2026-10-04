@@ -29,7 +29,7 @@
 
 ## 本地验证
 
-当前基础工具链要求 Node.js 24+ 和 pnpm 9.15+：
+当前基础工具链要求 Node.js 20+ 和 pnpm 9.15+（与 `package.json` 的 `engines` 一致；CI 在 Node 20、22、24 与 Windows 上运行）：
 
 ```bash
 pnpm install

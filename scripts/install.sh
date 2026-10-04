@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# apexnova-connect installer (Linux / macOS)
+# apexnova-connect installer (Linux, including WSL; macOS is not supported)
 #
 # Downloads the prebuilt single-file CLI from a GitHub release. No git clone, no
 # package manager, no build step.
@@ -8,7 +8,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 #
 # Pin a release:
-#   APEXNOVA_VERSION=v0.1.1 curl -fsSL .../scripts/install.sh | bash
+#   curl -fsSL .../scripts/install.sh | APEXNOVA_VERSION=v0.7.1 bash
+#   (the variable must reach bash, not curl)
 #
 # Env overrides:
 #   APEXNOVA_VERSION    release tag, or "latest"     (default: latest)

@@ -7,7 +7,7 @@
 #   irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
 #
 # Pin a release:
-#   $env:APEXNOVA_VERSION='v0.1.1'; irm .../scripts/install.ps1 | iex
+#   $env:APEXNOVA_VERSION='v0.7.1'; irm .../scripts/install.ps1 | iex
 #
 # Env overrides:
 #   APEXNOVA_VERSION    release tag, or "latest"     (default: latest)

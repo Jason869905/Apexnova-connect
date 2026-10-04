@@ -3,7 +3,7 @@
 > 适用版本：apexnova-connect v0.7.1 · Codex CLI ≥0.20.0
 > 平台：Windows、Linux（macOS 不在支持范围内，见 [ADR 0024](decisions/0024-narrow-platform-claims.md)）
 
-安装、登录、Hub 地址、Key 模式、通用命令和环境变量见 [CLI 通用指南](cli-usage-guide.md)。本文只讲 Codex 特有的部分。
+安装、升级与卸载见 [README 的安装指南](../README.md#安装指南)；登录、Hub 地址、Key 模式、通用命令和环境变量见 [CLI 通用指南](cli-usage-guide.md)。本文只讲 Codex 特有的部分。
 
 ## 快速开始
 

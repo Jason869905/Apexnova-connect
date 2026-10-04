@@ -56,7 +56,7 @@ jobs:
 
             下载预构建的单文件 CLI，不需要 git、pnpm 或本机编译，只需要 Node.js 20+（没有则脚本自动通过 fnm 安装）。
 
-            **Linux / macOS (bash):**
+            **Linux / WSL (bash):**
 
             ```bash
             curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/${{ github.ref_name }}/scripts/install.sh | bash
@@ -84,3 +84,5 @@ jobs:
             ### 安装脚本环境变量
 
             `APEXNOVA_VERSION`、`APEXNOVA_HOME`、`APEXNOVA_BIN`、`APEXNOVA_ASSET_URL`、`NODE_MAJOR`。
+
+            完整的安装、升级、卸载与常见问题见 [README 的安装指南](https://github.com/Jason869905/Apexnova-connect/blob/${{ github.ref_name }}/README.md#安装指南)；升级前请先读本版的 [发布说明](https://github.com/Jason869905/Apexnova-connect/blob/${{ github.ref_name }}/docs/release-notes.md)。

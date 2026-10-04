@@ -24,10 +24,10 @@ apexnova balance      # 看余额
 
 ## 先完成通用设置
 
-安装、Linux 凭证后端、Hub 地址、登录、Key 模式、通用命令、超时、环境变量和安全说明都在
-[CLI 通用指南](cli-usage-guide.md)——那份是所有 Agent 共用的，本文只讲 OpenCode 特有的部分。
+安装、升级与卸载见 [README 的安装指南](../README.md#安装指南)；凭证后端、Hub 地址、登录、Key 模式、通用命令、超时、环境变量和安全说明见
+[CLI 通用指南](cli-usage-guide.md)——这两份是所有 Agent 共用的，本文只讲 OpenCode 特有的部分。
 
-前置条件：Node.js 20+、已安装 OpenCode（`apexnova detect opencode` 可确认）、一个 Apexnova AI Hub 账号。
+前置条件：已装好 apexnova CLI、已安装 OpenCode（`apexnova detect opencode` 可确认）、一个 Apexnova AI Hub 账号。
 
 ## 受管理的字段
 

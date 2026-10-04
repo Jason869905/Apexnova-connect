@@ -3,7 +3,7 @@
 > 适用版本：apexnova-connect v0.7.1 · Claude Code ≥2.0.0 <3.0.0
 > 平台：Windows、Linux（macOS 不在支持范围内，见 [ADR 0024](decisions/0024-narrow-platform-claims.md)）
 
-安装、登录、Hub 地址、Key 模式、通用命令和环境变量见 [CLI 通用指南](cli-usage-guide.md)。本文只讲 Claude Code 特有的部分。
+安装、升级与卸载见 [README 的安装指南](../README.md#安装指南)；登录、Hub 地址、Key 模式、通用命令和环境变量见 [CLI 通用指南](cli-usage-guide.md)。本文只讲 Claude Code 特有的部分。
 
 用的是 Claude Code 官方文档中的 [LLM gateway](https://code.claude.com/docs/en/llm-gateway-connect) 机制，不抓取也不复用任何第三方订阅令牌。
 
