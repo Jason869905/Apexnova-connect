@@ -2,6 +2,31 @@
 
 按版本倒序。每条写明**包含什么**与**不包含什么**——后者同样是发布的一部分。
 
+## v0.7.2 — 2026-10-04
+
+**安装指南集中到 README，并修好了一条从未生效的版本钉定命令。** 文档版，CLI 的行为与 v0.7.1 完全相同。
+
+### 修复
+
+- **按文档钉定版本，装到的其实是最新版。** README、CLI 指南和 `install.sh` 开头注释给出的写法是 `APEXNOVA_VERSION=v0.7.1 curl ... | bash`——环境变量只设给了 `curl`，`bash` 里的安装脚本读不到，于是装的一直是 `latest`。正确写法是把变量交给执行脚本的那一端：
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | APEXNOVA_VERSION=v0.7.2 bash
+  ```
+
+  PowerShell 的写法（`$env:APEXNOVA_VERSION = '...'; irm ... | iex`）一直是对的。**照旧写法钉过版本的机器，实际装的是当时的最新版**，`apexnova --version` 可确认。
+
+### 文档
+
+- **[README 的安装指南](../README.md#安装指南)** 成为安装的唯一来源：前置条件、四步上手（装 CLI → 装好 Agent → 登录 → 启动）、安装脚本做了什么、钉定版本、Linux 与 Windows 两种手动安装、两个平台的文件路径、升级、卸载与常见错误。CLI 指南与四份 Agent 指南改为链接过去，不再各写一份；
+- release 页面正文增加指向安装指南与发布说明的链接；
+- 修正几处与事实不符的描述：安装脚本标注为「Linux / macOS」（macOS 不在支持范围内）；产物写作约 1 MB（实为约 2 MB）；从源码构建要求写作 Node 24+（`engines` 与 CI 均为 20+）；README 仍称「计划开源」，并把仍在调研的 DeepSeek Harness、n8n、Dify 与已上线的四个 Agent 并列为「首批目标」。
+
+### 不包含
+
+- **没有任何代码改动**，与 v0.7.1 的唯一差别是文档、安装脚本注释与 release 页面正文；从 v0.7.1 升级不需要做任何事；
+- **安装脚本的行为没有变**，修的是文档里调用它的方式。
+
 ## v0.7.1 — 2026-09-29
 
 **一个无法呈现的 Model 不再拖垮整份目录。** 修复版，没有新功能，没有破坏性变更。同时随附 M5 收口（[ADR 0041](decisions/0041-m5-closure.md)）后的文档。

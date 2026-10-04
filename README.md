@@ -51,18 +51,18 @@ apexnova --version
 **钉定某个版本**——环境变量要给**执行脚本的那一端**（`bash` / PowerShell 会话），不是 `curl`：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | APEXNOVA_VERSION=v0.7.1 bash
+curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | APEXNOVA_VERSION=v0.7.2 bash
 ```
 
 ```powershell
-$env:APEXNOVA_VERSION = 'v0.7.1'; irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
+$env:APEXNOVA_VERSION = 'v0.7.2'; irm https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.ps1 | iex
 ```
 
 脚本可识别的环境变量：
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
-| `APEXNOVA_VERSION` | `latest` | 要安装的 release tag，如 `v0.7.1` |
+| `APEXNOVA_VERSION` | `latest` | 要安装的 release tag，如 `v0.7.2` |
 | `APEXNOVA_HOME` | `~/.apexnova-connect` | CLI 安装目录 |
 | `APEXNOVA_BIN` | `~/.local/bin` | 启动器目录 |
 | `APEXNOVA_ASSET_URL` | 由版本推出 | 直接指定 `apexnova.mjs` 的下载地址（镜像、内网） |
@@ -239,7 +239,7 @@ Apexnova-connect 是一个开源的连接平台，用于把 Apexnova AI Hub 的�
 | 调研中 | DeepSeek Harness、n8n、Dify |
 | 目标用户 | 希望在现有 AI 工具中使用 Apexnova AI Hub 模型服务的开发者和团队 |
 | 产品形态 | 当前交付 CLI（单文件，随 GitHub release 发布）与可选本地 Gateway；桌面伴侣与原生插件尚未开始 |
-| 当前版本 | `v0.7.1`（M1～M5 已关闭） |
+| 当前版本 | `v0.7.2`（M1～M5 已关闭） |
 | 支持平台 | Linux（含 WSL）、Windows；不支持 macOS |
 | 开源协议 | Apache License 2.0 |
 | 代码仓库 | [Jason869905/Apexnova-connect](https://github.com/Jason869905/Apexnova-connect) |
@@ -319,7 +319,7 @@ Integration Runtime ─── Integration Manifest / Capability Contract
 ## 文档导航
 
 - [安装指南](#安装指南) —— 安装、升级、卸载、常见问题
-- [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.7.1`
+- [发布说明](docs/release-notes.md) —— 每个版本**包含什么与不包含什么**；当前 `v0.7.2`
 - [CLI 使用指南（通用）](docs/cli-usage-guide.md) —— 登录、启动、换模型、凭证后端、Key 模式、通用命令
 - Agent 使用指南：[OpenCode](docs/opencode-usage-guide.md)、[Codex](docs/codex-usage-guide.md)、[Claude Code](docs/claude-code-usage-guide.md)、[Hermes Agent](docs/hermes-usage-guide.md)
 - [产品范围与开源/商业边界](docs/product-scope.md)
@@ -393,7 +393,7 @@ Apexnova-connect/
 
 ## 实施路线图
 
-完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M5 均已关闭**（M5 收口见 [ADR 0041](docs/decisions/0041-m5-closure.md)），M6 按实际需求推进；当前发布为 `v0.7.1`。M5 关闭时明确**不包含** Circuit Breaker、受控选择、Connection Profile 与 Pro／Team，**本地 Gateway 保持默认关闭**，不支持 macOS。四个 Agent Integration 均为 `stable`（Hermes 仅 Linux，其余 Windows、Linux）。逐项见 [发布说明](docs/release-notes.md)。
+完整里程碑、范围和退出条件见 [路线图](docs/roadmap.md)。**M1～M5 均已关闭**（M5 收口见 [ADR 0041](docs/decisions/0041-m5-closure.md)），M6 按实际需求推进；当前发布为 `v0.7.2`。M5 关闭时明确**不包含** Circuit Breaker、受控选择、Connection Profile 与 Pro／Team，**本地 Gateway 保持默认关闭**，不支持 macOS。四个 Agent Integration 均为 `stable`（Hermes 仅 Linux，其余 Windows、Linux）。逐项见 [发布说明](docs/release-notes.md)。
 
 - [x] 建立 Integration Manifest 和 capability contract v1 初稿；
 - [x] 建立产品范围、领域模型、CLI、Evidence 和 Hub API 的 M0 设计基线；
@@ -420,7 +420,7 @@ Apexnova-connect/
 
 ## 开发状态
 
-截至 `v0.7.1`，已实现的能力如下（完整命令、选项与错误码见 [CLI 命令与输出规范](docs/cli-spec.md)）。
+截至 `v0.7.2`，已实现的能力如下（完整命令、选项与错误码见 [CLI 命令与输出规范](docs/cli-spec.md)）。
 
 ### 已实现的命令
 

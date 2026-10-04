@@ -8,7 +8,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/Jason869905/Apexnova-connect/main/scripts/install.sh | bash
 #
 # Pin a release:
-#   curl -fsSL .../scripts/install.sh | APEXNOVA_VERSION=v0.7.1 bash
+#   curl -fsSL .../scripts/install.sh | APEXNOVA_VERSION=v0.7.2 bash
 #   (the variable must reach bash, not curl)
 #
 # Env overrides:

@@ -1,6 +1,6 @@
 # Apexnova-connect CLI 使用指南（通用部分）
 
-> 适用版本：apexnova-connect v0.7.1
+> 适用版本：apexnova-connect v0.7.2
 > 平台：Windows、Linux。**macOS 不在支持范围内**——Keychain 后端有实现但从未在真实 macOS 上验收过，按 [ADR 0024](decisions/0024-narrow-platform-claims.md) 不再声称支持
 
 本文是所有 Agent 共用的部分：登录、启动、换模型、凭证后端、Key 模式、通用命令、环境变量和安全说明。**安装、升级、卸载与常见问题见 [README 的安装指南](../README.md#安装指南)。****某个 Agent 特有的配置字段、限制和恢复方式在各自的指南里**：
